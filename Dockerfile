@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 ARG NODE_VERSION=20-alpine
 ARG PYTHON_VERSION=3.12-slim
-ARG APP_VERSION=3.7.3
+ARG APP_VERSION=4.4
 
 FROM node:${NODE_VERSION} AS ui
 WORKDIR /build
