@@ -1,0 +1,44 @@
+---
+id: torrentscsv
+name: Torrents.csv
+description: Open torrent CSV search API (public)
+language: en-US
+type: public
+encoding: UTF-8
+links:
+  - https://torrents-csv.com/
+
+caps:
+  modes:
+    search: [q]
+    movie-search: [q]
+    tv-search: [q]
+    music-search: [q]
+
+settings: []
+
+search:
+  paths:
+    - path: "service/search"
+  inputs:
+    q: "{{ .Keywords }}"
+    size: 50
+  rows:
+    selector: "json"
+    attribute: rows
+    # engine may treat as JSON API depending on Cardigann version
+  fields:
+    title:
+      selector: name
+    size:
+      selector: size_bytes
+    seeders:
+      selector: seeders
+    leechers:
+      selector: leechers
+    infohash:
+      selector: infohash
+    downloadvolumefactor:
+      text: 0
+    uploadvolumefactor:
+      text: 1

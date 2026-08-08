@@ -1,0 +1,12 @@
+# Overlay: AMD GPU (VAAPI/AMF where supported)
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+services:
+  mediaos:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-109}"
+      - "${VIDEO_GID:-44}"
+    environment:
+      CONVERTER_HWACCEL_DEFAULT: amf
+      LIBVA_DRIVER_NAME: ${LIBVA_DRIVER_NAME:-radeonsi}

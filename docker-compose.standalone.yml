@@ -1,0 +1,98 @@
+# mediaos — standalone stack
+#
+# This is the whole point of mediaos: everything MediaOs (and the classic
+# *arr stack) needs a separate container for — Sonarr, Radarr, Lidarr,
+# Readarr, Bazarr, Prowlarr, FlareSolverr, a VPN sidecar, Overseerr/Jellyseerr
+# — is built into the mediaos app itself. The only two things left external
+# are the torrent client and the media server, because those are genuinely
+# different jobs (seeding/ratio management, and transcoding/playback).
+#
+# docker compose -f docker-compose.standalone.yml up -d
+
+services:
+  mediaos-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mediaos
+      POSTGRES_PASSWORD: mediaos
+      POSTGRES_DB: mediaos
+    volumes:
+      - mediaos_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediaos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mediaos:
+    image: ghcr.io/newguy467/mediaos:latest
+    build: .
+    depends_on:
+      mediaos-db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+      QBIT_URL: http://qbittorrent:8080
+      JELLYFIN_URL: http://jellyfin:8096
+      # Builtin indexers use CF bypass: curl_cffi first, then FlareSolverr if set.
+      # Uncomment FLARESOLVERR_URL when running the flaresolverr service below.
+      # FLARESOLVERR_URL: http://flaresolverr:8191
+    ports:
+      - "8787:8000"
+    volumes:
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${BOOKS_PATH:-./data/books}:/books
+      - ${AUDIOBOOKS_PATH:-./data/audiobooks}:/audiobooks
+      - ${PODCASTS_PATH:-./data/podcasts}:/podcasts
+      - ${COMICS_PATH:-./data/comics}:/comics
+      - ${MANGA_PATH:-./data/manga}:/manga
+      - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config/jellyfin:/config
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${BOOKS_PATH:-./data/books}:/books
+      - ${AUDIOBOOKS_PATH:-./data/audiobooks}:/audiobooks
+      - ${PODCASTS_PATH:-./data/podcasts}:/podcasts
+      - ${COMICS_PATH:-./data/comics}:/comics
+      - ${MANGA_PATH:-./data/manga}:/manga
+      - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+    ports:
+      - "8096:8096"
+    restart: unless-stopped
+
+volumes:
+  mediaos_pg:

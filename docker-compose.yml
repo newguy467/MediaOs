@@ -1,0 +1,49 @@
+# Production-oriented compose for mediaos
+# Docs: https://github.com/newguy467/mediaos#readme
+services:
+  mediaos-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mediaos
+      POSTGRES_PASSWORD: mediaos
+      POSTGRES_DB: mediaos
+    volumes:
+      - mediaos_pg:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediaos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mediaos:
+    image: ghcr.io/newguy467/mediaos:latest
+    build: .
+    depends_on:
+      mediaos-db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+    ports:
+      - "8787:8000"
+    volumes:
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${BOOKS_PATH:-./data/books}:/books
+      - ${AUDIOBOOKS_PATH:-./data/audiobooks}:/audiobooks
+      - ${PODCASTS_PATH:-./data/podcasts}:/podcasts
+      - ${COMICS_PATH:-./data/comics}:/comics
+      - ${MANGA_PATH:-./data/manga}:/manga
+      - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mediaos_pg:
