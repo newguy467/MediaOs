@@ -8,7 +8,7 @@ WORKDIR /build
 COPY package.json package-lock.json* vite.config.js tailwind.config.js postcss.config.js ./
 COPY ui ./ui
 RUN mkdir -p app/static \
- && npm install --no-fund --no-audit \
+ && npm config set registry https://registry.npmjs.org/ && npm install --no-fund --no-audit \
  && npm run build \
  && test -f app/static/index.html \
  && test -d app/static/assets \
