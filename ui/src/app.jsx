@@ -2166,9 +2166,6 @@ function MovieDetailPage({ movieId, onBack, refreshMovies, setMiniPlayer }) {
       {(ixLoading || ixResults) && (
         <InteractiveResultsPanel data={ixResults} loading={ixLoading} busy={busy} onGrab={grabRel} onClose={()=>setIxResults(null)} />
       )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
