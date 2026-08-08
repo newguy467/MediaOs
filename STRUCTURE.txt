@@ -1,0 +1,41 @@
+MediaOs 4.0.0-foundation — folder map
+=====================================
+
+This directory IS the application.
+
+  app/           Backend (Python FastAPI) + built web UI (app/static)
+  ui/            Frontend source (React + Vite + Tailwind / DaisyUI)
+  docs/          Screenshots + GitHub Pages
+  definitions/   Cardigann indexer YAML definitions
+  scripts/       Maintenance / helper scripts
+  tests/         Pytest suite
+  .github/       CI + GHCR workflows
+
+Key v4 service additions (app/services/):
+
+  trash_guide_fetch.py   — live TRaSH Guides sync (Recyclarr-level)
+  comic_arcs.py          — story-arc + reading order + metatag hooks
+  music_hierarchy.py     — artist → album tree + wanted hierarchy
+  hunt.py                — aggressive missing / upgrade engine
+  maintenance_rules.py   — Maintainerr-style library rules
+  homelab_links.py       — Organizr-lite Apps/Links
+
+Existing strong modules (still present):
+
+  quality/               — profiles, parser, matrix, store
+  comic_pull_sync.py     — weekly pull-list
+  music_completeness.py  — album completeness %
+  stream_mode.py         — .strm / stream-as-primary
+  cleanup.py             — stalled / malware / orphan cleaner
+  arr_migrator.py        — Sonarr/Radarr/… import
+  livetv*.py             — Live TV
+  rate_limit.py          — indexer host limits
+  … and the rest of the 3.7.x services
+
+Root docs:
+
+  VISION.md          Full *arr replacement vision
+  ARCHITECTURE.md    System design
+  ROADMAP.md         Phased implementation plan
+  README.md          This package overview
+  VERSION            4.0.0-foundation

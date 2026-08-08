@@ -1,0 +1,154 @@
+---
+id: knaben
+name: Knaben
+description: Torrent aggregator indexing multiple public trackers
+type: public
+protocol: torrent
+language: en-US
+encoding: UTF-8
+requestdelay: 1
+
+links:
+  - https://api.knaben.org
+
+caps:
+  modes:
+    search: [q]
+    movie-search: [q]
+    tv-search: [q]
+  categories:
+    '2000': Movies
+    '2030': Movies/SD
+    '2040': Movies/HD
+    '5000': TV
+    '5040': TV/HD
+    '6000': XXX
+    '6010': XXX/DVD
+    '6020': XXX/WMV
+    '6030': XXX/XviD
+    '6040': XXX/x264
+    '6045': XXX/UHD
+    '6050': XXX/Pack
+    '6060': XXX/ImgSet
+    '6070': XXX/Other
+    '8000': Other
+    '8010': Other/Misc
+    '8020': Other/Hashed
+  categorymappings:
+    - id: '3000000'
+      cat: '2000'
+      desc: Movies
+      default: true
+    - id: '3001000'
+      cat: '2040'
+      desc: Movies / HD
+    - id: '3004000'
+      cat: '2030'
+      desc: Movies / DVD
+    - id: '2000000'
+      cat: '5000'
+      desc: TV
+      default: true
+    - id: '2001000'
+      cat: '5040'
+      desc: TV / HD
+
+settings:
+  - name: hide_xxx
+    type: checkbox
+    label: Hide XXX Content
+    default: 'true'
+
+search:
+  paths:
+    # Movie search
+    - path: /v1
+      method: post
+      categories: [Movies, Movies/SD, Movies/HD]
+      inputs:
+        query: '{{ .Keywords }}'
+        search_field: title
+        categories: '[3000000, 3001000, 3004000]'
+        order_by: seeders
+        order_direction: desc
+        size: '150'
+        hide_unsafe: 'true'
+        hide_xxx: '{{ if .Config.hide_xxx }}true{{ else }}false{{ end }}'
+
+    # TV search
+    - path: /v1
+      method: post
+      categories: [TV, TV/HD]
+      inputs:
+        query: '{{ .Keywords }}'
+        search_field: title
+        categories: '[2000000, 2001000]'
+        order_by: seeders
+        order_direction: desc
+        size: '150'
+        hide_unsafe: 'true'
+        hide_xxx: '{{ if .Config.hide_xxx }}true{{ else }}false{{ end }}'
+
+    # XXX search — override hide_xxx so adult searches always return adult results
+    # regardless of the user's "Hide XXX Content" preference for general browsing
+    - path: /v1
+      method: post
+      categories: [XXX]
+      inputs:
+        query: '{{ .Keywords }}'
+        search_field: title
+        order_by: seeders
+        order_direction: desc
+        size: '150'
+        hide_unsafe: 'true'
+        hide_xxx: 'false'
+
+    # General search (all categories)
+    - path: /v1
+      method: post
+      inputs:
+        query: '{{ .Keywords }}'
+        search_field: title
+        order_by: seeders
+        order_direction: desc
+        size: '150'
+        hide_unsafe: 'true'
+        hide_xxx: '{{ if .Config.hide_xxx }}true{{ else }}false{{ end }}'
+
+  headers:
+    Content-Type: application/json
+
+  response:
+    type: json
+
+  rows:
+    selector: hits
+
+  fields:
+    title:
+      selector: title
+    guid:
+      selector: id
+    details:
+      selector: details
+    magnet:
+      selector: magnetUrl
+    download:
+      selector: link
+      optional: true
+    infohash:
+      selector: hash
+    date:
+      selector: date
+      filters:
+        - name: fuzzytime
+    size:
+      selector: bytes
+    seeders:
+      selector: seeders
+    leechers:
+      selector: peers
+    grabs:
+      selector: grabs
+    category:
+      selector: categoryId[0]

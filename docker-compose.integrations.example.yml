@@ -1,0 +1,32 @@
+# Companion services for mediaos (not required for core)
+services:
+  cross-seed:
+    image: crossseed/cross-seed:latest
+    volumes:
+      - ./cross-seed:/config
+      - /data/downloads:/downloads:ro
+    ports:
+      - "2468:2468"
+    restart: unless-stopped
+
+  # unpackerr alternative if you prefer external unpacker
+  unpackerr:
+    image: golift/unpackerr:latest
+    volumes:
+      - /data/downloads:/downloads
+    environment:
+      - UN_QBITTORRENT_0_URL=http://qbittorrent:8080
+      - UN_QBITTORRENT_0_USER=admin
+      - UN_QBITTORRENT_0_PASS=adminadmin
+    restart: unless-stopped
+
+  # Cloudflare bypass for subtitle scrapers (and for Prowlarr if shared)
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-UTC}
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+

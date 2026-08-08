@@ -1,0 +1,61 @@
+---
+id: nyaa
+name: Nyaa
+description: Public anime torrent index (manga/anime friendly)
+language: en-US
+type: public
+encoding: UTF-8
+links:
+  - https://nyaa.si/
+
+caps:
+  categorymappings:
+    - {id: 1_0, cat: TV/Anime, desc: "Anime"}
+    - {id: 3_0, cat: Books/Comics, desc: "Literature"}
+  modes:
+    search: [q]
+    tv-search: [q]
+
+settings: []
+
+search:
+  paths:
+    - path: /
+  inputs:
+    f: "0"
+    c: "0_0"
+    q: "{{ .Keywords }}"
+  rows:
+    selector: table.torrent-list tbody tr
+  fields:
+    category:
+      selector: td:nth-child(1) a
+      attribute: href
+      filters:
+        - name: regexp
+          args: "c=(\\d+_\\d+)"
+    title:
+      selector: td:nth-child(2) a:not(.comments)
+    details:
+      selector: td:nth-child(2) a:not(.comments)
+      attribute: href
+    download:
+      selector: td:nth-child(3) a[href*="download"]
+      attribute: href
+    size:
+      selector: td:nth-child(4)
+    seeders:
+      selector: td:nth-child(6)
+    leechers:
+      selector: td:nth-child(7)
+    date:
+      selector: td:nth-child(5)
+      filters:
+        - name: append
+          args: " -00"
+        - name: dateparse
+          args: "2006-01-02 15:04 -07"
+    downloadvolumefactor:
+      text: 0
+    uploadvolumefactor:
+      text: 1

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MediaOs — All-in-one media automation</title>
+  <meta name="description" content="MediaOs self-hosted media automation: movies, TV, music, books, comics, requests, subtitles. Docker and GHCR." />
+  <style>
+    :root {
+      --bg: #0f0f12;
+      --panel: #1c1c24;
+      --text: #f0f0f5;
+      --muted: #9a9ab0;
+      --accent: #8b5cf6;
+      --line: #2a2a36;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: Inter, system-ui, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.6;
+    }
+    a { color: var(--accent); }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding: 1.25rem 5vw;
+      display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; background: rgba(15,15,18,.92); backdrop-filter: blur(8px);
+    }
+    header .brand { font-weight: 700; font-size: 1.35rem; color: var(--accent); text-decoration: none; }
+    nav a { margin-left: 1rem; color: var(--muted); text-decoration: none; font-size: .95rem; }
+    nav a:hover { color: var(--text); }
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 5vw 4rem; }
+    h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.2; }
+    h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--line); padding-bottom: .4rem; }
+    .hero { display: grid; gap: 1.5rem; }
+    @media (min-width: 900px) {
+      .hero { grid-template-columns: 1.2fr .8fr; align-items: center; }
+    }
+    .lead { color: var(--muted); font-size: 1.1rem; }
+    .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+    .btn {
+      display: inline-block; padding: .65rem 1.1rem; border-radius: .5rem;
+      background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
+    }
+    .btn.secondary { background: var(--panel); border: 1px solid var(--line); color: var(--text); }
+    pre, code {
+      background: var(--panel); border-radius: .4rem; font-family: ui-monospace, monospace;
+    }
+    pre { padding: 1rem; overflow-x: auto; border: 1px solid var(--line); }
+    code { padding: .1rem .35rem; }
+    pre code { padding: 0; background: transparent; }
+    .grid {
+      display: grid; gap: 1rem;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: .6rem; padding: 1rem;
+    }
+    .card h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--muted); font-size: .92rem; }
+    .shots {
+      display: grid; gap: .75rem;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+    .shots figure {
+      margin: 0; background: var(--panel); border-radius: .5rem; overflow: hidden;
+      border: 1px solid var(--line);
+    }
+    .shots img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
+    .shots figcaption { padding: .5rem .75rem; font-size: .85rem; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    th, td { border: 1px solid var(--line); padding: .5rem .65rem; text-align: left; }
+    th { background: var(--panel); }
+    footer { border-top: 1px solid var(--line); padding: 2rem 5vw; color: var(--muted); font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="#">MediaOs</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#install">Install</a>
+      <a href="#config">Config</a>
+      <a href="#ghcr">GHCR</a>
+      <a href="https://github.com/newguy467/mediaos">GitHub</a>
+    </nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <h1>All-in-one media automation</h1>
+        <p class="lead">
+          Movies, TV, music, books, audiobooks, comics, requests, subtitles, Live TV, and more —
+          one self-hosted app. Grab, rename, and organize into Jellyfin-friendly libraries.
+        </p>
+        <div class="cta">
+          <a class="btn" href="#install">Get started</a>
+          <a class="btn secondary" href="https://ghcr.io/newguy467/mediaos">GHCR image</a>
+          <a class="btn secondary" href="https://github.com/newguy467/mediaos">Source</a>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Public testing</h3>
+        <p>Docker Compose smoke path: pull or build → wizard → add one title → check <code>/api/health</code>. Report issues with redacted logs.</p>
+      </div>
+    </section>
+
+    <h2 id="features">Features</h2>
+    <div class="grid">
+      <div class="card"><h3>Movies &amp; TV</h3><p>Search, grab, season packs, continuing/ended status, Jellyfin-style naming.</p></div>
+      <div class="card"><h3>Music, books, comics</h3><p>MusicBrainz, Open Library, ComicVine/MangaDex pipelines with organize.</p></div>
+      <div class="card"><h3>Discover &amp; requests</h3><p>Popular/trending/upcoming lists with library badges; built-in request flow.</p></div>
+      <div class="card"><h3>Indexers</h3><p>Built-in public sources, optional Cardigann YAML, optional Prowlarr/Jackett Torznab.</p></div>
+      <div class="card"><h3>Subtitles &amp; debrid</h3><p>OpenSubtitles/SubDL by default; Real-Debrid and other debrid unlock paths.</p></div>
+      <div class="card"><h3>Ops</h3><p>Converter presets, users/permissions, VPN health via Gluetun kill-switch, ARR-compat API.</p></div>
+    </div>
+
+    <h2 id="screenshots">Screenshots</h2>
+<p><img src="screenshots/00-hero-composite.png" alt="MediaOs overview" style="width:100%;border-radius:12px;border:1px solid #2a2a36"/></p>
+    <div class="shots">
+      <figure><img src="screenshots/01-dashboard.png" alt="Dashboard" /><figcaption>Dashboard</figcaption></figure>
+      <figure><img src="screenshots/02-movies.png" alt="Movies" /><figcaption>Movies</figcaption></figure>
+      <figure><img src="screenshots/03-tv.png" alt="TV" /><figcaption>TV</figcaption></figure>
+      <figure><img src="screenshots/04-music.png" alt="Music" /><figcaption>Music</figcaption></figure>
+      <figure><img src="screenshots/05-books.png" alt="Books" /><figcaption>Books</figcaption></figure>
+      <figure><img src="screenshots/06-comics.png" alt="Comics" /><figcaption>Comics</figcaption></figure>
+      <figure><img src="screenshots/07-discover.png" alt="Discover" /><figcaption>Discover</figcaption></figure>
+      <figure><img src="screenshots/08-settings.png" alt="Settings" /><figcaption>Settings</figcaption></figure>
+      <figure><img src="screenshots/09-setup-wizard.png" alt="Setup" /><figcaption>Setup wizard</figcaption></figure>
+      <figure><img src="screenshots/10-queue.png" alt="Queue" /><figcaption>Queue</figcaption></figure>
+      <figure><img src="screenshots/11-calendar.png" alt="Calendar" /><figcaption>Calendar</figcaption></figure>
+      <figure><img src="screenshots/12-converter.png" alt="Converter" /><figcaption>Converter</figcaption></figure>
+      <figure><img src="screenshots/13-users.png" alt="Users" /><figcaption>Users</figcaption></figure>
+      <figure><img src="screenshots/14-livetv.png" alt="Live TV" /><figcaption>Live TV</figcaption></figure>
+      <figure><img src="screenshots/15-splash.png" alt="Splash" /><figcaption>Splash</figcaption></figure>
+    </div>
+
+    <h2 id="install">Install</h2>
+    <h3>Docker Compose (recommended)</h3>
+    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
+docker compose -f docker-compose.standalone.yml up -d
+# UI: http://localhost:8787</code></pre>
+    <h3>Build from source</h3>
+    <pre><code>git clone https://github.com/newguy467/mediaos.git
+cd mediaos
+cp .env.example .env
+docker compose -f docker-compose.standalone.yml up -d --build</code></pre>
+    <p>The image builds the React UI and API together. You do not need Node on the host.</p>
+
+    <h2 id="config">Configuration</h2>
+    <table>
+      <thead><tr><th>Key</th><th>When you need it</th></tr></thead>
+      <tbody>
+        <tr><td><code>TMDB_API_KEY</code></td><td>Movies / Discover</td></tr>
+        <tr><td><code>TVDB_API_KEY</code></td><td>TV metadata</td></tr>
+        <tr><td>Download client password</td><td>Actual grabs</td></tr>
+        <tr><td><code>PROWLARR_API_KEY</code> / Jackett</td><td>Optional external Torznab</td></tr>
+        <tr><td><code>OPENSUBTITLES_API_KEY</code></td><td>Subtitles</td></tr>
+        <tr><td><code>REAL_DEBRID_TOKEN</code></td><td>Debrid unlock</td></tr>
+        <tr><td><code>AUTH_*</code></td><td>Lock down public ports</td></tr>
+      </tbody>
+    </table>
+    <p>Full list: <code>.env.example</code> in the repository.</p>
+
+    <h2 id="ghcr">GHCR</h2>
+    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
+docker pull ghcr.io/newguy467/mediaos:3.4.0</code></pre>
+    <p>Images publish from GitHub Actions on <code>main</code> and version tags. Compare running version via <code>GET /api/health</code>.</p>
+
+    <h2 id="scope">Scope &amp; honesty</h2>
+    <ul>
+      <li>Cardigann support is a <strong>subset</strong> of Jackett (selectors/login), not a full replacement.</li>
+      <li>Private trackers: prefer Prowlarr/Jackett Torznab endpoints.</li>
+      <li>VPN belongs on the download client (Gluetun example provided); MediaOs can health-check and kill-switch grabs.</li>
+      <li>HTML subtitle sites are optional and fragile; OpenSubtitles is the solid default.</li>
+    </ul>
+
+    <h2 id="api">API</h2>
+    <p>Interactive docs at <code>/docs</code> after install. Health: <code>GET /api/health</code>.</p>
+  </main>
+  <footer>
+    <p>MediaOs — self-hosted media automation. MIT-licensed. Not affiliated with Sonarr, Radarr, or Jellyfin.</p>
+    <p><a href="https://github.com/newguy467/mediaos">GitHub</a> · <a href="https://ghcr.io/newguy467/mediaos">Container image</a></p>
+  </footer>
+</body>
+</html>

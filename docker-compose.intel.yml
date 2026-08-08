@@ -1,0 +1,13 @@
+# Overlay: Intel QSV via /dev/dri
+#   docker compose -f docker-compose.yml -f docker-compose.intel.yml up -d
+# Fix group IDs: getent group render && getent group video
+services:
+  mediaos:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-109}"
+      - "${VIDEO_GID:-44}"
+    environment:
+      CONVERTER_HWACCEL_DEFAULT: qsv
+      LIBVA_DRIVER_NAME: ${LIBVA_DRIVER_NAME:-iHD}

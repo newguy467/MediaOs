@@ -1,0 +1,101 @@
+---
+id: bitsearch
+replaces:
+  - solidtorrents
+name: BitSearch
+description: 'BitSearch (Solid Torrents) is a Public torrent meta-search engine'
+language: en-US
+type: public
+encoding: UTF-8
+requestdelay: 2
+links:
+  - https://bitsearch.eu/
+  - https://solidtorrents.eu/
+legacylinks:
+  - https://bitsearch.to/
+  - https://bitsearch.nocensor.cloud/
+  - https://bitsearch.mrunblock.bond/
+  - https://solidtorrents.net/
+  - https://solidtorrents.nocensor.cloud/
+  - https://solidtorrents.to/
+
+caps:
+  categories:
+    2000: Movies
+    5000: TV
+
+  categorymappings:
+    - id: Movies
+      cat: '2000'
+      desc: Movies
+      default: true
+    - id: TV
+      cat: '5000'
+      desc: TV
+      default: true
+
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+    music-search: [q]
+    book-search: [q]
+
+download:
+  selectors:
+    - selector: a[href^="magnet:?xt"]
+      attribute: href
+
+search:
+  paths:
+    # https://bitsearch.to/search?q=spongebob&sortBy=created&order=desc&page=1
+    - path: 'search?q={{ .Keywords }}&sortBy=created&order=desc&page=1'
+
+  keywordsfilters:
+    - name: re_replace
+      args: ["\\.", ' ']
+
+  rows:
+    selector: div.space-y-4 > div.bg-white > div.items-start
+
+  fields:
+    category:
+      # latest, search
+      selector: div.space-y-2 > span:nth-child(1), span.space-x-1:nth-child(1)
+    title:
+      selector: h3 > a
+    details:
+      selector: h3 > a
+      attribute: href
+    download:
+      selector: h3 > a
+      attribute: href
+    magnet:
+      selector: a[href^="magnet:?xt"]
+      attribute: href
+    size:
+      selector: div.space-y-2 > span:nth-child(2), span.space-x-1:nth-child(2)
+    date_year:
+      selector: div.space-y-2 > span:nth-child(3):contains("/"), span.space-x-1:nth-child(3):contains("/")
+      optional: true
+      filters:
+        - name: dateparse
+          args: 'M/D/YYYY'
+    date_ago:
+      selector: div.space-y-2 > span:nth-child(3):contains("ago"), span.space-x-1:nth-child(3):contains("ago")
+      optional: true
+      filters:
+        - name: fuzzytime
+    date:
+      text: '{{ if or .Result.date_year .Result.date_ago }}{{ or .Result.date_year .Result.date_ago }}{{ else }}now{{ end }}'
+    seeders:
+      selector: div.space-x-3 > span:nth-child(1), span:contains("seeders")
+    leechers:
+      selector: div.space-x-3 > span:nth-child(2), span:contains("leechers")
+    grabs:
+      selector: span:contains("downloads")
+      optional: true
+    downloadvolumefactor:
+      text: '0'
+    uploadvolumefactor:
+      text: '1'
