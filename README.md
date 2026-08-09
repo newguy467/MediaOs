@@ -1,8 +1,8 @@
-# MediaOs v4.13.4 — True All-in-One Media OS
+# MediaOs v4.13.5 — True All-in-One Media OS
 
 **One app that replaces Sonarr + Radarr + Lidarr + Readarr + Bazarr + Prowlarr + Recyclarr + Maintainerr + Huntarr + NeutArr + Whisparr (+ Live TV, comics depth, stream-as-primary, and more).**
 
-Current version: **4.13.4**
+Current version: **4.13.5**
 
 ## Why MediaOs?
 
