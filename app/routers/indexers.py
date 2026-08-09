@@ -43,6 +43,15 @@ class IndexerOut(BaseModel):
         from_attributes = True
 
 
+class CredentialsIn(BaseModel):
+    username: str | None = None
+    password: str | None = None
+    cookie: str | None = None
+    api_key: str | None = None
+    extra: dict | None = None
+
+
+
 def _out(row: Indexer) -> IndexerOut:
     return IndexerOut(
         id=row.id,
@@ -498,12 +507,7 @@ def jackett_sync(
     return sync_jackett_indexers(db, enable_new=enable_new)
 
 
-class CredentialsIn(BaseModel):
-    username: str | None = None
-    password: str | None = None
-    cookie: str | None = None
-    api_key: str | None = None
-    extra: dict | None = None
+
 
 
 
