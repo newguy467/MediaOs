@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import ItemStatus, MediaItem, MediaType
 from app.services.grab import grab_release
 from app.services.search import find_best_comic_release, find_best_manga_release
+from app.services import comic_arcs as arcsvc
 
 router = APIRouter(
     prefix="/comics",
@@ -47,6 +48,36 @@ class ComicOut(BaseModel):
     added_at: datetime
     class Config:
         from_attributes = True
+
+
+class ArcCreate(BaseModel):
+    name: str
+    description: str | None = None
+    comicvine_id: int | None = None
+    issues: list[dict] | None = None
+
+
+class ArcIssueIn(BaseModel):
+    series_name: str
+    issue_number: str | None = None
+    reading_order: int | None = None
+    media_item_id: int | None = None
+    comic_issue_id: int | None = None
+
+
+class PullCreate(BaseModel):
+    series_name: str
+    issue_number: str | None = None
+    publisher: str | None = None
+    release_date: str | None = None
+    comicvine_id: int | None = None
+    watched: bool = True
+
+
+class PullFlags(BaseModel):
+    watched: bool | None = None
+    grabbed: bool | None = None
+
 
 @router.get("/search")
 def search_comics(query: str, source: str = Query("all")):

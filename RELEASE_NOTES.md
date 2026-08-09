@@ -1,10 +1,7 @@
-# MediaOs v4.13.4
+# MediaOs v4.13.5
 
-Fixes the remaining P1 items found on 4.13.3:
+CI / import fixes so the unit-test job on push goes green:
 
-1. Live TV health columns on the model + DB ALTERs
-2. Comic pull auto-grab uses `media_item_id`
-3. Live TV channel editor controls in the UI
-4. Plex/Tautulli in Settings integrations group
-
-Built on the 4.13.2/4.13.3 recovery line (app starts, Live TV imports, compose cleaned).
+1. comics router — ArcCreate / ArcIssueIn / PullCreate / PullFlags + arcsvc import
+2. indexers router — CredentialsIn defined before first use
+3. test_trash_and_migrate — use import_trash_payload API
