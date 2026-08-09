@@ -1,5 +1,6 @@
 """
-Hunt engine — aggressive missing / cutoff / upgrade logic (Huntarr-inspired).
+Hunt engine — aggressive missing / cutoff / upgrade logic.
+Built-in NeutArr + Huntarr replacement: no external NeutArr container required.
 Wired to search + grab services with rate-limit awareness.
 """
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import ItemStatus, MediaItem, MediaType
+from app.config import settings
 
 log = logging.getLogger("mediaos.hunt")
 
@@ -25,6 +27,8 @@ def plan_hunt(
     q = db.query(MediaItem)
     if only_monitored:
         q = q.filter(MediaItem.monitored.is_(True))
+    if not getattr(settings, "hunt_include_adult", True):
+        q = q.filter(MediaItem.media_type != MediaType.adult)
     if media_types:
         types = []
         for t in media_types:
@@ -56,6 +60,8 @@ def plan_hunt(
 
 def _search_one(db: Session, item: MediaItem) -> dict[str, Any]:
     from app.services.search import (
+        find_best_adult_release,
+        find_best_audiobook_release,
         find_best_book_release,
         find_best_comic_release,
         find_best_movie_release,
@@ -68,13 +74,17 @@ def _search_one(db: Session, item: MediaItem) -> dict[str, Any]:
     try:
         if mt == MediaType.movie:
             release = find_best_movie_release(item, db=db)
+        elif mt == MediaType.adult:
+            release = find_best_adult_release(item, db=db)
         elif mt == MediaType.music:
             release = find_best_music_release(item, db=db)
         elif mt == MediaType.book:
             release = find_best_book_release(item, db=db)
+        elif mt == MediaType.audiobook:
+            release = find_best_audiobook_release(item, db=db)
         elif mt in (MediaType.comic, MediaType.manga):
             release = find_best_comic_release(item, db=db)
-        # TV episodes handled by existing scheduler episode path
+        # TV episodes: series-level hunt marks wanted; episode path is in scheduler
     except Exception as e:
         log.warning("hunt search failed for %s: %s", item.title, e)
         return {"id": item.id, "ok": False, "error": str(e)}
@@ -108,9 +118,10 @@ def run_hunt_batch(db: Session, plan: list[dict[str, Any]]) -> dict[str, Any]:
         item = db.get(MediaItem, entry["id"])
         if not item:
             continue
-        # Skip pure upgrade_check for now unless missing
+        # Skip upgrade_check unless hunt_include_upgrades is on
         if entry.get("reason") == "upgrade_check" and item.status == ItemStatus.downloaded:
-            continue
+            if not getattr(settings, "hunt_include_upgrades", False):
+                continue
         r = _search_one(db, item)
         results.append(r)
         if r.get("grabbed"):

@@ -59,4 +59,32 @@ class JackettClient:
             return {"ok": False, "error": str(e)}
 
 
+
+    def list_indexers_detailed(self) -> list[dict[str, Any]]:
+        """UI-friendly list with Torznab URL and tags."""
+        rows = self.list_indexers()
+        base = self._base().rstrip("/")
+        key = self._key()
+        out = []
+        for ix in rows:
+            # Jackett indexers API shapes vary
+            name = ix.get("name") or ix.get("Name") or "unknown"
+            iid = ix.get("id") or ix.get("ID") or name
+            configured = ix.get("configured", ix.get("Configured", True))
+            caps = ix.get("caps") or ix.get("Caps") or {}
+            torznab = f"{base}/api/v2.0/indexers/{iid}/results/torznab/"
+            out.append({
+                "id": str(iid),
+                "name": name,
+                "configured": bool(configured),
+                "torznab_url": torznab,
+                "api_key": key,
+                "type": ix.get("type") or ix.get("Type") or "public",
+                "needs_flaresolverr": bool(ix.get("flaresolverr") or "flare" in str(ix).lower()),
+                "tags": [],
+            })
+        return out
+
+
 jackett_client = JackettClient()
+

@@ -282,3 +282,15 @@ def music_search(q: str = Query(..., min_length=1), limit: int = Query(24, ge=1,
         return {"results": [_music_row(r) for r in (rows or [])]}
     except Exception as e:
         return {"results": [], "error": str(e)}
+
+
+@router.get("/adult/search")
+def adult_discover_search(q: str = Query("", min_length=1), limit: int = Query(20, ge=1, le=50)):
+    """TPDB-backed adult discovery (requires unlock + TPDB key for results)."""
+    from app.clients.tpdb import tpdb_client
+    if not tpdb_client.configured():
+        return {"results": [], "hint": "Set TPDB_API_KEY in Settings → Adult"}
+    try:
+        return {"results": tpdb_client.search_movies(q, limit=limit)}
+    except Exception as e:
+        return {"results": [], "error": str(e)}

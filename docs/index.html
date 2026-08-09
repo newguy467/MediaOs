@@ -3,185 +3,251 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MediaOs — All-in-one media automation</title>
-  <meta name="description" content="MediaOs self-hosted media automation: movies, TV, music, books, comics, requests, subtitles. Docker and GHCR." />
+  <title>MediaOs — All-in-one media OS</title>
+  <meta name="description" content="MediaOs: one app replacing Sonarr, Radarr, Lidarr, Readarr, Whisparr, NeutArr, Cleanuparr, Prowlarr and more. Self-hosted Docker." />
+  <meta name="theme-color" content="#8b5cf6" />
+  <link rel="icon" href="screenshots/15-splash.png" />
   <style>
     :root {
-      --bg: #0f0f12;
-      --panel: #1c1c24;
-      --text: #f0f0f5;
-      --muted: #9a9ab0;
+      --bg: #0b0914;
+      --panel: #16122a;
+      --card: #1c1733;
+      --line: #2a2448;
+      --text: #f3f0ff;
+      --muted: #9b93c0;
       --accent: #8b5cf6;
-      --line: #2a2a36;
+      --accent2: #a78bfa;
+      --ok: #34d399;
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; font-family: Inter, system-ui, sans-serif;
-      background: var(--bg); color: var(--text); line-height: 1.6;
+      margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.55;
     }
-    a { color: var(--accent); }
+    a { color: var(--accent2); }
     header {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .85rem 5vw; background: rgba(11,9,20,.92); backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--line);
-      padding: 1.25rem 5vw;
-      display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between;
-      position: sticky; top: 0; background: rgba(15,15,18,.92); backdrop-filter: blur(8px);
     }
-    header .brand { font-weight: 700; font-size: 1.35rem; color: var(--accent); text-decoration: none; }
-    nav a { margin-left: 1rem; color: var(--muted); text-decoration: none; font-size: .95rem; }
+    .brand { font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
+    .brand span { color: var(--muted); font-weight: 500; font-size: .85rem; margin-left: .4rem; }
+    nav a { margin-left: 1rem; color: var(--muted); text-decoration: none; font-size: .92rem; }
     nav a:hover { color: var(--text); }
     main { max-width: 1100px; margin: 0 auto; padding: 2rem 5vw 4rem; }
-    h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.2; }
-    h2 { margin-top: 2.5rem; border-bottom: 1px solid var(--line); padding-bottom: .4rem; }
-    .hero { display: grid; gap: 1.5rem; }
-    @media (min-width: 900px) {
-      .hero { grid-template-columns: 1.2fr .8fr; align-items: center; }
+    h1 { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.15; margin: 0 0 .75rem; }
+    h2 { margin-top: 2.75rem; border-bottom: 1px solid var(--line); padding-bottom: .45rem; font-size: 1.35rem; }
+    h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
+    .lead { color: var(--muted); font-size: 1.12rem; max-width: 42rem; }
+    .badge {
+      display: inline-block; padding: .2rem .55rem; border-radius: 999px;
+      background: #2a1f4d; color: var(--accent2); font-size: .78rem; font-weight: 600;
+      border: 1px solid var(--line); margin-right: .35rem;
     }
-    .lead { color: var(--muted); font-size: 1.1rem; }
-    .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+    .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; }
     .btn {
-      display: inline-block; padding: .65rem 1.1rem; border-radius: .5rem;
+      display: inline-block; padding: .7rem 1.15rem; border-radius: .55rem;
       background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
     }
     .btn.secondary { background: var(--panel); border: 1px solid var(--line); color: var(--text); }
-    pre, code {
-      background: var(--panel); border-radius: .4rem; font-family: ui-monospace, monospace;
-    }
+    pre, code { background: var(--panel); border-radius: .4rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: .88rem; }
     pre { padding: 1rem; overflow-x: auto; border: 1px solid var(--line); }
-    code { padding: .1rem .35rem; }
+    code { padding: .12rem .35rem; }
     pre code { padding: 0; background: transparent; }
     .grid {
       display: grid; gap: 1rem;
       grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     }
     .card {
-      background: var(--panel); border: 1px solid var(--line); border-radius: .6rem; padding: 1rem;
+      background: var(--card); border: 1px solid var(--line); border-radius: .65rem; padding: 1.05rem;
     }
-    .card h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
     .card p { margin: 0; color: var(--muted); font-size: .92rem; }
     .shots {
       display: grid; gap: .75rem;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     }
     .shots figure {
       margin: 0; background: var(--panel); border-radius: .5rem; overflow: hidden;
       border: 1px solid var(--line);
     }
     .shots img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
-    .shots figcaption { padding: .5rem .75rem; font-size: .85rem; color: var(--muted); }
+    .shots figcaption { padding: .5rem .75rem; font-size: .82rem; color: var(--muted); }
     table { width: 100%; border-collapse: collapse; font-size: .92rem; }
     th, td { border: 1px solid var(--line); padding: .5rem .65rem; text-align: left; }
     th { background: var(--panel); }
-    footer { border-top: 1px solid var(--line); padding: 2rem 5vw; color: var(--muted); font-size: .9rem; }
+    .check { color: var(--ok); }
+    footer {
+      border-top: 1px solid var(--line); padding: 2rem 5vw; color: var(--muted); font-size: .9rem;
+      max-width: 1100px; margin: 0 auto;
+    }
+    .hero-meta { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
+    .alert {
+      display: flex; gap: .75rem; align-items: flex-start;
+      background: #241a3f; border: 1px solid #4c3a8a; border-radius: .6rem;
+      padding: .9rem 1.05rem; margin: 1.25rem 0; font-size: .92rem;
+    }
+    .alert.ok { border-color: #1f6d4e; background: #10241c; }
+    .alert .icon { font-size: 1.1rem; line-height: 1.4; }
+    .alert p { margin: 0; color: var(--text); }
+    .alert p + p { margin-top: .4rem; color: var(--muted); }
+    .badges-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 1.25rem; }
+    .badges-row img { height: 20px; display: block; }
+    code.inline-cmd { display: inline-block; }
+    .sev { display: inline-block; font-weight: 700; font-size: .72rem; letter-spacing: .04em;
+      padding: .12rem .45rem; border-radius: .3rem; margin-right: .4rem; }
+    .sev-p0 { background: #4a1420; color: #ff8fa3; }
+    .sev-p1 { background: #4a3512; color: #ffc36b; }
+    .sev-p2 { background: #123a4a; color: #7fd4ff; }
+    .sev-p3 { background: #263a12; color: #b7e07f; }
   </style>
 </head>
 <body>
   <header>
-    <a class="brand" href="#">MediaOs</a>
+    <a class="brand" href="./">MediaOs <span id="ver">v4.13.3</span></a>
     <nav>
       <a href="#features">Features</a>
-      <a href="#screenshots">Screenshots</a>
-      <a href="#install">Install</a>
-      <a href="#config">Config</a>
-      <a href="#ghcr">GHCR</a>
-      <a href="https://github.com/newguy467/mediaos">GitHub</a>
+      <a href="#modules">Modules</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="changelog.html">Changelog</a>
+      <a href="https://github.com/newguy467/MediaOs">GitHub</a>
     </nav>
   </header>
+
   <main>
     <section class="hero">
       <div>
-        <h1>All-in-one media automation</h1>
+        <p><span class="badge">v4.13.3</span><span class="badge">Self-hosted</span><span class="badge">Docker</span></p>
+        <h1>One app for your whole library</h1>
         <p class="lead">
-          Movies, TV, music, books, audiobooks, comics, requests, subtitles, Live TV, and more —
-          one self-hosted app. Grab, rename, and organize into Jellyfin-friendly libraries.
+          MediaOs replaces the classic *arr stack in a single container:
+          Sonarr, Radarr, Lidarr, Readarr, Whisparr, NeutArr/Huntarr, Cleanuparr,
+          Prowlarr, Recyclarr, Maintainerr — plus Live TV, comics, YouTube, and a converter.
         </p>
         <div class="cta">
-          <a class="btn" href="#install">Get started</a>
-          <a class="btn secondary" href="https://ghcr.io/newguy467/mediaos">GHCR image</a>
-          <a class="btn secondary" href="https://github.com/newguy467/mediaos">Source</a>
+          <a class="btn" href="#quickstart">Quick start</a>
+          <a class="btn secondary" href="https://github.com/newguy467/MediaOs">Source on GitHub</a>
+          <a class="btn secondary" href="changelog.html">Changelog</a>
         </div>
-      </div>
-      <div class="card">
-        <h3>Public testing</h3>
-        <p>Docker Compose smoke path: pull or build → wizard → add one title → check <code>/api/health</code>. Report issues with redacted logs.</p>
+        <p class="hero-meta">Keep qBittorrent + Jellyfin/Plex. Everything else is built in.</p>
+        <div class="badges-row">
+          <img src="https://img.shields.io/github/v/tag/newguy467/MediaOs?label=version&color=8b5cf6" alt="version" />
+          <img src="https://img.shields.io/github/actions/workflow/status/newguy467/MediaOs/ci.yml?label=CI" alt="CI status" />
+          <img src="https://img.shields.io/github/actions/workflow/status/newguy467/MediaOs/ghcr.yml?label=GHCR%20build" alt="GHCR build status" />
+          <img src="https://img.shields.io/github/license/newguy467/MediaOs" alt="license" />
+        </div>
       </div>
     </section>
 
-    <h2 id="features">Features</h2>
+    <div class="alert ok">
+      <div class="icon">✅</div>
+      <div>
+        <p><strong>v4.13.3 is current — critical patch, upgrade strongly recommended.</strong></p>
+        <p>
+          The prior release shipped with two Python syntax errors that broke the app on
+          boot (setup router) and broke Live TV entirely (import order in
+          <code>services/livetv.py</code>). This release fixes both, closes two auth
+          hardening gaps (constant-time API key check, login/adult-unlock rate
+          limiting), and adds the GHCR + UI CI workflows. See the full
+          <a href="changelog.html">changelog</a> for details.
+        </p>
+      </div>
+    </div>
+
+    <h2 id="features">Why MediaOs</h2>
     <div class="grid">
-      <div class="card"><h3>Movies &amp; TV</h3><p>Search, grab, season packs, continuing/ended status, Jellyfin-style naming.</p></div>
-      <div class="card"><h3>Music, books, comics</h3><p>MusicBrainz, Open Library, ComicVine/MangaDex pipelines with organize.</p></div>
-      <div class="card"><h3>Discover &amp; requests</h3><p>Popular/trending/upcoming lists with library badges; built-in request flow.</p></div>
-      <div class="card"><h3>Indexers</h3><p>Built-in public sources, optional Cardigann YAML, optional Prowlarr/Jackett Torznab.</p></div>
-      <div class="card"><h3>Subtitles &amp; debrid</h3><p>OpenSubtitles/SubDL by default; Real-Debrid and other debrid unlock paths.</p></div>
-      <div class="card"><h3>Ops</h3><p>Converter presets, users/permissions, VPN health via Gluetun kill-switch, ARR-compat API.</p></div>
+      <div class="card"><h3>Shared pipeline</h3><p>One search, grab, quality, and organize path for every media type.</p></div>
+      <div class="card"><h3>Built-in Hunt</h3><p>NeutArr/Huntarr-class aggressive missing + optional upgrades. No extra container.</p></div>
+      <div class="card"><h3>Built-in Cleanup</h3><p>Stalled strikes, seed goals, orphans — Cleanuparr/Swaparr-class, native.</p></div>
+      <div class="card"><h3>Adult (Whisparr)</h3><p>Passcode-gated adult library, XXX indexers, native organize + hunt.</p></div>
+      <div class="card"><h3>Hardlink organize</h3><p>Hardlink into the library when on the same filesystem; seed without doubling disk.</p></div>
+      <div class="card"><h3>Live TRaSH Guides</h3><p>Quality profiles and custom formats with live guide sync scaffolding.</p></div>
+      <div class="card"><h3>Basic + Advanced</h3><p>Friendly default UI; unlock indexers, quality matrix, Live TV, converter when you need them.</p></div>
+      <div class="card"><h3>Arr-compat API</h3><p><code>/api/v3</code> surface for clients that expect Radarr/Sonarr-style endpoints.</p></div>
     </div>
 
-    <h2 id="screenshots">Screenshots</h2>
-<p><img src="screenshots/00-hero-composite.png" alt="MediaOs overview" style="width:100%;border-radius:12px;border:1px solid #2a2a36"/></p>
-    <div class="shots">
-      <figure><img src="screenshots/01-dashboard.png" alt="Dashboard" /><figcaption>Dashboard</figcaption></figure>
-      <figure><img src="screenshots/02-movies.png" alt="Movies" /><figcaption>Movies</figcaption></figure>
-      <figure><img src="screenshots/03-tv.png" alt="TV" /><figcaption>TV</figcaption></figure>
-      <figure><img src="screenshots/04-music.png" alt="Music" /><figcaption>Music</figcaption></figure>
-      <figure><img src="screenshots/05-books.png" alt="Books" /><figcaption>Books</figcaption></figure>
-      <figure><img src="screenshots/06-comics.png" alt="Comics" /><figcaption>Comics</figcaption></figure>
-      <figure><img src="screenshots/07-discover.png" alt="Discover" /><figcaption>Discover</figcaption></figure>
-      <figure><img src="screenshots/08-settings.png" alt="Settings" /><figcaption>Settings</figcaption></figure>
-      <figure><img src="screenshots/09-setup-wizard.png" alt="Setup" /><figcaption>Setup wizard</figcaption></figure>
-      <figure><img src="screenshots/10-queue.png" alt="Queue" /><figcaption>Queue</figcaption></figure>
-      <figure><img src="screenshots/11-calendar.png" alt="Calendar" /><figcaption>Calendar</figcaption></figure>
-      <figure><img src="screenshots/12-converter.png" alt="Converter" /><figcaption>Converter</figcaption></figure>
-      <figure><img src="screenshots/13-users.png" alt="Users" /><figcaption>Users</figcaption></figure>
-      <figure><img src="screenshots/14-livetv.png" alt="Live TV" /><figcaption>Live TV</figcaption></figure>
-      <figure><img src="screenshots/15-splash.png" alt="Splash" /><figcaption>Splash</figcaption></figure>
-    </div>
-
-    <h2 id="install">Install</h2>
-    <h3>Docker Compose (recommended)</h3>
-    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
-docker compose -f docker-compose.standalone.yml up -d
-# UI: http://localhost:8787</code></pre>
-    <h3>Build from source</h3>
-    <pre><code>git clone https://github.com/newguy467/mediaos.git
-cd mediaos
-cp .env.example .env
-docker compose -f docker-compose.standalone.yml up -d --build</code></pre>
-    <p>The image builds the React UI and API together. You do not need Node on the host.</p>
-
-    <h2 id="config">Configuration</h2>
+    <h2 id="modules">Modules</h2>
     <table>
-      <thead><tr><th>Key</th><th>When you need it</th></tr></thead>
+      <thead><tr><th>Module</th><th>Replaces</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td><code>TMDB_API_KEY</code></td><td>Movies / Discover</td></tr>
-        <tr><td><code>TVDB_API_KEY</code></td><td>TV metadata</td></tr>
-        <tr><td>Download client password</td><td>Actual grabs</td></tr>
-        <tr><td><code>PROWLARR_API_KEY</code> / Jackett</td><td>Optional external Torznab</td></tr>
-        <tr><td><code>OPENSUBTITLES_API_KEY</code></td><td>Subtitles</td></tr>
-        <tr><td><code>REAL_DEBRID_TOKEN</code></td><td>Debrid unlock</td></tr>
-        <tr><td><code>AUTH_*</code></td><td>Lock down public ports</td></tr>
+        <tr><td>Movies</td><td>Radarr</td><td>Core — always on</td></tr>
+        <tr><td>TV</td><td>Sonarr</td><td>Core — always on</td></tr>
+        <tr><td>Music</td><td>Lidarr</td><td>Artist → album hierarchy</td></tr>
+        <tr><td>Books / Audiobooks</td><td>Readarr</td><td>Optional modules</td></tr>
+        <tr><td>Adult</td><td>Whisparr</td><td>Passcode gate · XXX cat 6000</td></tr>
+        <tr><td>Comics / Manga</td><td>Mylar-style</td><td>Pull list + story arcs</td></tr>
+        <tr><td>Hunt</td><td>NeutArr / Huntarr</td><td>Settings → Hunt</td></tr>
+        <tr><td>Cleanup</td><td>Cleanuparr / Swaparr</td><td>Settings → Cleanup</td></tr>
+        <tr><td>Indexers</td><td>Prowlarr / Jackett</td><td>Torznab + Cardigann + builtins</td></tr>
+        <tr><td>Live TV / YouTube / Converter</td><td>—</td><td>Optional advanced modules</td></tr>
       </tbody>
     </table>
-    <p>Full list: <code>.env.example</code> in the repository.</p>
 
-    <h2 id="ghcr">GHCR</h2>
-    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
-docker pull ghcr.io/newguy467/mediaos:3.4.0</code></pre>
-    <p>Images publish from GitHub Actions on <code>main</code> and version tags. Compare running version via <code>GET /api/health</code>.</p>
+    <h2 id="quickstart">Quick start</h2>
+    <pre><code>git clone https://github.com/newguy467/MediaOs.git
+cd MediaOs
+cp .env.example .env
+# edit paths / API keys
 
-    <h2 id="scope">Scope &amp; honesty</h2>
+docker compose -f docker-compose.standalone.yml up -d --build
+# UI → http://localhost:8787</code></pre>
+    <p>Health check: <code>GET /api/health</code> (reports version <strong>4.13.3</strong>).</p>
+
+    <h2 id="screenshots">Screenshots</h2>
+    <div class="shots">
+      <figure><img src="screenshots/01-movies.png" alt="Movies" loading="lazy" /><figcaption>Movies</figcaption></figure>
+      <figure><img src="screenshots/02-tv.png" alt="TV" loading="lazy" /><figcaption>TV</figcaption></figure>
+      <figure><img src="screenshots/03-music.png" alt="Music" loading="lazy" /><figcaption>Music</figcaption></figure>
+      <figure><img src="screenshots/08-settings.png" alt="Settings" loading="lazy" /><figcaption>Settings</figcaption></figure>
+      <figure><img src="screenshots/09-setup-wizard.png" alt="Setup" loading="lazy" /><figcaption>Setup wizard</figcaption></figure>
+      <figure><img src="screenshots/10-queue.png" alt="Queue" loading="lazy" /><figcaption>Queue</figcaption></figure>
+    </div>
+
+    <h2 id="docs">More docs</h2>
     <ul>
-      <li>Cardigann support is a <strong>subset</strong> of Jackett (selectors/login), not a full replacement.</li>
-      <li>Private trackers: prefer Prowlarr/Jackett Torznab endpoints.</li>
-      <li>VPN belongs on the download client (Gluetun example provided); MediaOs can health-check and kill-switch grabs.</li>
-      <li>HTML subtitle sites are optional and fragile; OpenSubtitles is the solid default.</li>
+      <li><a href="changelog.html">Changelog</a></li>
+      <li><a href="QUICKSTART.md">QUICKSTART.md</a></li>
+      <li><a href="TRASH.md">TRaSH Guides</a></li>
+      <li><a href="GPU.md">GPU / converter</a></li>
+      <li><a href="YOUTUBE.md">YouTube</a></li>
+      <li><a href="https://github.com/newguy467/MediaOs/blob/main/VISION.md">VISION.md</a></li>
+      <li><a href="https://github.com/newguy467/MediaOs/blob/main/ARCHITECTURE.md">ARCHITECTURE.md</a></li>
     </ul>
 
-    <h2 id="api">API</h2>
-    <p>Interactive docs at <code>/docs</code> after install. Health: <code>GET /api/health</code>.</p>
+    <h2 id="ghcr">Container image</h2>
+    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
+docker pull ghcr.io/newguy467/mediaos:4.13.3</code></pre>
+    <p>Images are multi-arch (<code>linux/amd64</code>, <code>linux/arm64</code>), built and pushed by
+      <code>.github/workflows/ghcr.yml</code> on every push to <code>main</code> and on every
+      <code>v*</code> tag. A separate <code>ui.yml</code> workflow builds and verifies the Vite/React UI
+      on any change under <code>ui/**</code>, independent of the full Docker build, for faster PR feedback.</p>
+
+    <h2 id="security">Security model</h2>
+    <p>MediaOs ships in <strong>open mode</strong> by default for easy local/LAN first-run — no
+      username, API key, or DB user configured means no auth is enforced. Set one of
+      <code>AUTH_USERNAME</code>/<code>AUTH_PASSWORD</code>, <code>AUTH_API_KEY</code>, or create a DB user
+      before exposing the container beyond your local network.</p>
+    <table>
+      <thead><tr><th>Layer</th><th>Mechanism</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Passwords</td><td>PBKDF2-HMAC-SHA256, 120k iterations, per-user salt</td><td><code>app/auth.py</code></td></tr>
+        <tr><td>Tokens / API keys</td><td>Constant-time comparison (<code>hmac.compare_digest</code> / <code>secrets.compare_digest</code>)</td><td>Covers bearer tokens, <code>X-API-Key</code>, and the <code>*arr</code>-compat <code>X-Api-Key</code></td></tr>
+        <tr><td>Login throttling</td><td>Escalating backoff per client IP + username</td><td><code>/api/auth/login</code></td></tr>
+        <tr><td>Adult module</td><td>Separate passcode gate + short-lived unlock token, rate-limited</td><td><code>/api/adult/unlock</code></td></tr>
+        <tr><td>Library file access</td><td>Every resolved path is checked against configured library roots (symlinks included)</td><td><code>app/services/media_player.py::_assert_under_library</code></td></tr>
+        <tr><td>Permissions</td><td>Per-user permission list, admin role bypasses with <code>*</code></td><td><code>require_permission()</code> dependency on nearly every router</td></tr>
+      </tbody>
+    </table>
+    <p>Found a security issue? Please open a private security advisory on GitHub rather than a public issue.</p>
   </main>
+
   <footer>
-    <p>MediaOs — self-hosted media automation. MIT-licensed. Not affiliated with Sonarr, Radarr, or Jellyfin.</p>
-    <p><a href="https://github.com/newguy467/mediaos">GitHub</a> · <a href="https://ghcr.io/newguy467/mediaos">Container image</a></p>
+    <p>MediaOs — self-hosted media OS. MIT licensed. Not affiliated with Sonarr, Radarr, Whisparr, or Jellyfin.</p>
+    <p>
+      <a href="https://github.com/newguy467/MediaOs">GitHub</a> ·
+      <a href="changelog.html">Changelog</a> ·
+      <a href="https://ghcr.io/newguy467/mediaos">GHCR</a>
+    </p>
   </footer>
 </body>
 </html>

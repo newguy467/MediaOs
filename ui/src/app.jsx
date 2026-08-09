@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import Ic, { Icons, P } from "./icons.jsx";
+import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "./storage.js";
+import AiChatPanel from "./AiChatPanel.jsx";
 
 /* ── Splash (Sonarr/Radarr-style boot screen) ─────────────────────────────── */
 
@@ -112,6 +115,74 @@ function LogoMark({ className = "", size = 32 }) {
       className={"logo-mark " + className}
       style={{ width: size, height: size, objectFit: "contain" }}
       draggable={false}
+    />
+  );
+}
+
+
+function PageChrome({ children, title }) {
+  return (
+    <div className="mos-page-chrome">
+      <div className="flex items-center gap-2 mb-4 lg:mb-5 sticky top-0 z-10 py-2 -mt-1 bg-base-100/90 backdrop-blur border-b border-base-content/5">
+        <div className="w-8 h-8 flex items-center justify-center shrink-0">
+          <LogoMark size={28} />
+        </div>
+        <div className="font-bold tracking-tight text-sm sm:text-base bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+          MediaOs
+        </div>
+        {title && <span className="text-xs opacity-40 ml-1 hidden sm:inline">· {String(title).replace(/^settings-/,'').replace(/-/g,' ')}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+
+/* ── HLS (Node-built hls.js) for Live TV & library streams ─────────────── */
+function useHlsVideo(videoRef, src, { enabled = true } = {}) {
+  useEffect(() => {
+    const el = videoRef && videoRef.current;
+    if (!el || !src || !enabled) return undefined;
+    let hls = null;
+    const isHls = /\.m3u8(\?|$)/i.test(src) || src.includes("m3u8");
+    const native = el.canPlayType("application/vnd.apple.mpegurl");
+    if (isHls && !native) {
+      import("hls.js").then((mod) => {
+        const Hls = mod.default;
+        if (!Hls.isSupported()) {
+          el.src = src;
+          return;
+        }
+        hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hls.loadSource(src);
+        hls.attachMedia(el);
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data?.fatal) {
+            try { hls.destroy(); } catch (_) {}
+            el.src = src;
+          }
+        });
+      }).catch(() => { el.src = src; });
+    } else {
+      el.src = src;
+    }
+    return () => {
+      try { if (hls) hls.destroy(); } catch (_) {}
+    };
+  }, [src, enabled]);
+}
+
+function HlsVideo({ src, className, autoPlay, controls, poster }) {
+  const ref = useRef(null);
+  useHlsVideo(ref, src);
+  return (
+    <video
+      ref={ref}
+      className={className}
+      controls={controls !== false}
+      autoPlay={!!autoPlay}
+      playsInline
+      poster={poster}
     />
   );
 }
@@ -265,6 +336,27 @@ function InteractiveResultsPanel({ data, loading, busy, onGrab, onClose, mediaIt
                     {!r.rejected && r.download_url && (
                       <button type="button" className="btn btn-primary btn-xs" disabled={busy} onClick={()=>onGrab(r)}>Grab</button>
                     )}
+                    {!r.rejected && (r.download_url || r.magnet || r.stream_url) && mediaItemId && (
+                      <button type="button" className="btn btn-secondary btn-xs ml-1" disabled={busy}
+                        title="Add as stream (.strm) without downloading"
+                        onClick={async ()=>{
+                          try {
+                            const url = r.stream_url || r.download_url || r.magnet;
+                            const res = await fetch('/api/overhaul/streams', {
+                              method: 'POST',
+                              headers: {'Content-Type':'application/json'},
+                              body: JSON.stringify({
+                                title: r.title,
+                                stream_url: url,
+                                media_item_id: mediaItemId,
+                                provider: r.indexer || 'interactive',
+                              }),
+                            });
+                            if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || res.statusText);
+                            setMsg('Stream link added: ' + (r.title||''));
+                          } catch(e) { setMsg(String(e.message||e)); }
+                        }}>Stream</button>
+                    )}
                     <button type="button" className="btn btn-ghost btn-xs" title="Blocklist" onClick={()=>blockRow(r)}>Block</button>
                   </td>
                 </tr>
@@ -286,54 +378,23 @@ function storedTheme() {
   return localStorage.getItem('mediaos-theme') || 'mediaos' || 'mediaos';
 }
 
-/* ── Icons (inline SVG, Lucide style) ───────────────────────────────────── */
-const P = { viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:'1.6', strokeLinecap:'round', strokeLinejoin:'round' };
-const Ic = {
-  Home:       ()=><svg {...P}><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M9 21V12h6v9"/></svg>,
-  Compass:    ()=><svg {...P}><circle cx="12" cy="12" r="10"/><path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"/></svg>,
-  Library:    ()=><svg {...P}><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>,
-  Film:       ()=><svg {...P}><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M17 7h5M2 17h5M17 17h5"/></svg>,
-  Tv:         ()=><svg {...P}><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M17 2l-5 5-5-5"/></svg>,
-  Music:      ()=><svg {...P}><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
-  Book:       ()=><svg {...P}><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>,
-  Headphones: ()=><svg {...P}><path d="M3 18v-6a9 9 0 0118 0v6"/><path d="M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3z"/><path d="M3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3z"/></svg>,
-  Activity:   ()=><svg {...P}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
-  Calendar:   ()=><svg {...P}><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>,
-  Rss:        ()=><svg {...P}><path d="M4 11a9 9 0 019 9"/><path d="M4 4a16 16 0 0116 16"/><circle cx="5" cy="19" r="1"/></svg>,
-  Radio:      ()=><svg {...P}><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>,
-  List:       ()=><svg {...P}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
-  Shield:     ()=><svg {...P}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-  Settings:   ()=><svg {...P}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
-  Palette:    ()=><svg {...P}><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>,
-  Puzzle:     ()=><svg {...P}><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
-  Download:   ()=><svg {...P}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-  Server:     ()=><svg {...P}><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
-  Folder:     ()=><svg {...P}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
-  Eye:        ()=><svg {...P}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
-  EyeOff:     ()=><svg {...P}><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
-  Trash:      ()=><svg {...P}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
-  Plus:       ()=><svg {...P}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  Search:     ()=><svg {...P}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
-  Refresh:    ()=><svg {...P}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
-  X:          ()=><svg {...P}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-  Menu:       ()=><svg {...P}><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
-  ChevDown:   ()=><svg {...P}><polyline points="6 9 12 15 18 9"/></svg>,
-  ChevRight:  ()=><svg {...P}><polyline points="9 18 15 12 9 6"/></svg>,
-  HardDrive:  ()=><svg {...P}><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>,
-  Check:      ()=><svg {...P}><polyline points="20 6 9 17 4 12"/></svg>,
-  Inbox:      ()=><svg {...P}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>,
-  AlertTri:   ()=><svg {...P}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-  Users:      ()=><svg {...P}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>,
-  Loader:     ()=><svg {...P} className="animate-spin"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>,
-};
+/* Icons imported from ./icons.jsx as Ic */
+
 
 /* ── Auth token (Bearer) ─────────────────────────────────────────────────── */
-const AUTH_TOKEN_KEY = 'mediaos_token';
-function getToken() { try { return localStorage.getItem(AUTH_TOKEN_KEY); } catch { return null; } }
-function getAdvanced() { try { return localStorage.getItem('mediaos-advanced') === '1'; } catch { return false; } }
-function setAdvancedFlag(v) { try { localStorage.setItem('mediaos-advanced', v ? '1' : '0'); } catch {} }
+/* storage helpers imported from ./storage.js */
 
-function setToken(t) { try { if (t) localStorage.setItem(AUTH_TOKEN_KEY, t); else localStorage.removeItem(AUTH_TOKEN_KEY); } catch {} }
+const ADULT_UNLOCK_KEY = 'mediaos_adult_unlock';
+function getAdultUnlock() { try { return sessionStorage.getItem(ADULT_UNLOCK_KEY); } catch { return null; } }
+function setAdultUnlock(t) { try { if (t) sessionStorage.setItem(ADULT_UNLOCK_KEY, t); else sessionStorage.removeItem(ADULT_UNLOCK_KEY); } catch {} }
+function adultFetch(input, init={}) {
+  const headers = new Headers(init.headers || {});
+  const tok = getAdultUnlock();
+  if (tok) headers.set('X-Adult-Unlock', tok);
+  return fetch(input, { ...init, headers });
+}
+
+
 const _fetch = window.fetch.bind(window);
 window.fetch = (input, init={}) => {
   const headers = new Headers(init.headers || {});
@@ -421,10 +482,28 @@ const api = {
                searchMusic: id=>fetch(`/api/wanted/music/${id}/search`,{method:'POST'}).then(r=>r.json()),
                searchBook: id=>fetch(`/api/wanted/books/${id}/search`,{method:'POST'}).then(r=>r.json()),
                searchAudiobook: id=>fetch(`/api/wanted/audiobooks/${id}/search`,{method:'POST'}).then(r=>r.json()),
+               searchAdult: id=>fetch(`/api/wanted/adult/${id}/search`,{method:'POST'}).then(r=>r.json()),
                searchAll: (mt,limit=40)=>fetch(`/api/wanted/search-all?limit=${limit}${mt&&mt!=='all'?`&media_type=${mt}`:''}`,{method:'POST'}).then(r=>r.json()) },
   queue:     { list: ()=>fetch('/api/queue').then(r=>r.json()),
                history: ()=>fetch('/api/queue/history').then(r=>r.json()),
                remove: id=>fetch(`/api/queue/${id}`,{method:'DELETE'}) },
+  adult: {
+    status: ()=>fetch('/api/adult/status').then(r=>r.json()),
+    unlock: (passcode)=>fetch('/api/adult/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({passcode})}).then(r=>r.json()),
+    list: ()=>adultFetch('/api/adult').then(r=>r.json()),
+    get: (id)=>adultFetch('/api/adult/'+id).then(r=>r.json()),
+    add: (body)=>adultFetch('/api/adult',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+    update: (id,body)=>adultFetch('/api/adult/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+    remove: (id)=>adultFetch('/api/adult/'+id,{method:'DELETE'}),
+    searchNow: (id)=>adultFetch('/api/adult/'+id+'/search',{method:'POST'}).then(r=>r.json()),
+    searchMissing: ()=>adultFetch('/api/adult/search-missing',{method:'POST'}).then(r=>r.json()),
+    interactive: (id)=>adultFetch('/api/adult/'+id+'/interactive-search').then(r=>r.json()),
+    grab: (id, body)=>adultFetch('/api/adult/'+id+'/grab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+    refresh: (id)=>adultFetch('/api/adult/'+id+'/refresh',{method:'POST'}).then(r=>r.json()),
+    metadataSearch: (q)=>adultFetch('/api/adult/metadata/search?query='+encodeURIComponent(q)).then(r=>r.json()),
+    metadataStatus: ()=>adultFetch('/api/adult/metadata/status').then(r=>r.json()),
+    file: (id, body)=>adultFetch('/api/adult/'+id+'/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+  },
   indexers:  { list: ()=>fetch('/api/indexers').then(r=>r.json()),
                add: body=>fetch('/api/indexers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
                remove: id=>fetch(`/api/indexers/${id}`,{method:'DELETE'}),
@@ -434,6 +513,10 @@ const api = {
                addSource: body=>fetch('/api/livetv/sources',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
                sync: id=>fetch(`/api/livetv/sources/${id}/sync`,{method:'POST'}).then(r=>r.json()),
                channels: (q='')=>fetch(`/api/livetv/channels?q=${encodeURIComponent(q)}&limit=300`).then(r=>r.json()),
+               channelsEditor: ()=>fetch('/api/livetv/channels/editor?include_disabled=true&limit=2000').then(r=>r.json()),
+               patchChannel: (id, body)=>fetch('/api/livetv/channels/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+               bulkChannels: (body)=>fetch('/api/livetv/channels/bulk',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+
                groups: ()=>fetch('/api/livetv/groups').then(r=>r.json()) },
   audiobooks:{ list: ()=>fetch('/api/audiobooks').then(r=>r.json()),
                get: id=>fetch(`/api/audiobooks/${id}`).then(r=>r.json()),
@@ -464,9 +547,17 @@ const api = {
                run: id=>fetch(`/api/smartlists/${id}/run`,{method:'POST'}).then(r=>r.json()),
                runAll: ()=>fetch('/api/smartlists/run-all',{method:'POST'}).then(r=>r.json()) },
   books:     { list: ()=>fetch('/api/books').then(r=>r.json()),
+               get: id=>fetch(`/api/books/${id}`).then(r=>r.json()),
                search: q=>fetch(`/api/books/search?query=${encodeURIComponent(q)}`).then(r=>r.json()),
                add: body=>fetch('/api/books',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
-               remove: id=>fetch(`/api/books/${id}`,{method:'DELETE'}) },
+               remove: id=>fetch(`/api/books/${id}`,{method:'DELETE'}),
+               searchNow: id=>fetch(`/api/books/${id}/search`,{method:'POST'}).then(r=>r.json()),
+               searchMissing: ()=>fetch('/api/books/search-missing',{method:'POST'}).then(r=>r.json()),
+               interactive: id=>fetch(`/api/books/${id}/interactive-search`).then(r=>r.json()),
+               grab: (id, body)=>fetch(`/api/books/${id}/grab`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+               update: (id, body)=>fetch(`/api/books/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()),
+               refresh: id=>fetch(`/api/books/${id}/refresh`,{method:'POST'}).then(r=>r.json()),
+               file: (id, body)=>fetch(`/api/books/${id}/file`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()) },
   requests:  { list: (status)=>fetch(`/api/requests${status?`?status=${status}`:''}`).then(r=>r.json()),
                create: body=>fetch('/api/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(async r=>{ if(!r.ok) throw new Error((await r.json()).detail||r.statusText); return r.json(); }),
                approve: (id,quality_profile)=>fetch(`/api/requests/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quality_profile:quality_profile||null})}).then(r=>r.json()),
@@ -513,6 +604,7 @@ function saveResume(key, t) {
 }
 
 function MediaPlayer({ itemId, episodeId, videoId, path, title, onClose, compact, podcastEpisodeId, chapters: chaptersProp }) {
+  // Built-in library player — direct or ffmpeg transcode
 
   const [info, setInfo] = useState(null);
   const [mode, setMode] = useState('auto'); // auto | direct | transcode
@@ -994,7 +1086,7 @@ function ComicDetailPage({ comicId, onBack }) {
   async function openIx() {
     setIxLoading(true); setIxResults([]);
     try {
-      const rows = await fetch(`/api/comics/${comicId}/interactive-search`).then(x=>x.json());
+      const data = await fetch(`/api/comics/${comicId}/interactive-search`).then(x=>x.json()); const rows = data?.results || data || [];
       setIxResults(rows||[]);
     } catch(e) { setMsg(String(e.message||e)); }
     setIxLoading(false);
@@ -1363,6 +1455,7 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules }) {
   // Flat primary nav — filtered by enabled modules (movies+tv always on)
   const em = enabledModules || ['movies','tv'];
   const primaryAll = [
+    { key: 'adult', label: 'Adult', Icon: Ic.Shield, count: counts.adult, mod: 'adult' },
     { key: 'movies', label: 'Movies', Icon: Ic.Film, count: counts.movies, mod: 'movies' },
     { key: 'tv', label: 'TV', Icon: Ic.Tv, count: counts.tv, mod: 'tv' },
     { key: 'music', label: 'Music', Icon: Ic.Music, count: counts.music, mod: 'music' },
@@ -1376,15 +1469,20 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules }) {
   ];
   // Basic mode: core library modules only in primary; advanced unlocks Live TV / Converter nav
   const advancedOnlyMods = new Set(['livetv', 'converter']);
+  const advancedOnlyPages = new Set(['indexers', 'settings-quality-matrix', 'settings-quality']);
   const primary = primaryAll.filter(i => {
     if (!i.mod) return true;
     if (!em.includes(i.mod)) return false;
     if (!advanced && advancedOnlyMods.has(i.mod)) return false;
+    if (!advanced && advancedOnlyPages.has(i.key)) return false;
     return true;
   });
   const secondaryAll = [
     { key: 'dashboard', label: 'Home', Icon: Ic.Home, mod: null },
+    { key: 'ai-search', label: 'AI Search', Icon: Ic.Search, mod: null },
+    { key: 'homelab', label: 'Homelab', Icon: Ic.Box, mod: null },
     { key: 'wanted', label: 'Wanted', Icon: Ic.AlertTri, mod: null },
+    { key: 'library-player', label: 'Watch', Icon: Ic.Film, mod: null },
     { key: 'calendar', label: 'Calendar', Icon: Ic.Calendar, mod: null },
     { key: 'requests', label: 'Requests', Icon: Ic.Inbox, count: counts.requests, mod: null },
     { key: 'livetv', label: 'Live TV', Icon: Ic.Radio, mod: 'livetv' },
@@ -1393,6 +1491,7 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules }) {
     if (!i.mod) return true;
     if (!em.includes(i.mod)) return false;
     if (!advanced && advancedOnlyMods.has(i.mod)) return false;
+    if (!advanced && advancedOnlyPages.has(i.key)) return false;
     return true;
   });
   if (advanced) {
@@ -1423,7 +1522,15 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules }) {
             key={item.key}
             type="button"
             className={'mr-nav-item' + (isActive(item.key) ? ' active' : '')}
-            onClick={() => { setPage(item.key); onClose && onClose(); }}
+            onClick={() => {
+              if (item.key === 'ai-search') {
+                window.dispatchEvent(new CustomEvent('mediaos-open-ai'));
+                onClose && onClose();
+                return;
+              }
+              setPage(item.key);
+              onClose && onClose();
+            }}
           >
             <span className="nav-icon"><item.Icon /></span>
             <span className="flex-1">{item.label}</span>
@@ -1438,7 +1545,15 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules }) {
             key={item.key}
             type="button"
             className={'mr-nav-item' + (isActive(item.key) ? ' active' : '')}
-            onClick={() => { setPage(item.key); onClose && onClose(); }}
+            onClick={() => {
+              if (item.key === 'ai-search') {
+                window.dispatchEvent(new CustomEvent('mediaos-open-ai'));
+                onClose && onClose();
+                return;
+              }
+              setPage(item.key);
+              onClose && onClose();
+            }}
           >
             <span className="nav-icon"><item.Icon /></span>
             <span className="flex-1">{item.label}</span>
@@ -1832,140 +1947,245 @@ function GlossaryPage() {
 }
 
 function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setPage }) {
-  const recent_movies = [...movies].sort((a,b)=>new Date(b.added_at)-new Date(a.added_at)).slice(0,8);
-  const recent_series = [...series].sort((a,b)=>new Date(b.added_at)-new Date(a.added_at)).slice(0,8);
-  const downloading = [...movies.filter(m=>m.status==='downloading')].slice(0,5);
-  const isEmpty = movies.length===0 && series.length===0;
+  const DEFAULT_LAYOUT = [
+    { id: 'stats', enabled: true },
+    { id: 'calendar', enabled: true },
+    { id: 'queue', enabled: true },
+    { id: 'wanted', enabled: true },
+    { id: 'recent', enabled: true },
+    { id: 'activity', enabled: true },
+    { id: 'health', enabled: true },
+    { id: 'nowplaying', enabled: true },
+  ];
+  const [layout, setLayout] = useState(() => {
+    try {
+      const raw = localStorage.getItem('mediaos.dashboard.layout');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return DEFAULT_LAYOUT;
+  });
+  const [edit, setEdit] = useState(false);
+  const [bundle, setBundle] = useState(null);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const load = () => {
+    fetch('/api/overhaul/dashboard').then(r=>r.json()).then(setBundle).catch(()=>setBundle(null));
+    fetch('/api/now-playing').then(r=>r.json()).then(setNowPlaying).catch(()=>setNowPlaying(null));
+  };
+  useEffect(()=>{ load(); const i=setInterval(load, 30000); return ()=>clearInterval(i); }, []);
+  function saveLayout(next) {
+    setLayout(next);
+    try { localStorage.setItem('mediaos.dashboard.layout', JSON.stringify(next)); } catch {}
+  }
+  function toggleWidget(id) {
+    saveLayout(layout.map(w => w.id===id ? {...w, enabled: !w.enabled} : w));
+  }
+  function moveWidget(id, dir) {
+    const idx = layout.findIndex(w=>w.id===id);
+    if (idx < 0) return;
+    const j = idx + dir;
+    if (j < 0 || j >= layout.length) return;
+    const next = [...layout];
+    const tmp = next[idx]; next[idx] = next[j]; next[j] = tmp;
+    saveLayout(next);
+  }
+  const lib = bundle?.library || {};
+  const wanted = bundle?.wanted || {};
+  const cal = bundle?.calendar || [];
+  const queue = bundle?.queue || [];
+  const activity = bundle?.activity || [];
+  const recent = bundle?.recent || [];
+  const health = bundle?.health || {};
+  const movieN = movies?.length ?? lib.movie ?? 0;
+  const tvN = series?.length ?? lib.tv ?? 0;
 
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="mr-page-title">Dashboard</h1>
-          <p className="text-base-content/60 text-sm mt-0.5">Unified control surface — library, queue, calendar</p>
+  const widgetDefs = {
+    stats: {
+      label: 'Library stats',
+      render: () => (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            {label:'Movies', n: movieN, page:'movies'},
+            {label:'TV', n: tvN, page:'tv'},
+            {label:'Music', n: music.length||lib.music||0, page:'music'},
+            {label:'Books', n: books.length||lib.book||0, page:'books'},
+          ].map(c=>(
+            <button key={c.label} type="button" className="card bg-base-200 hover:border-primary border border-base-content/5 text-left"
+              onClick={()=>setPage && setPage(c.page)}>
+              <div className="card-body p-3">
+                <div className="text-2xl font-bold tabular-nums">{c.n}</div>
+                <div className="text-xs opacity-60">{c.label}</div>
+              </div>
+            </button>
+          ))}
         </div>
-        <div className="flex gap-2">
-          <button className="btn btn-sm gap-2" onClick={()=>setPage('movies')}>
-            <span className="w-4 h-4"><Ic.Plus /></span>Add content
-          </button>
+      ),
+    },
+    calendar: {
+      label: 'Upcoming / airing',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <div className="flex justify-between items-center">
+              <h2 className="font-semibold text-sm">Calendar (next 14 days)</h2>
+              <button className="btn btn-xs btn-ghost" onClick={()=>setPage && setPage('calendar')}>Open</button>
+            </div>
+            {(cal||[]).slice(0,8).map((e,i)=>(
+              <div key={i} className="flex gap-2 text-xs items-baseline">
+                <span className="opacity-50 w-24 shrink-0 tabular-nums">{(e.air_date||'').slice(0,10)}</span>
+                <span className="font-medium truncate">{e.series}</span>
+                <span className="opacity-60">S{String(e.season).padStart(2,'0')}E{String(e.episode).padStart(2,'0')}</span>
+                <span className={"badge badge-xs ml-auto "+(e.status==='downloaded'?'badge-success':'badge-ghost')}>{e.status}</span>
+              </div>
+            ))}
+            {!cal.length && <p className="text-xs opacity-50">No upcoming monitored episodes — add TV series and keep monitor on.</p>}
+            <p className="text-[10px] opacity-40 mt-1">Missing episodes auto-search on the scheduler (RSS lookback).</p>
+          </div>
         </div>
-      </div>
-
-      <GuidedFirstRun setPage={setPage} />
-      <StatsGrid movies={movies} series={series} music={music} books={books} audiobooks={audiobooks} setPage={setPage} />
-
-      {/* Prismarr-inspired dense control strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <button type="button" className="card bg-base-200 hover:bg-base-300 border border-base-content/5 text-left" onClick={()=>setPage('calendar')}>
-          <div className="card-body p-3 gap-0.5">
-            <div className="text-[10px] uppercase tracking-wide opacity-50">Calendar</div>
-            <div className="text-sm font-semibold">Releases</div>
-            <div className="text-[10px] opacity-50">Movies + episodes</div>
+      ),
+    },
+    queue: {
+      label: 'Download queue',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <div className="flex justify-between"><h2 className="font-semibold text-sm">Queue</h2>
+              <button className="btn btn-xs btn-ghost" onClick={()=>setPage&&setPage('queue')}>Open</button></div>
+            {(queue||[]).slice(0,6).map(q=>(
+              <div key={q.id} className="text-xs truncate"><span className="badge badge-xs mr-1">{q.status}</span>{q.title}</div>
+            ))}
+            {!queue.length && <p className="text-xs opacity-50">Queue empty</p>}
           </div>
-        </button>
-        <button type="button" className="card bg-base-200 hover:bg-base-300 border border-base-content/5 text-left" onClick={()=>setPage('queue')}>
-          <div className="card-body p-3 gap-0.5">
-            <div className="text-[10px] uppercase tracking-wide opacity-50">Queue</div>
-            <div className="text-sm font-semibold">Downloads</div>
-            <div className="text-[10px] opacity-50">Active + history</div>
-          </div>
-        </button>
-        <button type="button" className="card bg-base-200 hover:bg-base-300 border border-base-content/5 text-left" onClick={()=>setPage('wanted')}>
-          <div className="card-body p-3 gap-0.5">
-            <div className="text-[10px] uppercase tracking-wide opacity-50">Wanted</div>
-            <div className="text-sm font-semibold">Missing</div>
-            <div className="text-[10px] opacity-50">Hunt &amp; search</div>
-          </div>
-        </button>
-        <button type="button" className="card bg-base-200 hover:bg-base-300 border border-base-content/5 text-left" onClick={()=>setPage('modules')}>
-          <div className="card-body p-3 gap-0.5">
-            <div className="text-[10px] uppercase tracking-wide opacity-50">Modules</div>
-            <div className="text-sm font-semibold">Expand</div>
-            <div className="text-[10px] opacity-50">Music, comics…</div>
-          </div>
-        </button>
-      </div>
-
-      {isEmpty ? (
-        <div className="card bg-base-200 border border-dashed border-base-content/20">
-          <div className="card-body items-center text-center py-16 gap-4">
-            <div className="w-16 h-16 text-base-content/20"><Ic.Library /></div>
-            <h2 className="text-xl font-semibold">Your library is empty</h2>
-            <button className="btn btn-primary btn-sm mt-2" onClick={()=>setPage&&setPage('setup')}>Open Setup wizard</button>
-            <p className="text-base-content/50 text-sm max-w-sm">Add movies and TV shows to start building your collection. mediaos will automatically search, grab, and organize everything.</p>
-            <div className="flex gap-3">
-              <button className="btn btn-primary btn-sm" onClick={()=>setPage('movies')}>Add Movies</button>
-              <button className="btn btn-secondary btn-sm" onClick={()=>setPage('tv')}>Add TV Shows</button>
+        </div>
+      ),
+    },
+    wanted: {
+      label: 'Wanted counts',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <div className="flex justify-between"><h2 className="font-semibold text-sm">Wanted</h2>
+              <button className="btn btn-xs btn-ghost" onClick={()=>setPage&&setPage('wanted')}>Open</button></div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {Object.entries(wanted).map(([k,v])=>(
+                <span key={k} className="badge badge-ghost gap-1">{k}: <b>{v}</b></span>
+              ))}
+              {!Object.keys(wanted).length && <span className="opacity-50">None</span>}
             </div>
           </div>
         </div>
-      ) : (
-        <div className="grid gap-8 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-8">
-            {recent_movies.length>0 && (
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold">Recently Added Movies</h2>
-                  <button className="btn btn-ghost btn-xs" onClick={()=>setPage('movies')}>View all</button>
+      ),
+    },
+    recent: {
+      label: 'Recently downloaded',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <h2 className="font-semibold text-sm">Recently downloaded</h2>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {(recent||[]).slice(0,6).map(r=>(
+                <div key={r.id} className="text-center">
+                  {r.poster_path ? <img src={r.poster_path} alt="" className="rounded aspect-[2/3] object-cover w-full" /> :
+                    <div className="rounded aspect-[2/3] bg-base-300" />}
+                  <div className="text-[10px] truncate mt-1">{r.title}</div>
                 </div>
-                <div className="poster-grid">
-                  {recent_movies.map(m=>(
-                    <div key={m.id} className="media-card aspect-poster relative hover:ring-2 hover:ring-primary/40 cursor-pointer transition-all">
-                      {m.poster_path ? <img src={TMDB+m.poster_path} className="w-full h-full object-cover" alt={m.title} loading="lazy" /> :
-                        <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-base-content/20">{m.title?.[0]}</div>}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-            {recent_series.length>0 && (
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold">Recently Added Series</h2>
-                  <button className="btn btn-ghost btn-xs" onClick={()=>setPage('tv')}>View all</button>
-                </div>
-                <div className="poster-grid">
-                  {recent_series.map(s=>(
-                    <div key={s.id} className="media-card aspect-poster relative hover:ring-2 hover:ring-secondary/40 cursor-pointer transition-all">
-                      {s.poster_path ? <img src={TMDB+s.poster_path} className="w-full h-full object-cover" alt={s.title} loading="lazy" /> :
-                        <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-base-content/20">{s.title?.[0]}</div>}
-                      <progress className="progress progress-secondary absolute bottom-0 left-0 right-0 h-0.5 w-full" value={s.episode_count>0?Math.round(s.downloaded_count/s.episode_count*100):0} max="100" />
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-
-          {/* Right sidebar: activity */}
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Active Downloads</h2>
-            {downloading.length===0 ? (
-              <div className="card bg-base-200 p-4 text-center text-sm text-base-content/40">
-                <div className="w-8 h-8 mx-auto mb-2 text-base-content/20"><Ic.Download /></div>
-                Queue is empty
-              </div>
-            ) : downloading.map(m=>(
-              <div key={m.id} className="card bg-base-200 p-3 flex flex-row items-center gap-3">
-                <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-base-300">
-                  {m.poster_path ? <img src={TMDB+m.poster_path} className="w-full h-full object-cover" alt="" /> :
-                    <div className="w-full h-full flex items-center justify-center font-bold text-base-content/20">{m.title?.[0]}</div>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{m.title}</div>
-                  <div className="text-xs text-base-content/50 font-mono">{m.year}</div>
-                  <div className="badge badge-info badge-sm mt-1 border-none">Downloading</div>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
+            {!recent.length && <p className="text-xs opacity-50">Nothing downloaded yet</p>}
           </div>
         </div>
+      ),
+    },
+    activity: {
+      label: 'Activity feed',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-1">
+            <div className="flex justify-between"><h2 className="font-semibold text-sm">Activity</h2>
+              <button className="btn btn-xs btn-ghost" onClick={()=>setPage&&setPage('activity')}>History</button></div>
+            {(activity||[]).slice(0,8).map(a=>(
+              <div key={a.id} className="text-xs opacity-80 truncate">{a.message||a.event}</div>
+            ))}
+            {!activity.length && <p className="text-xs opacity-50">No activity yet</p>}
+          </div>
+        </div>
+      ),
+    },
+
+    nowplaying: {
+      label: 'Now playing',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <h2 className="font-semibold text-sm">Now playing</h2>
+            {(nowPlaying?.sessions||[]).map((s,i)=>(
+              <div key={i} className="text-xs flex flex-wrap gap-2 items-baseline">
+                <span className="badge badge-xs badge-primary">{s.source}</span>
+                <span className="font-medium truncate">{s.title||'—'}</span>
+                {s.user && <span className="opacity-50">{s.user}</span>}
+                {s.state && <span className="opacity-50">{s.state}</span>}
+                {s.progress_percent != null && <span className="tabular-nums opacity-50">{s.progress_percent}%</span>}
+              </div>
+            ))}
+            {!nowPlaying?.sessions?.length && (
+              <p className="text-xs opacity-50">
+                {nowPlaying?.configured ? 'Nothing playing right now' : (nowPlaying?.hint || 'Configure Plex or Tautulli in settings to show sessions')}
+              </p>
+            )}
+          </div>
+        </div>
+      ),
+    },
+
+    health: {
+      label: 'System health',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-1 text-xs">
+            <h2 className="font-semibold text-sm">System</h2>
+            <div>MediaOs <b>v{health.version||'—'}</b> · {health.status||'ok'}</div>
+            <div className="opacity-50">Scheduler searches new/missing TV episodes automatically (calendar + RSS lookback).</div>
+          </div>
+        </div>
+      ),
+    },
+  };
+
+  return (
+    <div className="space-y-4 max-w-6xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="mr-page-title">Home</h1>
+          <p className="mr-page-sub">Your media OS dashboard — editable widgets</p>
+        </div>
+        <div className="flex gap-2">
+          <button className={"btn btn-sm "+(edit?'btn-primary':'btn-ghost')} onClick={()=>setEdit(e=>!e)}>{edit?'Done':'Edit widgets'}</button>
+          <button className="btn btn-sm btn-ghost" onClick={load}>Refresh</button>
+        </div>
+      </div>
+      {edit && (
+        <div className="card bg-base-200 border border-primary/30"><div className="card-body p-3 gap-2">
+          <p className="text-xs opacity-70">Toggle and reorder widgets. Layout is saved in this browser.</p>
+          {layout.map(w=>(
+            <div key={w.id} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="checkbox checkbox-sm" checked={!!w.enabled} onChange={()=>toggleWidget(w.id)} />
+              <span className="flex-1">{widgetDefs[w.id]?.label || w.id}</span>
+              <button type="button" className="btn btn-xs" onClick={()=>moveWidget(w.id,-1)}>↑</button>
+              <button type="button" className="btn btn-xs" onClick={()=>moveWidget(w.id,1)}>↓</button>
+            </div>
+          ))}
+          <button type="button" className="btn btn-xs btn-ghost w-fit" onClick={()=>saveLayout(DEFAULT_LAYOUT)}>Reset defaults</button>
+        </div></div>
       )}
+      <div className="space-y-4">
+        {layout.filter(w=>w.enabled).map(w=>(
+          <div key={w.id}>{widgetDefs[w.id]?.render?.()}</div>
+        ))}
+      </div>
     </div>
   );
 }
 
-/* ── Movies Page ─────────────────────────────────────────────────────────── */
+
 function MoviesPage({ movies, refreshMovies, setMiniPlayer, setPage }) {
   const [detailId, setDetailId] = useState(null);
   const [q, setQ] = useState('');
@@ -2447,7 +2667,39 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage }) {
 
 
 
-function DiscoverPage({ movies, series, music = [], refreshMovies, refreshSeries }) {
+function DiscoverPage({ movies, series, music = [], refreshMovies, refreshSeries, enabledModules = [], setPage }) {
+
+  const [adultQ, setAdultQ] = useState('');
+  const [adultResults, setAdultResults] = useState([]);
+  const [adultBusy, setAdultBusy] = useState(false);
+  const [adultMsg, setAdultMsg] = useState(null);
+  async function searchAdultDiscover(e) {
+    e && e.preventDefault();
+    if (!adultQ.trim()) return;
+    setAdultBusy(true); setAdultMsg(null);
+    try {
+      const tok = (typeof getAdultUnlock === 'function') ? getAdultUnlock() : null;
+      const headers = {};
+      if (tok) headers['X-Adult-Unlock'] = tok;
+      const r = await fetch('/api/discover/adult/search?q='+encodeURIComponent(adultQ.trim()), { headers }).then(x=>x.json());
+      setAdultResults(r.results||[]);
+      if (r.hint) setAdultMsg(r.hint);
+      if (!(r.results||[]).length && !r.hint) setAdultMsg('No results — set TPDB_API_KEY in Settings → Adult');
+    } catch(ex) { setAdultMsg(String(ex.message||ex)); }
+    setAdultBusy(false);
+  }
+  async function addAdultFromDiscover(row) {
+    setAdultBusy(true);
+    try {
+      await api.adult.add({
+        title: row.title, year: row.year, external_id: row.external_id,
+        overview: row.overview, poster_path: row.poster_path,
+      });
+      setAdultMsg('Added: '+row.title);
+    } catch(ex) { setAdultMsg(String(ex.message||ex)); }
+    setAdultBusy(false);
+  }
+
   const [mode, setMode] = useState('browse'); // browse | search
   const [tab, setTab] = useState('movie');
   const [kind, setKind] = useState('popular');
@@ -2611,6 +2863,7 @@ function DiscoverPage({ movies, series, music = [], refreshMovies, refreshSeries
         <div className="tabs tabs-boxed tabs-sm">
           <a className={'tab '+(tab==='movie'?'tab-active':'')} onClick={()=>setTab('movie')}>Movies</a>
           <a className={'tab '+(tab==='tv'?'tab-active':'')} onClick={()=>setTab('tv')}>TV</a>
+          <a className={'tab '+(tab==='adult'?'tab-active':'')} onClick={()=>setTab('adult')}>Adult</a>
           <a className={'tab '+(tab==='music'?'tab-active':'')} onClick={()=>{setTab('music'); setKind('popular');}}>Music</a>
         </div>
         {tab==='music' && mode==='browse' && (
@@ -2717,7 +2970,35 @@ function DiscoverPage({ movies, series, music = [], refreshMovies, refreshSeries
         </div>
       )}
       <LibraryLegend showTv={tab==='tv'} showSeries={false} />
-    </div>
+    
+      {tab==='adult' && (
+        <div className="space-y-4">
+          <form onSubmit={searchAdultDiscover} className="flex flex-wrap gap-2">
+            <input className="input input-bordered input-sm flex-1 min-w-[12rem]" placeholder="Search adult metadata (TPDB)…"
+              value={adultQ} onChange={e=>setAdultQ(e.target.value)} />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={adultBusy||!adultQ.trim()}>Search</button>
+          </form>
+          {adultMsg && <div className="alert alert-info text-xs py-2">{adultMsg}</div>}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(adultResults||[]).map((r,i)=>(
+              <div key={r.external_id||i} className="card bg-base-200 border border-base-content/10">
+                <div className="card-body p-3 flex-row gap-3">
+                  {r.poster_path ? <img src={r.poster_path} alt="" className="w-16 h-24 object-cover rounded" /> :
+                    <div className="w-16 h-24 bg-base-300 rounded" />}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm truncate">{r.title}</div>
+                    <div className="text-xs opacity-50">{[r.year||'—', r.site].filter(Boolean).join(' · ')}</div>
+                    <button type="button" className="btn btn-xs btn-primary mt-2" disabled={adultBusy}
+                      onClick={()=>addAdultFromDiscover(r)}>Add to library</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+</div>
   );
 }
 
@@ -3546,7 +3827,7 @@ function SessionsAdminPage() {
   );
 }
 
-function ConfigGroupPage({ group, title, Icon, description }) {
+function ConfigGroupPage({ group, title, Icon, description, setPage, hideBack }) {
   const [fields, setFields] = useState(null);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -4138,8 +4419,87 @@ function BooksAuthorsTree() {
   );
 }
 
+
+function BookDetailPage({ bookId, onBack, refresh }) {
+  const [item, setItem] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [ixResults, setIxResults] = useState(null);
+  const [ixLoading, setIxLoading] = useState(false);
+  const load = useCallback(() => {
+    api.books.get(bookId).then(setItem).catch(e=>setMsg(String(e.message||e)));
+  }, [bookId]);
+  useEffect(()=>{ load(); }, [load]);
+  async function autoSearch() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.books.searchNow(bookId);
+      setMsg(r?.found ? `Grabbed: ${r.title}` : 'No release found');
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function openIx() {
+    setIxLoading(true); setIxResults([]); setMsg(null);
+    try {
+      const d = await api.books.interactive(bookId);
+      setIxResults(d?.results || d || []);
+    } catch(e) { setMsg(String(e.message||e)); }
+    setIxLoading(false);
+  }
+  async function grabRel(rel) {
+    setBusy(true);
+    try {
+      await api.books.grab(bookId, {
+        title: rel.title, download_url: rel.download_url, indexer: rel.indexer,
+        size: rel.size, seeders: rel.seeders, protocol: rel.protocol, quality_score: rel.score,
+      });
+      setMsg(`Grabbed: ${rel.title}`); setIxResults(null);
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  if (!item) return <div className="p-6 opacity-50">Loading…</div>;
+  return (
+    <MediaDetailShell
+      title={item.title} year={item.year} poster={item.poster_path}
+      status={item.status} monitored={item.monitored}
+      overview={item.overview || item.artist_name}
+      filePath={item.file_path} qualityProfile={item.quality_profile}
+      msg={msg} busy={busy} onBack={onBack}
+      actions={<>
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={autoSearch}>Search & grab</button>
+        <button className="btn btn-sm btn-secondary" disabled={busy||ixLoading} onClick={openIx}>Interactive search</button>
+        <button className="btn btn-sm" disabled={busy} onClick={async()=>{
+          setBusy(true);
+          try { await api.books.update(bookId, { monitored: !item.monitored }); load(); refresh&&refresh(); }
+          catch(e){ setMsg(String(e.message||e)); }
+          setBusy(false);
+        }}>{item.monitored?'Unmonitor':'Monitor'}</button>
+        <button className="btn btn-sm" disabled={busy} onClick={async()=>{
+          setBusy(true);
+          try { await api.books.refresh(bookId); load(); setMsg('Refreshed'); }
+          catch(e){ setMsg(String(e.message||e)); }
+          setBusy(false);
+        }}>Refresh</button>
+        {item.file_path && <button className="btn btn-sm btn-ghost" disabled={busy} onClick={async()=>{
+          setBusy(true);
+          try { await api.books.file(bookId, { clear: true }); load(); refresh&&refresh(); }
+          catch(e){ setMsg(String(e.message||e)); }
+          setBusy(false);
+        }}>Clear file</button>}
+        <button className="btn btn-sm btn-ghost text-error" onClick={async()=>{ await api.books.remove(bookId); onBack(); refresh&&refresh(); }}>Delete</button>
+      </>}
+    >
+      <InteractiveResultsTable results={ixResults} loading={ixLoading} busy={busy} onGrab={grabRel} onClose={()=>setIxResults(null)} />
+    </MediaDetailShell>
+  );
+}
+
 function BooksPage({ setPage }) {
+  // searchAllMissing defined below
   const [items, setItems] = useState([]);
+  const [detailId, setDetailId] = useState(null);
   const [nav, setNav] = useState('library');
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
@@ -4148,6 +4508,8 @@ function BooksPage({ setPage }) {
   const [msg, setMsg] = useState(null);
   const load = () => api.books.list().then(setItems).catch(()=>[]).finally(()=>setLoading(false));
   useEffect(() => { load(); }, []);
+  // toolbar uses searchAllMissing for monitored missing books
+  if (detailId) return <BookDetailPage bookId={detailId} onBack={()=>{ setDetailId(null); load(); }} refresh={load} />;
 
   async function doSearch(e) {
     e && e.preventDefault();
@@ -4170,7 +4532,17 @@ function BooksPage({ setPage }) {
       setMsg(r.message||'Search done'); load();
     } catch(e){ setMsg(String(e.message||e)); }
   }
+  async function searchAllMissing() {
+    setMsg('Searching missing…');
+    try {
+      const r = await api.books.searchMissing();
+      setMsg(`Searched ${r.searched||0} · grabbed ${r.grabbed||0}`); load();
+    } catch(e){ setMsg(String(e.message||e)); }
+  }
   const hasFile = b => !!(b.file_path || b.status==='downloaded');
+  const missingToolbar = (
+    <button type="button" className="btn btn-sm btn-primary mb-3" onClick={searchAllMissing}>Search missing</button>
+  );
   let list = [...items];
   if (q.trim() && nav==='library') list = list.filter(b => (b.title||'').toLowerCase().includes(q.toLowerCase()));
   if (filter==='downloaded') list = list.filter(hasFile);
@@ -4232,7 +4604,7 @@ function BooksPage({ setPage }) {
         {nav==='wanted' && (
           <table className="table table-sm"><thead><tr><th>Title</th><th></th></tr></thead><tbody>
             {items.filter(b=>b.monitored&&!hasFile(b)).map(b=>(
-              <tr key={b.id}><td>{b.title}</td><td><button className="btn btn-xs btn-primary" onClick={()=>searchGrab(b.id)}>Search</button></td></tr>
+              <tr key={b.id}><td>{b.title}</td><td><button className="btn btn-xs btn-primary" onClick={()=>setDetailId(b.id)}>Search</button></td></tr>
             ))}
           </tbody></table>
         )}
@@ -4252,7 +4624,7 @@ function BooksPage({ setPage }) {
                     <div className="text-xs font-semibold line-clamp-2 min-h-[2rem]">{b.title}</div>
                     <span className={"badge badge-xs "+(b.monitored?'badge-success':'badge-ghost')}>{b.monitored?'Monitored':'Off'}</span>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100">
-                      <button className="btn btn-ghost btn-xs" onClick={()=>searchGrab(b.id)}>Search</button>
+                      <button className="btn btn-ghost btn-xs" onClick={()=>setDetailId(b.id)}>Search</button>
                       <button className="btn btn-ghost btn-xs text-error" onClick={async()=>{await api.books.remove(b.id); load();}}>Del</button>
                     </div>
                   </div>
@@ -4384,7 +4756,63 @@ function EpgTimeline() {
 }
 
 
+
+function LibraryBrowserPage({ movies = [], series = [], music = [], books = [], setMiniPlayer, setPage }) {
+  const [tab, setTab] = useState('movies');
+  const [q, setQ] = useState('');
+  const downloaded = (list) => (list||[]).filter(x => x.file_path || x.status==='downloaded');
+  let items = [];
+  if (tab==='movies') items = downloaded(movies);
+  else if (tab==='tv') items = (series||[]); // series list — play from detail
+  else if (tab==='music') items = downloaded(music);
+  else if (tab==='books') items = downloaded(books);
+  if (q.trim()) {
+    const f = q.toLowerCase();
+    items = items.filter(x => (x.title||'').toLowerCase().includes(f));
+  }
+  return (
+    <div className="space-y-4 max-w-6xl">
+      <div>
+        <h1 className="mr-page-title">Library player</h1>
+        <p className="mr-page-sub">Watch or listen without Jellyfin — built-in player with optional ffmpeg transcode.</p>
+      </div>
+      <div className="tabs tabs-boxed w-fit flex-wrap">
+        {['movies','tv','music','books'].map(k=>(
+          <button key={k} type="button" className={'tab '+(tab===k?'tab-active':'')} onClick={()=>setTab(k)}>{k}</button>
+        ))}
+      </div>
+      <input className="input input-bordered input-sm w-full max-w-md" placeholder="Filter…" value={q} onChange={e=>setQ(e.target.value)} />
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {items.map(item=>(
+          <div key={item.id} className="card bg-base-200 border border-base-content/10">
+            <div className="card-body p-3 flex-row gap-3 items-center">
+              {item.poster_path
+                ? <img src={item.poster_path} alt="" className="w-14 h-20 object-cover rounded" />
+                : <div className="w-14 h-20 bg-base-300 rounded" />}
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-sm truncate">{item.title}</div>
+                <div className="text-xs opacity-50">{item.year||''}</div>
+                {tab==='tv' ? (
+                  <button type="button" className="btn btn-xs btn-primary mt-1" onClick={()=>setPage && setPage('tv')}>Open series</button>
+                ) : (
+                  <button type="button" className="btn btn-xs btn-primary mt-1" disabled={!item.file_path}
+                    onClick={()=>setMiniPlayer && setMiniPlayer({ itemId: item.id, title: item.title, path: item.file_path })}>
+                    Play
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {!items.length && <p className="text-sm opacity-50 col-span-full">No downloaded files in this library yet.</p>}
+      </div>
+      <p className="text-xs opacity-40">Player uses direct stream or ffmpeg → H.264/AAC when the browser cannot play the file.</p>
+    </div>
+  );
+}
+
 function LiveTvPage() {
+  // jellyfin pipeline panel below
   const [tvTab, setTvTab] = useState('channels'); // channels | epg | nownext
   const [sources, setSources] = useState([]);
   const [channels, setChannels] = useState([]);
@@ -4398,8 +4826,25 @@ function LiveTvPage() {
   const [lineup, setLineup] = useState(null);
   const load = () => {
     api.livetv.sources().then(setSources).catch(()=>[]);
-    api.livetv.channels(q).then(setChannels).catch(()=>[]);
+    // Editor list includes disabled channels for lineup management
+    (api.livetv.channelsEditor ? api.livetv.channelsEditor() : api.livetv.channels(q))
+      .then(setChannels).catch(()=>api.livetv.channels(q).then(setChannels).catch(()=>[]));
     fetch('/api/overhaul/livetv/now-next').then(r=>r.json()).then(setLineup).catch(()=>null);
+  };
+  const toggleChannel = async (c, enabled) => {
+    try {
+      await api.livetv.patchChannel(c.id, { enabled });
+      setChannels(prev => (prev||[]).map(x => x.id===c.id ? {...x, enabled} : x));
+    } catch(e) { setMsg(String(e.message||e)); }
+  };
+  const bulkEnable = async (enabled) => {
+    const ids = (filtered||[]).map(c=>c.id);
+    if (!ids.length) return;
+    try {
+      await api.livetv.bulkChannels({ channel_ids: ids, enabled });
+      setMsg((enabled?'Enabled':'Disabled')+' '+ids.length+' channels');
+      load();
+    } catch(e) { setMsg(String(e.message||e)); }
   };
   useEffect(() => { load(); }, []);
   const groups = [...new Set((channels||[]).map(c=>c.group_title||c.group).filter(Boolean))].sort();
@@ -4411,16 +4856,73 @@ function LiveTvPage() {
     <div className="space-y-6 max-w-6xl">
       <div>
         <h1 className="mr-page-title">Live TV / IPTV</h1>
-        <p className="text-sm text-base-content/50">M3U · Xtream · EPG · Now/Next · play in browser</p>
+        <p className="text-sm text-base-content/50">M3U · Xtream · EPG · health · Jellyfin · full IPTV</p>
+        <div className="card bg-base-200 border border-base-content/10 my-3">
+          <div className="card-body p-3 gap-2 text-sm">
+            <div className="font-semibold text-sm">EPG guides (iptv-org / epg-grabber)</div>
+            <p className="text-xs opacity-60">Published XMLTV from iptv-org.github.io — auto-bound when you seed country playlists. Multi-URL merge on refresh.</p>
+            <div className="flex flex-wrap gap-1">
+              <button type="button" className="btn btn-xs" onClick={async()=>{
+                try {
+                  const r = await fetch('/api/livetv/epg/presets').then(x=>x.json());
+                  setMsg((r.presets||[]).map(p=>p.name+': '+p.url).join(' | '));
+                } catch(e){ setMsg(String(e.message||e)); }
+              }}>List EPG presets</button>
+              <button type="button" className="btn btn-xs" onClick={async()=>{
+                try {
+                  const r = await fetch('/api/livetv/epg/presets/epg-us-tvtv/bind',{method:'POST'}).then(x=>x.json());
+                  setMsg('Bound US tvtv: '+JSON.stringify(r));
+                } catch(e){ setMsg(String(e.message||e)); }
+              }}>Bind US guide to all sources</button>
+              <button type="button" className="btn btn-xs" onClick={async()=>{
+                try {
+                  const r = await fetch('/api/livetv/epg/presets/epg-uk-sky/bind',{method:'POST'}).then(x=>x.json());
+                  setMsg('Bound UK sky: '+JSON.stringify(r));
+                } catch(e){ setMsg(String(e.message||e)); }
+              }}>Bind UK guide</button>
+            </div>
+            <p className="text-[10px] opacity-40">Offline channels are removed after 12h (Settings → System · livetv_offline_*).</p>
+          </div>
+        </div>
+
+        <div className="card bg-base-200 border border-base-content/10 my-3">
+          <div className="card-body p-3 gap-1 text-sm">
+            <div className="font-semibold text-sm">Jellyfin Live TV pipeline</div>
+            <p className="text-xs opacity-60">In Jellyfin: Live TV → M3U Tuner + XMLTV guide. Streams proxy through MediaOs.</p>
+            <code className="text-[11px] break-all">/api/livetv/export/playlist.m3u</code>
+            <code className="text-[11px] break-all">/api/livetv/export/guide.xml</code>
+            <button type="button" className="btn btn-xs w-fit mt-1" onClick={async()=>{
+              try {
+                const r = await fetch('/api/livetv/jellyfin-setup').then(x=>x.json());
+                setMsg((r.steps||[]).join(' | '));
+              } catch(e){ setMsg(String(e.message||e)); }
+            }}>Show setup steps</button>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2 mt-2">
           <button className="btn btn-sm btn-secondary" onClick={async()=>{
-            setMsg('Seeding iptv-org defaults (US + Entertainment)…');
+            setMsg('Seeding iptv-org defaults + EPG guides…');
             try {
               const r = await fetch('/api/livetv/presets/iptv-org/seed',{method:'POST'}).then(x=>x.json());
-              setMsg(`iptv-org: created ${JSON.stringify(r.created||[])} synced ${JSON.stringify(r.synced||[])}`);
+              setMsg(`Seeded ${JSON.stringify(r.created||[])} · EPG ${JSON.stringify(r.epg_bound||[])} · index ${JSON.stringify(r.epg_index||{})}`);
               load();
             } catch(e) { setMsg(String(e.message||e)); }
-          }}>Add iptv-org defaults</button>
+          }}>Add iptv-org defaults + EPG</button>
+          <button className="btn btn-sm" onClick={async()=>{
+            setMsg('Refreshing EPG (all XMLTV URLs)…');
+            try {
+              const r = await fetch('/api/livetv/epg/refresh',{method:'POST'}).then(x=>x.json());
+              setMsg('EPG: '+JSON.stringify(r));
+            } catch(e){ setMsg(String(e.message||e)); }
+          }}>Refresh EPG</button>
+          <button className="btn btn-sm" onClick={async()=>{
+            setMsg('Probing channel health…');
+            try {
+              const r = await fetch('/api/livetv/health/run',{method:'POST'}).then(x=>x.json());
+              setMsg(`Health: checked ${r.checked} ok ${r.ok} fail ${r.failed} deleted ${r.deleted} disabled ${r.disabled}`);
+              load();
+            } catch(e){ setMsg(String(e.message||e)); }
+          }}>Health check</button>
           <button className="btn btn-sm" onClick={async()=>{
             setMsg('Re-syncing iptv-org sources…');
             try {
@@ -4517,13 +5019,22 @@ function LiveTvPage() {
               {groups.map(g=><option key={g} value={g}>{g}</option>)}
             </select>
             <button className="btn btn-sm" onClick={()=>api.livetv.channels(q).then(setChannels)}>Search</button>
+            <button className="btn btn-sm btn-success" title="Enable all filtered" onClick={()=>bulkEnable(true)}>Enable filtered</button>
+            <button className="btn btn-sm btn-warning" title="Disable all filtered" onClick={()=>bulkEnable(false)}>Disable filtered</button>
+            <button className="btn btn-sm btn-ghost" onClick={load}>Reload editor</button>
           </div>
           <div className="overflow-x-auto max-h-[28rem]">
             <table className="table table-xs">
-              <thead><tr><th></th><th>Name</th><th>Group</th><th></th></tr></thead>
+              <thead><tr><th>On</th><th></th><th>Name</th><th>Group</th><th></th></tr></thead>
               <tbody>
                 {filtered.map(c=>(
-                  <tr key={c.id}>
+                  <tr key={c.id} className={c.enabled===false ? 'opacity-40' : ''}>
+                    <td className="w-10">
+                      <input type="checkbox" className="toggle toggle-xs toggle-success"
+                        checked={c.enabled!==false}
+                        onChange={e=>toggleChannel(c, e.target.checked)}
+                        title={c.enabled===false?'Enable channel':'Disable channel'} />
+                    </td>
                     <td className="w-10">
                       {c.logo
                         ? <img src={c.logo} alt="" className="w-8 h-8 rounded object-contain bg-base-300" onError={e=>{ e.currentTarget.style.display='none'; }} />
@@ -4531,8 +5042,17 @@ function LiveTvPage() {
                     </td>
                     <td className="font-medium">{c.name}</td>
                     <td className="opacity-60">{c.group_title||c.group||'—'}</td>
-                    <td>
+                    <td className="whitespace-nowrap">
                       <button className="btn btn-xs btn-primary" onClick={()=>setPlaying(c)}>Play</button>
+                      <button className="btn btn-xs" title="Map EPG" onClick={async()=>{
+                        try {
+                          const r = await fetch('/api/livetv/channels/'+c.id+'/suggest-epg').then(x=>x.json());
+                          const s = (r.suggestions||[])[0];
+                          if (!s) { setMsg('No EPG suggestions for '+c.name); return; }
+                          await fetch('/api/livetv/channels/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({epg_tvg_id:s.tvg_id})});
+                          setMsg('Mapped '+c.name+' → '+s.tvg_id);
+                        } catch(e){ setMsg(String(e.message||e)); }
+                      }}>Map EPG</button>
                       <a className="btn btn-xs btn-ghost" href={c.stream_url} target="_blank" rel="noreferrer">Open</a>
                     </td>
                   </tr>
@@ -4547,7 +5067,7 @@ function LiveTvPage() {
         <div className="modal modal-open">
           <div className="modal-box max-w-3xl">
             <h3 className="font-bold text-sm">{playing.name}</h3>
-            <video className="w-full mt-2 bg-black rounded" controls autoPlay src={playing.stream_url} />
+            <HlsVideo className="w-full mt-2 bg-black rounded" autoPlay src={playing.id ? `/api/livetv/stream/${playing.id}` : playing.stream_url} />
             <div className="modal-action">
               <button className="btn btn-sm" onClick={()=>setPlaying(null)}>Close</button>
             </div>
@@ -4640,7 +5160,7 @@ function AudiobookDetailPage({ id, onBack }) {
   }
   async function openIx() {
     setIxLoading(true); setIxResults([]);
-    try { setIxResults(await api.audiobooks.interactive(id) || []); }
+    try { const d = await api.audiobooks.interactive(id); setIxResults(d?.results || d || []); }
     catch(e) { setMsg(String(e.message||e)); }
     setIxLoading(false);
   }
@@ -5550,290 +6070,473 @@ function QueuePage() {
 }
 
 function IndexersPage() {
+  /* Prowlarr-style: browse catalog / Prowlarr / Jackett → pick URL → Test → Add (FlareSolverr tag) */
+  const [tab, setTab] = useState("added"); // added | catalog | prowlarr | jackett
   const [items, setItems] = useState([]);
   const [msg, setMsg] = useState(null);
-  const [jackett, setJackett] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
-  const [catalogQ, setCatalogQ] = useState('');
+  const [catalogQ, setCatalogQ] = useState("");
   const [catalog, setCatalog] = useState([]);
-  const [privacy, setPrivacy] = useState('');
-  const [picked, setPicked] = useState(null); // catalog detail
-  const [form, setForm] = useState({ name:'', url:'', username:'', password:'', cookie:'', api_key:'', use_flaresolverr:false, priority:25 });
-  const [manual, setManual] = useState({ name:'', url:'', api_key:'', kind:'torznab' });
+  const [privacy, setPrivacy] = useState("");
+  const [picked, setPicked] = useState(null);
+  const [form, setForm] = useState({ name: "", url: "", username: "", password: "", cookie: "", api_key: "", use_flaresolverr: false, priority: 25 });
+  const [prowlarr, setProwlarr] = useState({ indexers: [], ok: false });
+  const [jackett, setJackett] = useState({ indexers: [], ok: false });
+  const [statusP, setStatusP] = useState(null);
+  const [statusJ, setStatusJ] = useState(null);
+  const [filter, setFilter] = useState("");
+  const [testResult, setTestResult] = useState(null);
 
-  const load = () => {
-    api.indexers.list().then(setItems).catch(()=>[]);
-    fetch('/api/indexers/jackett/status').then(r=>r.json()).then(setJackett).catch(()=>{});
-  };
-  useEffect(() => { load(); }, []);
+  const loadAdded = () => api.indexers.list().then(setItems).catch(() => setItems([]));
+  useEffect(() => { loadAdded(); }, []);
 
   async function loadCatalog(q, priv) {
     setBusy(true);
     try {
       const params = new URLSearchParams();
-      if (q) params.set('q', q);
-      if (priv) params.set('privacy', priv);
-      const r = await fetch('/api/indexers/catalog?'+params).then(x=>x.json());
-      setCatalog(Array.isArray(r)?r:[]);
-    } catch(e) { setMsg(String(e.message||e)); }
+      if (q) params.set("q", q);
+      if (priv) params.set("privacy", priv);
+      const r = await fetch("/api/indexers/catalog?" + params).then(x => x.json());
+      setCatalog(Array.isArray(r) ? r : (r.results || []));
+    } catch (e) { setMsg(String(e.message || e)); }
     setBusy(false);
   }
 
-  function openAdd() {
-    setShowAdd(true); setPicked(null); setCatalogQ(''); setPrivacy('');
-    loadCatalog('', '');
+  async function loadProwlarr() {
+    setBusy(true); setMsg(null);
+    try {
+      const st = await fetch("/api/indexers/prowlarr/status").then(x => x.json());
+      setStatusP(st);
+      const r = await fetch("/api/indexers/prowlarr/indexers").then(x => x.json());
+      setProwlarr(r);
+      if (!r.ok) setMsg(r.error || "Prowlarr unavailable");
+    } catch (e) { setMsg(String(e.message || e)); }
+    setBusy(false);
   }
 
-  async function pickDef(id) {
-    setBusy(true);
+  async function loadJackett() {
+    setBusy(true); setMsg(null);
     try {
-      const d = await fetch('/api/indexers/catalog/'+encodeURIComponent(id)).then(x=>x.json());
-      setPicked(d);
+      const st = await fetch("/api/indexers/jackett/status").then(x => x.json());
+      setStatusJ(st);
+      const r = await fetch("/api/indexers/jackett/indexers").then(x => x.json());
+      setJackett(r);
+      if (!r.ok) setMsg(r.error || "Jackett unavailable");
+    } catch (e) { setMsg(String(e.message || e)); }
+    setBusy(false);
+  }
+
+  useEffect(() => {
+    if (tab === "catalog") loadCatalog(catalogQ, privacy);
+    if (tab === "prowlarr") loadProwlarr();
+    if (tab === "jackett") loadJackett();
+  }, [tab]);
+
+  async function pickCatalog(id) {
+    setBusy(true); setTestResult(null);
+    try {
+      const d = await fetch("/api/indexers/catalog/" + encodeURIComponent(id)).then(x => x.json());
+      setPicked({ source: "catalog", ...d });
+      const urls = d.urls || (d.url ? [d.url] : []);
       setForm({
         name: d.name || id,
-        url: d.url || (d.urls && d.urls[0]) || '',
-        username:'', password:'', cookie:'', api_key:'',
-        use_flaresolverr:false, priority:25,
+        url: urls[0] || d.url || "",
+        urls,
+        username: "", password: "", cookie: "", api_key: "",
+        use_flaresolverr: !!(d.extra_tags && d.extra_tags.includes("flaresolverr")),
+        priority: 25,
       });
-    } catch(e) { setMsg(String(e.message||e)); }
+    } catch (e) { setMsg(String(e.message || e)); }
+    setBusy(false);
+  }
+
+  function pickProwlarr(ix) {
+    setTestResult(null);
+    setPicked({ source: "prowlarr", ...ix });
+    setForm({
+      name: ix.name,
+      url: ix.torznab_url || "",
+      urls: [ix.torznab_url, ix.base_url].filter(Boolean),
+      username: "", password: "", cookie: "", api_key: "",
+      use_flaresolverr: !!ix.needs_flaresolverr,
+      priority: ix.priority || 25,
+      prowlarr_id: ix.id,
+      tags: ix.tags || [],
+    });
+  }
+
+  function pickJackett(ix) {
+    setTestResult(null);
+    setPicked({ source: "jackett", ...ix });
+    setForm({
+      name: ix.name,
+      url: ix.torznab_url || "",
+      urls: [ix.torznab_url].filter(Boolean),
+      username: "", password: "", cookie: "", api_key: ix.api_key || "",
+      use_flaresolverr: !!ix.needs_flaresolverr,
+      priority: 25,
+      jackett_id: ix.id,
+      tags: ix.tags || [],
+    });
+  }
+
+  async function testPicked() {
+    if (!picked) return;
+    setBusy(true); setTestResult(null);
+    try {
+      if (picked.source === "prowlarr" && form.prowlarr_id != null) {
+        const r = await fetch("/api/indexers/prowlarr/indexers/" + form.prowlarr_id + "/test", { method: "POST" }).then(x => x.json());
+        setTestResult(r);
+      } else if (picked.source === "catalog" && picked.id) {
+        const r = await fetch("/api/indexers/catalog/" + encodeURIComponent(picked.id) + "/test?query=ubuntu", { method: "POST" }).then(x => x.json()).catch(async () => {
+          // fallback test-search after add pattern
+          return { ok: false, error: "Catalog test endpoint unavailable — Add then Test on the row" };
+        });
+        setTestResult(r);
+      } else if (picked.source === "jackett") {
+        // Torznab caps ping via temporary test after add is safer; try jackett status
+        setTestResult({ ok: true, note: "Jackett indexer selected — will use Torznab URL. Click Add, then Test on the added row." });
+      } else {
+        setTestResult({ ok: false, error: "Nothing to test" });
+      }
+    } catch (e) { setTestResult({ ok: false, error: String(e.message || e) }); }
     setBusy(false);
   }
 
   async function addPicked() {
     if (!picked) return;
-    setBusy(true);
+    setBusy(true); setMsg(null);
     try {
-      const body = {
-        def_id: picked.id,
-        name: form.name,
-        url: form.url || null,
-        enabled: true,
-        priority: form.priority,
-        use_flaresolverr: form.use_flaresolverr,
-        username: form.username || null,
-        password: form.password || null,
-        cookie: form.cookie || null,
-        api_key: form.api_key || null,
-      };
-      const r = await fetch('/api/indexers/catalog/add', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
-      }).then(x=>x.json());
-      if (r.detail) throw new Error(typeof r.detail==='string'?r.detail:JSON.stringify(r.detail));
-      setMsg(`Added ${r.name}`);
-      setShowAdd(false); setPicked(null); load();
-    } catch(e) { setMsg(String(e.message||e)); }
+      let r;
+      if (picked.source === "prowlarr") {
+        r = await fetch("/api/indexers/prowlarr/indexers/add", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            indexer_id: form.prowlarr_id,
+            name: form.name,
+            use_flaresolverr: form.use_flaresolverr,
+            enabled: true,
+            priority: form.priority,
+          }),
+        }).then(x => x.json());
+      } else if (picked.source === "jackett") {
+        r = await fetch("/api/indexers/jackett/indexers/add", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            indexer_id: String(form.jackett_id),
+            name: form.name,
+            use_flaresolverr: form.use_flaresolverr,
+            enabled: true,
+            priority: form.priority,
+          }),
+        }).then(x => x.json());
+      } else {
+        r = await fetch("/api/indexers/catalog/add", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            def_id: picked.id,
+            name: form.name,
+            url: form.url || null,
+            enabled: true,
+            priority: form.priority,
+            use_flaresolverr: form.use_flaresolverr,
+            username: form.username || null,
+            password: form.password || null,
+            cookie: form.cookie || null,
+            api_key: form.api_key || null,
+          }),
+        }).then(x => x.json());
+      }
+      if (r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
+      setMsg("Added: " + (r.name || form.name));
+      setPicked(null);
+      loadAdded();
+      setTab("added");
+    } catch (e) { setMsg(String(e.message || e)); }
     setBusy(false);
   }
 
-  async function testIx(id) {
+  async function testAdded(id) {
     setBusy(true);
     try {
-      const r = await fetch(`/api/indexers/${id}/test-search?query=ubuntu`, {method:'POST'}).then(x=>x.json());
-      setMsg(r.ok ? `Test OK — ${r.count} results` : `Test failed: ${r.error||'unknown'}`);
-      load();
-    } catch(e) { setMsg(String(e.message||e)); }
+      const r = await fetch("/api/indexers/" + id + "/test-search?query=ubuntu", { method: "POST" }).then(x => x.json());
+      setMsg(r.ok ? `Test OK — ${r.count} results` : `Test failed: ${r.error || JSON.stringify(r)}`);
+      loadAdded();
+    } catch (e) { setMsg(String(e.message || e)); }
     setBusy(false);
   }
 
-  const already = new Set((items||[]).map(i => (i.name||'').toLowerCase()));
+  async function removeIndexer(id) {
+    if (!confirm("Remove this indexer?")) return;
+    await fetch("/api/indexers/" + id, { method: "DELETE" });
+    loadAdded();
+  }
+
+  async function toggleFlare(row) {
+    await fetch("/api/indexers/" + row.id, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: row.name, url: row.url, kind: row.kind, enabled: row.enabled,
+        priority: row.priority, use_flaresolverr: !row.use_flaresolverr,
+        categories: row.categories, api_key: null,
+      }),
+    });
+    loadAdded();
+  }
+
+  const filt = (name) => !filter || (name || "").toLowerCase().includes(filter.toLowerCase());
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex-1">
-          <h1 className="mr-page-title">Indexers</h1>
-          <p className="text-sm text-base-content/50">Prowlarr-style: find a definition, pick site URL, add credentials, test</p>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={openAdd}>+ Add Indexer</button>
-        {jackett?.configured && (
-          <button className="btn btn-sm" disabled={busy} onClick={async()=>{
-            setBusy(true);
-            try {
-              const r = await fetch('/api/indexers/jackett/sync',{method:'POST'}).then(x=>x.json());
-              setMsg(`Jackett sync: ${r.added||0} added`); load();
-            } catch(e){ setMsg(String(e.message||e)); }
-            setBusy(false);
-          }}>Sync Jackett</button>
-        )}
+    <div className="space-y-4 max-w-5xl">
+      <div>
+        <h1 className="mr-page-title">Indexers</h1>
+        <p className="mr-page-sub">Prowlarr is optional (private trackers only). Public = builtins + full Jackett Cardigann sync. Tag FlareSolverr when needed.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={async()=>{
+          setBusy(true);
+          try {
+            const r = await fetch('/api/indexers/health/run',{method:'POST'}).then(x=>x.json());
+            setMsg('Health: '+JSON.stringify(r)); loadAdded();
+          } catch(e){ setMsg(String(e.message||e)); }
+          setBusy(false);
+        }}>Run health check</button>
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={async()=>{
+          setBusy(true);
+          try {
+            const r = await fetch('/api/setup/bootstrap?force=true',{method:'POST'}).then(x=>x.json());
+            setMsg('Def sync started: '+JSON.stringify(r));
+          } catch(e){ setMsg(String(e.message||e)); }
+          setBusy(false);
+        }}>Sync all Jackett defs</button>
       </div>
-      {msg && <div className="alert alert-info text-xs py-2">{msg}</div>}
-
-      {/* Added indexers */}
-      <div className="card bg-base-200 shadow-sm">
-        <div className="card-body p-4 gap-2">
-          <h2 className="font-semibold text-sm">Enabled indexers ({(items||[]).length})</h2>
-          <div className="overflow-x-auto">
-            <table className="table table-sm">
-              <thead><tr><th>Name</th><th>URL</th><th>Kind</th><th>Priority</th><th>Status</th><th></th></tr></thead>
-              <tbody>
-                {(items||[]).map(ix=>(
-                  <tr key={ix.id} className="hover">
-                    <td className="font-medium">{ix.name}</td>
-                    <td className="text-xs font-mono truncate max-w-[14rem]" title={ix.url}>{ix.url}</td>
-                    <td><span className="badge badge-xs badge-outline">{ix.kind}</span></td>
-                    <td className="text-xs">{ix.priority}</td>
-                    <td className="text-xs">
-                      {ix.last_error ? <span className="text-error" title={ix.last_error}>error</span>
-                        : ix.last_ok_at ? <span className="text-success">ok</span>
-                        : <span className="opacity-40">—</span>}
-                    </td>
-                    <td className="flex gap-1">
-                      <button className="btn btn-ghost btn-xs" disabled={busy} onClick={()=>testIx(ix.id)}>Test</button>
-                      <button className="btn btn-ghost btn-xs text-error" onClick={async()=>{ await api.indexers.remove(ix.id); load(); }}>Del</button>
-                    </td>
-                  </tr>
-                ))}
-                {!(items||[]).length && <tr><td colSpan={6} className="opacity-50 text-sm">No indexers yet — click Add Indexer</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
 
-      {/* Manual Torznab */}
-      <div className="card bg-base-200 shadow-sm">
-        <div className="card-body p-4 gap-2">
-          <h2 className="font-semibold text-sm">Generic Torznab / Newznab</h2>
-          <p className="text-xs opacity-60">Like Prowlarr&apos;s Generic Torznab — paste any indexer API URL (Prowlarr, Jackett, NZBGeek, …).</p>
-          <div className="flex flex-wrap gap-2">
-            <input className="input input-bordered input-sm" placeholder="Name" value={manual.name} onChange={e=>setManual(m=>({...m,name:e.target.value}))} />
-            <input className="input input-bordered input-sm flex-1 min-w-[12rem]" placeholder="https://host/api/v1/indexer/.../api" value={manual.url} onChange={e=>setManual(m=>({...m,url:e.target.value}))} />
-            <input className="input input-bordered input-sm" placeholder="API key" value={manual.api_key} onChange={e=>setManual(m=>({...m,api_key:e.target.value}))} />
-            <select className="select select-bordered select-sm" value={manual.kind} onChange={e=>setManual(m=>({...m,kind:e.target.value}))}>
-              <option value="torznab">Torznab</option>
-              <option value="newznab">Newznab</option>
-            </select>
-            <button className="btn btn-sm btn-primary" onClick={async()=>{
-              if(!manual.name||!manual.url) return;
-              await api.indexers.add({name:manual.name, url:manual.url, api_key:manual.api_key||null, kind:manual.kind});
-              setManual({name:'',url:'',api_key:'',kind:'torznab'}); load();
-            }}>Add</button>
-          </div>
-        </div>
+      <div className="tabs tabs-boxed w-fit flex-wrap">
+        {[
+          ["added", "Added"],
+          ["catalog", "Cardigann catalog"],
+          ["prowlarr", "Prowlarr"],
+          ["jackett", "Jackett"],
+        ].map(([k, label]) => (
+          <button key={k} type="button" className={"tab " + (tab === k ? "tab-active" : "")} onClick={() => setTab(k)}>{label}</button>
+        ))}
       </div>
 
-      {/* Add modal */}
-      {showAdd && (
-        <div className="modal modal-open">
-          <div className="modal-box max-w-3xl max-h-[90vh] overflow-y-auto">
-            <h3 className="font-bold text-lg">{picked ? `Add: ${picked.name}` : 'Add Indexer'}</h3>
-            {!picked ? (
-              <div className="space-y-3 mt-3">
-                <p className="text-sm opacity-70">Search the catalog (Cardigann definitions + built-ins). Same idea as Prowlarr&apos;s indexer list.</p>
-                <div className="flex flex-wrap gap-2">
-                  <input className="input input-bordered input-sm flex-1" placeholder="Search by name…" value={catalogQ}
-                    onChange={e=>setCatalogQ(e.target.value)}
-                    onKeyDown={e=>e.key==='Enter'&&loadCatalog(catalogQ, privacy)} />
-                  <select className="select select-bordered select-sm" value={privacy} onChange={e=>{ setPrivacy(e.target.value); loadCatalog(catalogQ, e.target.value); }}>
-                    <option value="">All</option>
-                    <option value="public">Public</option>
-                    <option value="semi-private">Semi-private</option>
-                    <option value="private">Private</option>
-                  </select>
-                  <button className="btn btn-sm" disabled={busy} onClick={()=>loadCatalog(catalogQ, privacy)}>Search</button>
-                </div>
-                <div className="overflow-x-auto border border-base-content/10 rounded-lg max-h-80 overflow-y-auto">
-                  <table className="table table-xs">
-                    <thead className="sticky top-0 bg-base-300"><tr><th>Name</th><th>Type</th><th>Source</th><th>URL</th><th></th></tr></thead>
-                    <tbody>
-                      {catalog.map(d=>{
-                        const added = already.has((d.name||'').toLowerCase());
-                        return (
-                          <tr key={d.id} className="hover">
-                            <td className="font-medium text-xs">{d.name}</td>
-                            <td><span className="badge badge-ghost badge-xs">{d.type||'?'}</span></td>
-                            <td className="text-[10px] opacity-60">{d.source}</td>
-                            <td className="text-[10px] font-mono truncate max-w-[10rem]">{d.url||'—'}</td>
-                            <td>
-                              {added
-                                ? <span className="text-[10px] opacity-40">Added</span>
-                                : <button className="btn btn-xs btn-primary" onClick={()=>pickDef(d.id)}>Select</button>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!catalog.length && <tr><td colSpan={5} className="opacity-50 text-sm p-3">No matches — load Cardigann .yml files or try another query</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3 mt-3">
-                <button className="btn btn-ghost btn-xs" onClick={()=>setPicked(null)}>← Back to list</button>
-                <p className="text-xs opacity-60">{picked.description || picked.id}</p>
-                <label className="form-control">
-                  <span className="label-text text-xs">Name</span>
-                  <input className="input input-bordered input-sm" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} />
-                </label>
-                {(picked.urls||[]).length > 0 && (
-                  <label className="form-control">
-                    <span className="label-text text-xs">Site URL (preconfigured)</span>
-                    <select className="select select-bordered select-sm" value={form.url}
-                      onChange={e=>setForm(f=>({...f,url:e.target.value}))}>
-                      {(picked.urls||[]).map(u=><option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </label>
-                )}
-                {!(picked.urls||[]).length && picked.source==='cardigann' && (
-                  <label className="form-control">
-                    <span className="label-text text-xs">Site URL</span>
-                    <input className="input input-bordered input-sm" value={form.url} onChange={e=>setForm(f=>({...f,url:e.target.value}))} placeholder="https://…" />
-                  </label>
-                )}
-                {(picked.has_login || (picked.settings||[]).length>0) && (
-                  <div className="grid sm:grid-cols-2 gap-2">
-                    {(picked.settings||[]).length ? (picked.settings||[]).map(s=>{
-                      const k = s.name==='apikey'?'api_key':s.name;
-                      const isSecret = (s.type||'').includes('password') || /pass|key|cookie|token/i.test(s.name||'');
-                      if (!['username','password','cookie','api_key','apikey'].includes(k) && k!=='api_key') {
-                        // map unknown to extra via cookie field skip - show common only
-                      }
-                      if (!['username','password','cookie','api_key'].includes(k) && k!=='apikey') return null;
-                      const fk = k==='apikey'?'api_key':k;
-                      return (
-                        <label key={s.name} className="form-control">
-                          <span className="label-text text-xs">{s.label||s.name}</span>
-                          <input className="input input-bordered input-sm" type={isSecret?'password':'text'}
-                            value={form[fk]||''} onChange={e=>setForm(f=>({...f,[fk]:e.target.value}))} />
-                        </label>
-                      );
-                    }) : (
-                      <>
-                        <label className="form-control"><span className="label-text text-xs">Username</span>
-                          <input className="input input-bordered input-sm" value={form.username} onChange={e=>setForm(f=>({...f,username:e.target.value}))} /></label>
-                        <label className="form-control"><span className="label-text text-xs">Password</span>
-                          <input className="input input-bordered input-sm" type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} /></label>
-                        <label className="form-control"><span className="label-text text-xs">Cookie</span>
-                          <input className="input input-bordered input-sm" value={form.cookie} onChange={e=>setForm(f=>({...f,cookie:e.target.value}))} /></label>
-                        <label className="form-control"><span className="label-text text-xs">API key</span>
-                          <input className="input input-bordered input-sm" type="password" value={form.api_key} onChange={e=>setForm(f=>({...f,api_key:e.target.value}))} /></label>
-                      </>
-                    )}
-                  </div>
-                )}
-                <label className="label cursor-pointer justify-start gap-2">
-                  <input type="checkbox" className="toggle toggle-sm" checked={form.use_flaresolverr}
-                    onChange={e=>setForm(f=>({...f,use_flaresolverr:e.target.checked}))} />
-                  <span className="label-text text-xs">Use FlareSolverr / CF bypass</span>
-                </label>
-                <div className="modal-action">
-                  <button className="btn btn-sm" onClick={()=>setPicked(null)}>Back</button>
-                  <button className="btn btn-sm btn-primary" disabled={busy||!form.name} onClick={addPicked}>
-                    {busy?'Adding…':'Add Indexer'}
-                  </button>
-                </div>
-              </div>
-            )}
-            {!picked && (
-              <div className="modal-action">
-                <button className="btn btn-sm" onClick={()=>setShowAdd(false)}>Close</button>
-              </div>
-            )}
-          </div>
-          <div className="modal-backdrop bg-black/50" onClick={()=>setShowAdd(false)} />
+      {msg && <div className="alert alert-info text-sm py-2">{msg}</div>}
+
+      <input className="input input-bordered input-sm w-full max-w-md" placeholder="Filter list…" value={filter} onChange={e => setFilter(e.target.value)} />
+
+      {tab === "added" && (
+        <div className="overflow-x-auto">
+          <table className="table table-sm">
+            <thead>
+              <tr>
+                <th>Name</th><th>Kind</th><th>URL</th><th>Tags</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).filter(r => filt(r.name)).map(r => (
+                <tr key={r.id}>
+                  <td className="font-medium">{r.name}</td>
+                  <td><span className="badge badge-ghost badge-sm">{r.kind}</span></td>
+                  <td className="font-mono text-[10px] max-w-[12rem] truncate">{r.url}</td>
+                  <td>
+                    {r.use_flaresolverr && <span className="badge badge-warning badge-sm">FlareSolverr</span>}
+                    {r.kind === "cardigann" && <span className="badge badge-info badge-sm ml-1">Cardigann</span>}
+                  </td>
+                  <td className="text-xs">
+                    {r.last_error ? <span className="text-error">{r.last_error.slice(0, 40)}</span> :
+                      r.last_ok_at ? <span className="text-success">OK</span> : "—"}
+                  </td>
+                  <td className="flex gap-1">
+                    <button type="button" className="btn btn-xs" disabled={busy} onClick={() => testAdded(r.id)}>Test</button>
+                    <button type="button" className="btn btn-xs" onClick={() => toggleFlare(r)} title="Toggle FlareSolverr">
+                      {r.use_flaresolverr ? "Unflare" : "Flare"}
+                    </button>
+                    <button type="button" className="btn btn-xs btn-ghost text-error" onClick={() => removeIndexer(r.id)}>Del</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!items.length && <p className="text-sm opacity-50 p-4">No indexers yet — use Catalog, Prowlarr, or Jackett tab.</p>}
         </div>
       )}
+
+      {tab === "catalog" && (
+        <div className="grid lg:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div className="flex gap-2 flex-wrap">
+              <input className="input input-bordered input-sm flex-1" placeholder="Search definitions…" value={catalogQ}
+                onChange={e => setCatalogQ(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && loadCatalog(catalogQ, privacy)} />
+              <select className="select select-bordered select-sm" value={privacy} onChange={e => { setPrivacy(e.target.value); loadCatalog(catalogQ, e.target.value); }}>
+                <option value="">All</option>
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+              <button type="button" className="btn btn-sm" disabled={busy} onClick={() => loadCatalog(catalogQ, privacy)}>Search</button>
+            </div>
+            <div className="max-h-[28rem] overflow-auto border border-base-content/10 rounded-lg">
+              {(catalog || []).filter(c => filt(c.name || c.id)).map(c => (
+                <button key={c.id || c.name} type="button"
+                  className={"w-full text-left px-3 py-2 text-sm border-b border-base-content/5 hover:bg-base-200 "
+                    + (picked && picked.id === c.id ? "bg-primary/15" : "")}
+                  onClick={() => pickCatalog(c.id)}>
+                  <span className="font-medium">{c.name || c.id}</span>
+                  {c.privacy && <span className="badge badge-ghost badge-xs ml-2">{c.privacy}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+          <IndexerAddPanel form={form} setForm={setForm} picked={picked} testResult={testResult}
+            busy={busy} onTest={testPicked} onAdd={addPicked} />
+        </div>
+      )}
+
+      {tab === "prowlarr" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 items-center text-sm">
+            <span className={"badge " + (statusP?.test?.ok ? "badge-success" : "badge-warning")}>
+              {statusP?.configured ? (statusP?.test?.ok ? "Connected" : "Configured, unreachable") : "Not configured"}
+            </span>
+            <span className="opacity-50 text-xs">{statusP?.url || "Set URL + API key in Settings → Indexer connection"}</span>
+            <button type="button" className="btn btn-xs" disabled={busy} onClick={loadProwlarr}>Refresh</button>
+          </div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="max-h-[28rem] overflow-auto border border-base-content/10 rounded-lg">
+              {(prowlarr.indexers || []).filter(ix => filt(ix.name)).map(ix => (
+                <button key={ix.id} type="button"
+                  className={"w-full text-left px-3 py-2 text-sm border-b border-base-content/5 hover:bg-base-200 "
+                    + (picked && picked.source === "prowlarr" && picked.id === ix.id ? "bg-primary/15" : "")}
+                  onClick={() => pickProwlarr(ix)}>
+                  <div className="font-medium flex flex-wrap gap-1 items-center">
+                    {ix.name}
+                    {!ix.enable && <span className="badge badge-ghost badge-xs">disabled in Prowlarr</span>}
+                    {ix.needs_flaresolverr && <span className="badge badge-warning badge-xs">FlareSolverr</span>}
+                    {(ix.tags || []).slice(0, 3).map(t => <span key={t} className="badge badge-outline badge-xs">{t}</span>)}
+                  </div>
+                  <div className="text-[10px] opacity-50 font-mono truncate">{ix.torznab_url}</div>
+                </button>
+              ))}
+              {!prowlarr.indexers?.length && <p className="p-3 text-sm opacity-50">No indexers from Prowlarr yet.</p>}
+            </div>
+            <IndexerAddPanel form={form} setForm={setForm} picked={picked} testResult={testResult}
+              busy={busy} onTest={testPicked} onAdd={addPicked} />
+          </div>
+        </div>
+      )}
+
+      {tab === "jackett" && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 items-center text-sm">
+            <span className={"badge " + (statusJ?.configured ? "badge-success" : "badge-warning")}>
+              {statusJ?.configured ? "Jackett configured" : "Not configured"}
+            </span>
+            <button type="button" className="btn btn-xs" disabled={busy} onClick={loadJackett}>Refresh</button>
+            <button type="button" className="btn btn-xs" disabled={busy} onClick={async () => {
+              setBusy(true);
+              try {
+                const r = await fetch("/api/indexers/jackett/sync", { method: "POST" }).then(x => x.json());
+                setMsg("Jackett sync: " + JSON.stringify(r));
+                loadAdded();
+              } catch (e) { setMsg(String(e.message || e)); }
+              setBusy(false);
+            }}>Sync all configured</button>
+          </div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <div className="max-h-[28rem] overflow-auto border border-base-content/10 rounded-lg">
+              {(jackett.indexers || []).filter(ix => filt(ix.name)).map(ix => (
+                <button key={ix.id} type="button"
+                  className={"w-full text-left px-3 py-2 text-sm border-b border-base-content/5 hover:bg-base-200 "
+                    + (picked && picked.source === "jackett" && picked.id === ix.id ? "bg-primary/15" : "")}
+                  onClick={() => pickJackett(ix)}>
+                  <div className="font-medium">
+                    {ix.name}
+                    {ix.needs_flaresolverr && <span className="badge badge-warning badge-xs ml-1">FlareSolverr</span>}
+                  </div>
+                  <div className="text-[10px] opacity-50 font-mono truncate">{ix.torznab_url}</div>
+                </button>
+              ))}
+            </div>
+            <IndexerAddPanel form={form} setForm={setForm} picked={picked} testResult={testResult}
+              busy={busy} onTest={testPicked} onAdd={addPicked} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IndexerAddPanel({ form, setForm, picked, testResult, busy, onTest, onAdd }) {
+  if (!picked) {
+    return (
+      <div className="card bg-base-200 border border-base-content/10 h-fit">
+        <div className="card-body text-sm opacity-50">Select an indexer from the list to configure URL, tags, Test, and Add.</div>
+      </div>
+    );
+  }
+  const urls = form.urls || (form.url ? [form.url] : []);
+  return (
+    <div className="card bg-base-200 border border-base-content/10 h-fit">
+      <div className="card-body gap-2 p-4">
+        <h3 className="font-semibold">{form.name || picked.name}</h3>
+        <p className="text-xs opacity-50">Source: {picked.source || "catalog"}</p>
+        {(form.tags || []).length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {form.tags.map(t => <span key={t} className="badge badge-outline badge-sm">{t}</span>)}
+          </div>
+        )}
+        <label className="form-control">
+          <span className="label-text text-xs">Display name</span>
+          <input className="input input-bordered input-sm" value={form.name || ""}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </label>
+        <label className="form-control">
+          <span className="label-text text-xs">Base / Torznab URL</span>
+          {urls.length > 1 ? (
+            <select className="select select-bordered select-sm font-mono text-xs" value={form.url}
+              onChange={e => setForm(f => ({ ...f, url: e.target.value }))}>
+              {urls.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          ) : (
+            <input className="input input-bordered input-sm font-mono text-xs" value={form.url || ""}
+              onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
+          )}
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" className="checkbox checkbox-sm checkbox-warning"
+            checked={!!form.use_flaresolverr}
+            onChange={e => setForm(f => ({ ...f, use_flaresolverr: e.target.checked }))} />
+          <span className="text-sm">FlareSolverr / Cloudflare tag</span>
+        </label>
+        <label className="form-control">
+          <span className="label-text text-xs">Priority</span>
+          <input type="number" className="input input-bordered input-sm w-24" value={form.priority}
+            onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) || 25 }))} />
+        </label>
+        {picked.source === "catalog" && (
+          <div className="grid grid-cols-2 gap-2">
+            <input className="input input-bordered input-sm" placeholder="Username" value={form.username || ""}
+              onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
+            <input type="password" className="input input-bordered input-sm" placeholder="Password" value={form.password || ""}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+            <input className="input input-bordered input-sm col-span-2" placeholder="Cookie (optional)" value={form.cookie || ""}
+              onChange={e => setForm(f => ({ ...f, cookie: e.target.value }))} />
+            <input className="input input-bordered input-sm col-span-2" placeholder="API key (optional)" value={form.api_key || ""}
+              onChange={e => setForm(f => ({ ...f, api_key: e.target.value }))} />
+          </div>
+        )}
+        {testResult && (
+          <div className={"alert text-xs py-2 " + (testResult.ok ? "alert-success" : "alert-warning")}>
+            {testResult.ok ? (testResult.note || "Test OK") : (testResult.error || "Test failed")}
+          </div>
+        )}
+        <div className="flex gap-2 mt-1">
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={onTest}>Test</button>
+          <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={onAdd}>Add to MediaOs</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -6010,7 +6713,7 @@ function IntegrationsPage() {
 
 
 function WantedPage() {
-  const [data, setData] = useState({ movies:[], episodes:[], music:[], books:[], audiobooks:[], counts:{} });
+  const [data, setData] = useState({ movies:[], episodes:[], music:[], books:[], audiobooks:[], adult:[], counts:{} });
   const [tab, setTab] = useState('movies');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(null);
@@ -6020,7 +6723,7 @@ function WantedPage() {
   async function searchOne(kind, id) {
     setBusy(kind+'-'+id); setMsg(null);
     try {
-      const fn = {movie:api.wanted.searchMovie, episode:api.wanted.searchEpisode, music:api.wanted.searchMusic, book:api.wanted.searchBook, audiobook:api.wanted.searchAudiobook}[kind];
+      const fn = {movie:api.wanted.searchMovie, episode:api.wanted.searchEpisode, music:api.wanted.searchMusic, book:api.wanted.searchBook, audiobook:api.wanted.searchAudiobook, adult:api.wanted.searchAdult}[kind];
       const r = await fn(id);
       setMsg(r.found ? ('Grabbed: '+(r.title||'release')+' ('+(r.indexer||'?')+')') : (r.error || 'No release found'));
       load();
@@ -6044,6 +6747,7 @@ function WantedPage() {
     { key:'music', label:'Music ('+(c.music||0)+')' },
     { key:'books', label:'Books ('+(c.books||0)+')' },
     { key:'audiobooks', label:'Audiobooks ('+(c.audiobooks||0)+')' },
+    { key:'adult', label:'Adult ('+(c.adult||0)+')' },
   ];
   return (
     <div className="space-y-6 max-w-5xl">
@@ -6096,6 +6800,10 @@ function WantedPage() {
             {(data.audiobooks||[]).length===0?<tr><td colSpan={4} className="opacity-40">No missing audiobooks</td></tr>:
               data.audiobooks.map(a=>(<tr key={a.id}><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.overview||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
               <td><button className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('audiobook',a.id)}>{busy==='audiobook-'+a.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
+          {tab==='adult' && <table className="table table-sm"><thead><tr><th>Title</th><th>Year</th><th>Status</th><th></th></tr></thead><tbody>
+            {(data.adult||[]).length===0?<tr><td colSpan={4} className="opacity-40">No missing adult titles</td></tr>:
+              data.adult.map(a=>(<tr key={a.id}><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.year||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
+              <td><button className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('adult',a.id)}>{busy==='adult-'+a.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
         </div>
       )}
     </div>
@@ -6286,553 +6994,359 @@ function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
 }
 
 function SetupWizardPage({ onDone }) {
+  /* Simple first-run: Welcome → Admin → Modules → Paths → Finish (everything else automatic) */
   const STEPS = [
-    { id:'welcome', title:'Welcome' },
-    { id:'modules', title:'Modules' },
-    { id:'metadata', title:'Metadata' },
-    { id:'library', title:'Libraries' },
-    { id:'downloads', title:'Downloads' },
-    { id:'indexers', title:'Indexers' },
-    { id:'subtitles', title:'Subtitles' },
-    { id:'usenet', title:'Usenet' },
-    { id:'vpn', title:'VPN' },
-    { id:'youtube', title:'YouTube' },
-    { id:'integrations', title:'Integrations' },
-    { id:'admin', title:'Admin' },
-    { id:'finish', title:'Finish' },
+    { id: "welcome", title: "Welcome" },
+    { id: "admin", title: "Admin & users" },
+    { id: "modules", title: "Libraries" },
+    { id: "paths", title: "Folders" },
+    { id: "finish", title: "Finish" },
+  ];
+  const OPTIONAL_MODULES = [
+    { id: "music", label: "Music", hint: "Lidarr-style" },
+    { id: "books", label: "Books", hint: "eBooks" },
+    { id: "audiobooks", label: "Audiobooks", hint: "" },
+    { id: "comics", label: "Comics", hint: "" },
+    { id: "manga", label: "Manga", hint: "" },
+    { id: "youtube", label: "YouTube", hint: "Channels & playlists" },
+    { id: "livetv", label: "Live TV", hint: "IPTV + EPG auto" },
+    { id: "adult", label: "Adult", hint: "Requires 5-digit passcode" },
   ];
   const [step, setStep] = useState(0);
-  const [st, setSt] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState("");
   const [pathCheck, setPathCheck] = useState(null);
-  const [prowlarrList, setProwlarrList] = useState(null);
-  const [prowlarrSelected, setProwlarrSelected] = useState([]);
-  const [prowlarrBusy, setProwlarrBusy] = useState(false);
-  const [prowlarrMsg, setProwlarrMsg] = useState('');
-  const [selectedModules, setSelectedModules] = useState(['movies','tv']); // core always
-  const [moduleCatalog, setModuleCatalog] = useState([]);
+  const [selectedModules, setSelectedModules] = useState(["movies", "tv"]);
+  const [adultPin, setAdultPin] = useState("");
+  const [adultPin2, setAdultPin2] = useState("");
+  const [admin, setAdmin] = useState({ username: "admin", password: "", password2: "", role: "admin" });
+  const [extraUsers, setExtraUsers] = useState([]); // {username,password,role}
   const [form, setForm] = useState({
-    tmdb_api_key:'', tvdb_api_key:'', tvdb_pin:'', comicvine_api_key:'', trakt_client_id:'', trakt_access_token:'',
-    movies_library_path:'/movies', tv_library_path:'/tv', music_library_path:'/music',
-    books_library_path:'/books', audiobooks_library_path:'/audiobooks',
-    podcasts_library_path:'/podcasts', comics_library_path:'/comics',
-    manga_library_path:'/manga', youtube_library_path:'/youtube', downloads_path:'/downloads',
-    movie_naming_folder:'{title} ({year})', episode_naming:'{series} - S{season:00}E{episode:00} - {title}',
-    flaresolverr_url:'', cf_bypass_enabled:true, cf_impersonate:'chrome124',
-    sabnzbd_category:'mediaos', nzbget_category:'mediaos', usenet_client:'auto', allow_usenet:true,
-    vpn_enabled:false, vpn_gluetun_url:'http://gluetun:8000', vpn_expected_country:'', vpn_kill_switch:true,
-    auth_api_key:'', youtube_backlog_download:false,
-    qbit_url:'http://qbittorrent:8080', qbit_username:'admin', qbit_password:'',
-    torrent_client:'qbittorrent',
-    transmission_url:'', transmission_username:'', transmission_password:'',
-    deluge_url:'', deluge_password:'', rtorrent_url:'', aria2_url:'', aria2_secret:'',
-    sabnzbd_url:'', sabnzbd_api_key:'', nzbget_url:'', nzbget_username:'', nzbget_password:'',
-    prowlarr_url:'', prowlarr_api_key:'', jackett_url:'', jackett_api_key:'',
-    cardigann_enabled:true, min_seeders:3,
-    opensubtitles_api_key:'', opensubtitles_username:'', opensubtitles_password:'',
-    subdl_api_key:'', subtitle_languages:'en', subtitle_hearing_impaired:'include',
-    subtitle_providers:'sidecar,opensubtitles,subdl,addic7ed,subscene',
-    nntp_host:'', nntp_port:563, nntp_user:'', nntp_pass:'', nntp_ssl:true,
-    vpn_provider:'', vpn_username:'', vpn_password:'', vpn_killswitch:false, vpn_interface:'',
-    youtube_ytdlp_path:'yt-dlp', youtube_format:'best[height<=1080]',
-    youtube_auto_download_default:true, youtube_cookies_path:'', youtube_cookies_from_browser:'',
-    youtube_sponsorblock_remove:'sponsor,selfpromo,interaction,intro,outro,preview,music_offtopic',
-    youtube_sponsorblock_mark:'',
-    real_debrid_token:'', torbox_api_key:'', alldebrid_api_key:'', premiumize_api_key:'',
-    debridlink_api_key:'', putio_token:'', easydebrid_api_key:'', offcloud_api_key:'',
-    movie_download_mode:'download',
-    jellyfin_url:'', jellyfin_api_key:'', emby_url:'', emby_api_key:'',
-    apprise_url:'', discord_webhook_url:'', telegram_bot_token:'', telegram_chat_id:'',
-    auth_username:'admin', auth_password:'', arr_api_key:'',
+    movies_library_path: "/movies",
+    tv_library_path: "/tv",
+    music_library_path: "/music",
+    books_library_path: "/books",
+    audiobooks_library_path: "/audiobooks",
+    comics_library_path: "/comics",
+    manga_library_path: "/manga",
+    youtube_library_path: "/youtube",
+    adult_library_path: "/adult",
+    downloads_path: "/downloads",
+    podcasts_library_path: "/podcasts",
   });
-  const set = (k,v)=> setForm(f=>({...f,[k]:v}));
-  const Field = ({label, k, type='text', placeholder='', hint}) => (
-    <label className="form-control w-full">
-      <span className="label-text text-xs opacity-70">{label}</span>
-      <input className="input input-bordered input-sm w-full" type={type} value={form[k]===undefined||form[k]===null?'':form[k]}
-        placeholder={placeholder} onChange={e=>set(k, type==='number'?Number(e.target.value):e.target.value)} />
-      {hint && <span className="label-text-alt opacity-50 text-[10px]">{hint}</span>}
-    </label>
-  );
-  const Toggle = ({label, k}) => (
-    <label className="label cursor-pointer justify-start gap-3 py-1">
-      <input type="checkbox" className="toggle toggle-sm" checked={!!form[k]} onChange={e=>set(k, e.target.checked)} />
-      <span className="label-text text-sm">{label}</span>
-    </label>
-  );
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  useEffect(()=>{
-    api.setup.status().then(setSt).catch(()=>{});
-    fetch('/api/setup/modules').then(r=>r.json()).then(d=>{
-      setModuleCatalog(d.catalog||[]);
-      if (d.enabled && d.enabled.length) setSelectedModules(d.enabled);
-    }).catch(()=>{});
-    fetch('/api/setup/defaults').then(r=>r.json()).then(d=>{
-      if (!d || typeof d !== 'object') return;
-      setForm(f => {
-        const next = {...f};
-        Object.keys(d).forEach(k=>{
-          if (d[k] === '__SET__') return; // keep blank for secrets already configured
-          if (d[k] !== '' && d[k] !== null && d[k] !== undefined) next[k] = d[k];
-        });
-        return next;
-      });
-      setMsg('Loaded current settings');
-    }).catch(()=>{});
+  useEffect(() => {
+    api.setup.status().catch(() => null);
+    fetch("/api/setup/defaults").then(r => r.json()).then(d => {
+      if (d && typeof d === "object") {
+        setForm(f => ({
+          ...f,
+          movies_library_path: d.movies_library_path || f.movies_library_path,
+          tv_library_path: d.tv_library_path || f.tv_library_path,
+          music_library_path: d.music_library_path || f.music_library_path,
+          downloads_path: d.downloads_path || f.downloads_path,
+        }));
+      }
+    }).catch(() => {});
   }, []);
 
-  const applyPartial = async (mark) => {
-    setSaving(true); setMsg('');
-    try {
-      const body = {...form, mark_complete: !!mark};
-      // drop empty secrets so we don't wipe existing
-      Object.keys(body).forEach(k=>{
-        if (body[k] === '' || body[k] === null) delete body[k];
-      });
-      const url = mark ? '/api/setup/complete' : '/api/setup/apply';
-      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(x=>x.json());
-      setMsg(mark ? 'Setup complete' : `Saved ${r.count||0} fields`);
-      if (mark && onDone) onDone();
-      return r;
-    } catch(e) {
-      setMsg(String(e.message||e));
-    } finally { setSaving(false); }
-  };
+  function toggleMod(id) {
+    if (id === "movies" || id === "tv") return; // mandatory
+    setSelectedModules(m => m.includes(id) ? m.filter(x => x !== id) : [...m, id]);
+  }
 
-  const checkPaths = async () => {
-    setSaving(true);
+  function validateStep() {
+    if (step === 1) {
+      if (!admin.username.trim()) return "Admin username required";
+      if ((admin.password || "").length < 4) return "Admin password (min 4 characters)";
+      if (admin.password !== admin.password2) return "Passwords do not match";
+    }
+    if (step === 2) {
+      if (selectedModules.includes("adult")) {
+        if (!/^\d{5}$/.test(adultPin)) return "Adult module needs a 5-digit passcode";
+        if (adultPin !== adultPin2) return "Passcodes do not match";
+      }
+    }
+    if (step === 3) {
+      if (!(form.movies_library_path || "").trim()) return "Movies path required";
+      if (!(form.tv_library_path || "").trim()) return "TV path required";
+    }
+    return null;
+  }
+
+  async function checkPaths() {
+    setMsg("Checking folders…");
     try {
-      const r = await fetch('/api/setup/check-paths', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(form),
-      }).then(x=>x.json());
-      setPathCheck(r.results||[]);
-      setMsg('Path check finished');
-    } catch(e) { setMsg(String(e.message||e)); }
+      const body = {
+        movies_library_path: form.movies_library_path,
+        tv_library_path: form.tv_library_path,
+        downloads_path: form.downloads_path,
+      };
+      if (selectedModules.includes("music")) body.music_library_path = form.music_library_path;
+      if (selectedModules.includes("books")) body.books_library_path = form.books_library_path;
+      if (selectedModules.includes("adult")) body.adult_library_path = form.adult_library_path;
+      const r = await fetch("/api/setup/check-paths", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(x => x.json());
+      setPathCheck(r);
+      setMsg(r.ok ? "Paths look good (missing folders can be created by mounts)." : "Some paths need attention — you can still continue if Docker volumes will create them.");
+    } catch (e) {
+      setMsg(String(e.message || e));
+    }
+  }
+
+  async function finish(mark) {
+    const err = validateStep();
+    if (err) { setMsg(err); return; }
+    setSaving(true); setMsg("");
+    try {
+      const payload = {
+        mark_complete: !!mark,
+        auto_defaults: true,
+        auth_username: admin.username.trim(),
+        auth_password: admin.password,
+        admin_role: admin.role || "admin",
+        enabled_modules: selectedModules,
+        extra_users: extraUsers.filter(u => u.username && u.password),
+        movies_library_path: form.movies_library_path,
+        tv_library_path: form.tv_library_path,
+        downloads_path: form.downloads_path,
+        music_library_path: form.music_library_path,
+        books_library_path: form.books_library_path,
+        audiobooks_library_path: form.audiobooks_library_path,
+        comics_library_path: form.comics_library_path,
+        manga_library_path: form.manga_library_path,
+        youtube_library_path: form.youtube_library_path,
+        podcasts_library_path: form.podcasts_library_path,
+        adult_library_path: form.adult_library_path,
+      };
+      if (selectedModules.includes("adult") && adultPin) {
+        payload.adult_passcode = adultPin;
+      }
+      const url = mark ? "/api/setup/complete" : "/api/setup/apply";
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(x => x.json());
+      if (!r.ok && r.detail) throw new Error(typeof r.detail === "string" ? r.detail : JSON.stringify(r.detail));
+      setMsg(r.message || "Saved. Indexers, Live TV EPG, and definitions sync in the background.");
+      if (mark && onDone) setTimeout(() => onDone(), 600);
+    } catch (e) {
+      setMsg(String(e.message || e));
+    }
     setSaving(false);
-  };
+  }
 
-  const next = async () => {
-    if (STEPS[step]?.id === 'modules') {
-      try {
-        await fetch('/api/setup/modules', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ enabled: selectedModules }),
-        });
-      } catch(e) { console.warn('modules save', e); }
-    }
-    if (step < STEPS.length - 1) {
-      await applyPartial(false);
-      setStep(s=>s+1);
-    } else {
-      await applyPartial(true);
-    }
-  };
-  const back = () => setStep(s=>Math.max(0, s-1));
-  const cur = STEPS[step];
+  function next() {
+    const err = validateStep();
+    if (err) { setMsg(err); return; }
+    setMsg("");
+    setStep(s => Math.min(s + 1, STEPS.length - 1));
+  }
+  function back() {
+    setMsg("");
+    setStep(s => Math.max(s - 1, 0));
+  }
+
+  const id = STEPS[step].id;
 
   return (
-    <div className="min-h-[70vh] flex items-start justify-center py-6">
-      <div className="w-full max-w-3xl space-y-4">
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">Setup wizard</h1>
-          <p className="text-sm opacity-60">Full first-run config — paths, clients, logins, integrations. Everything is editable later under Settings.</p>
+    <div className="max-w-2xl mx-auto space-y-6 py-4">
+      <div className="flex items-center gap-3">
+        <LogoMark size={40} />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Get started</h1>
+          <p className="text-sm opacity-50">A few choices — downloads, indexers, and APIs configure themselves.</p>
         </div>
-        <ul className="steps steps-horizontal w-full text-[10px] overflow-x-auto">
-          {STEPS.map((s,i)=>(
-            <li key={s.id} className={'step '+(i<=step?'step-primary':'')} onClick={()=>setStep(i)} style={{cursor:'pointer'}}>{s.title}</li>
-          ))}
-        </ul>
-        <div className="card bg-base-200 shadow-md">
-          <div className="card-body gap-4 p-5">
-            <h2 className="card-title text-lg">{cur.title}</h2>
+      </div>
 
-            {cur.id==='welcome' && (
-              <div className="space-y-3 text-sm opacity-80">
-                <p>This wizard configures everything needed to replace Sonarr, Radarr, Lidarr, Readarr, Bazarr, Prowlarr, and Overseerr in one app.</p>
-                <ol className="list-decimal list-inside space-y-1 text-xs opacity-70">
-                  <li>Metadata API keys (TMDb required)</li>
-                  <li>Library folders + incomplete downloads path</li>
-                  <li>Torrent / Usenet clients</li>
-                  <li>Indexers (builtins work without Prowlarr)</li>
-                  <li>Subtitles + YouTube login (optional)</li>
-                  <li>Debrid, Jellyfin/Emby, Discord/Telegram</li>
-                  <li>Admin account</li>
-                </ol>
-                {st && !st.complete && st.steps?.length>0 && (
-                  <div className="alert alert-warning text-xs"><span>Suggested: {st.steps.join('   ')}</span></div>
-                )}
-              </div>
-            )}
+      <ul className="steps steps-horizontal w-full text-xs">
+        {STEPS.map((s, i) => (
+          <li key={s.id} className={"step " + (i <= step ? "step-primary" : "")}>{s.title}</li>
+        ))}
+      </ul>
 
+      {msg && <div className="alert alert-info text-sm py-2">{msg}</div>}
 
-            {cur.id==='modules' && (
-              <div className="space-y-4">
-                <p className="text-sm opacity-80">Choose which library types to enable. <strong>Movies</strong> and <strong>TV</strong> are always on (core). You can add more later from the Module Store.</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {(moduleCatalog.length ? moduleCatalog : [
-                    {id:'movies',label:'Movies',description:'Movie library — always enabled',core:true,enabled:true},
-                    {id:'tv',label:'TV Shows',description:'Series & episodes — always enabled',core:true,enabled:true},
-                    {id:'music',label:'Music',description:'Artists, albums, tracks + completeness',core:false},
-                    {id:'books',label:'Books',description:'eBooks with organize & monitoring',core:false},
-                    {id:'audiobooks',label:'Audiobooks',description:'Audiobook library + Audnexus',core:false},
-                    {id:'comics',label:'Comics / Manga',description:'Pull-list, story arcs, metatagging',core:false},
-                    {id:'livetv',label:'Live TV',description:'Channels, EPG, portal scan',core:false},
-                  ]).map(m => {
-                    const on = selectedModules.includes(m.id);
-                    const locked = !!m.core;
-                    return (
-                      <label key={m.id} className={"flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition " + (on ? "border-primary bg-primary/10" : "border-base-content/10 bg-base-300/30")}>
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-primary mt-1"
-                          checked={on}
-                          disabled={locked}
-                          onChange={(e)=>{
-                            if (locked) return;
-                            setSelectedModules(prev => e.target.checked
-                              ? [...new Set([...prev, m.id])]
-                              : prev.filter(x => x !== m.id));
-                          }}
-                        />
-                        <div className="min-w-0">
-                          <div className="font-medium text-sm flex items-center gap-2">
-                            {m.label}
-                            {locked && <span className="badge badge-xs badge-primary">Core</span>}
-                          </div>
-                          <div className="text-xs opacity-60 mt-0.5">{m.description}</div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-                <p className="text-xs opacity-50">Tip: start with Movies + TV only for the simplest experience. Enable Music, Books, Comics, etc. when you need them.</p>
-              </div>
-            )}
-
-            {cur.id==='metadata' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">API keys for metadata providers. TMDb is required for movies and TV.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="TMDb API key *" k="tmdb_api_key" type="password" hint="themoviedb.org → Settings → API" />
-                  <Field label="TVDb API key" k="tvdb_api_key" type="password" hint="Optional; TMDb covers most TV" />
-                  <Field label="TVDb PIN" k="tvdb_pin" type="password" hint="Required by some TVDb v4 apps" />
-                  <Field label="ComicVine API key" k="comicvine_api_key" type="password" hint="comicvine.gamespot.com for comics" />
-                  <Field label="Trakt client ID" k="trakt_client_id" hint="Smart lists / watchlist import" />
-                  <Field label="Trakt access token" k="trakt_access_token" type="password" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='library' && (
-              <div className="space-y-4">
-                <p className="text-sm opacity-70">Where finished media is stored, and where incomplete downloads land. Map these to host folders in Docker compose.</p>
-                <div className="alert alert-info text-xs py-2">Downloads path is the incomplete / staging folder (qBittorrent save path). Library paths are the final organized libraries.</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Downloads (incomplete) *" k="downloads_path" placeholder="/downloads" hint="qB / SABnzbd incomplete folder" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Movie & TV</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Movies library *" k="movies_library_path" placeholder="/movies" />
-                  <Field label="TV library *" k="tv_library_path" placeholder="/tv" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Music & reading</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Music" k="music_library_path" placeholder="/music" />
-                  <Field label="Books" k="books_library_path" placeholder="/books" />
-                  <Field label="Audiobooks" k="audiobooks_library_path" placeholder="/audiobooks" />
-                  <Field label="Podcasts" k="podcasts_library_path" placeholder="/podcasts" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Comics & YouTube</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Comics" k="comics_library_path" placeholder="/comics" />
-                  <Field label="Manga" k="manga_library_path" placeholder="/manga" />
-                  <Field label="YouTube" k="youtube_library_path" placeholder="/youtube" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Naming templates</div>
-                <div className="grid gap-2 sm:grid-cols-1">
-                  <Field label="Movie folder template" k="movie_naming_folder" placeholder="{title} ({year})" hint="Tokens: {title} {year} {tmdb_id}" />
-                  <Field label="Episode file template" k="episode_naming" placeholder="{series} - S{season:00}E{episode:00} - {title}" />
-                </div>
-                <button type="button" className="btn btn-sm btn-outline" disabled={saving} onClick={checkPaths}>Verify paths (create if missing)</button>
-                {pathCheck && (
-                  <div className="overflow-x-auto">
-                    <table className="table table-xs">
-                      <thead><tr><th>Path</th><th>Exists</th><th>Writable</th><th>Note</th></tr></thead>
-                      <tbody>
-                        {pathCheck.map(r=>(
-                          <tr key={r.key}>
-                            <td className="font-mono text-[10px]">{r.path||'—'}</td>
-                            <td>{r.exists?'✓':'✗'}</td>
-                            <td>{r.writable?'✓':'✗'}</td>
-                            <td className="text-[10px] opacity-60">{r.note||r.key}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {cur.id==='downloads' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Primary torrent client and optional Usenet downloaders. Category defaults are set automatically (mediaos-tv, mediaos-comics, …).</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Active torrent client" k="torrent_client" placeholder="qbittorrent" hint="qbittorrent | transmission | deluge | rtorrent | aria2" />
-                  <Field label="Downloads path" k="downloads_path" placeholder="/downloads" />
-                  <Field label="qBittorrent URL" k="qbit_url" placeholder="http://qbittorrent:8080" />
-                  <Field label="qB username" k="qbit_username" />
-                  <Field label="qB password" k="qbit_password" type="password" />
-                  <Field label="Transmission URL" k="transmission_url" placeholder="http://transmission:9091" />
-                  <Field label="Deluge URL" k="deluge_url" placeholder="http://deluge:8112" />
-                  <Field label="Deluge password" k="deluge_password" type="password" />
-                  <Field label="rTorrent URL" k="rtorrent_url" placeholder="http://rtorrent:8080" />
-                  <Field label="aria2 URL" k="aria2_url" placeholder="http://aria2:6800/jsonrpc" />
-                  <Field label="aria2 secret" k="aria2_secret" type="password" />
-                  <Field label="SABnzbd URL" k="sabnzbd_url" placeholder="http://sabnzbd:8080" />
-                  <Field label="SABnzbd API key" k="sabnzbd_api_key" type="password" />
-                  <Field label="NZBGet URL" k="nzbget_url" placeholder="http://nzbget:6789" />
-                  <Field label="NZBGet user" k="nzbget_username" />
-                  <Field label="NZBGet password" k="nzbget_password" type="password" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='indexers' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Builtin public indexers work out of the box. Connect <strong>Prowlarr</strong> to pick which indexers to import, or Jackett / Cardigann for extras.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Prowlarr URL" k="prowlarr_url" placeholder="http://prowlarr:9696" />
-                  <Field label="Prowlarr API key" k="prowlarr_api_key" type="password" />
-                  <Field label="Jackett URL" k="jackett_url" placeholder="http://jackett:9117" />
-                  <Field label="Jackett API key" k="jackett_api_key" type="password" />
-                  <Field label="Min seeders" k="min_seeders" type="number" />
-                  <Toggle label="Enable Cardigann definitions" k="cardigann_enabled" />
-                  <Field label="FlareSolverr URL" k="flaresolverr_url" placeholder="http://flaresolverr:8191" />
-                  <Toggle label="Built-in CF bypass (curl_cffi)" k="cf_bypass_enabled" />
-                  <Field label="CF impersonate profile" k="cf_impersonate" placeholder="chrome124" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Pick indexers from Prowlarr</div>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <button type="button" className="btn btn-sm btn-primary" disabled={prowlarrBusy || !form.prowlarr_url || !form.prowlarr_api_key}
-                    onClick={async ()=>{
-                      setProwlarrBusy(true); setProwlarrMsg('');
-                      try {
-                        const q = new URLSearchParams({ url: form.prowlarr_url, api_key: form.prowlarr_api_key });
-                        const r = await fetch('/api/setup/prowlarr/indexers?'+q).then(x=>x.json());
-                        if (!r.ok) { setProwlarrMsg(r.error || 'Failed to list'); setProwlarrList([]); }
-                        else {
-                          setProwlarrList(r.indexers || []);
-                          setProwlarrSelected((r.indexers||[]).filter(i=>i.enable).map(i=>i.id));
-                          setProwlarrMsg((r.count||0)+' indexer(s) found — select which to import');
-                        }
-                      } catch(e) { setProwlarrMsg(String(e)); }
-                      finally { setProwlarrBusy(false); }
-                    }}>Load from Prowlarr</button>
-                  <button type="button" className="btn btn-sm btn-outline" disabled={prowlarrBusy || !prowlarrSelected.length}
-                    onClick={async ()=>{
-                      setProwlarrBusy(true); setProwlarrMsg('');
-                      try {
-                        const r = await fetch('/api/setup/prowlarr/import', {
-                          method:'POST', headers:{'Content-Type':'application/json'},
-                          body: JSON.stringify({
-                            url: form.prowlarr_url, api_key: form.prowlarr_api_key,
-                            indexer_ids: prowlarrSelected, enable_all: false,
-                          }),
-                        }).then(x=>x.json());
-                        setProwlarrMsg(r.ok
-                          ? `Imported: +${r.added||0} ~${r.updated||0} (skipped ${r.skipped||0})`
-                          : (r.error || 'Import failed'));
-                      } catch(e) { setProwlarrMsg(String(e)); }
-                      finally { setProwlarrBusy(false); }
-                    }}>Import selected</button>
-                  <button type="button" className="btn btn-sm btn-ghost" disabled={!prowlarrList?.length}
-                    onClick={()=>setProwlarrSelected((prowlarrList||[]).map(i=>i.id))}>Select all</button>
-                  <button type="button" className="btn btn-sm btn-ghost" disabled={!prowlarrSelected.length}
-                    onClick={()=>setProwlarrSelected([])}>Clear</button>
-                </div>
-                {prowlarrMsg && <p className="text-xs opacity-70">{prowlarrMsg}</p>}
-                {prowlarrList && prowlarrList.length > 0 && (
-                  <div className="max-h-56 overflow-y-auto border border-base-content/10 rounded-lg">
-                    <table className="table table-xs">
-                      <thead><tr><th></th><th>Name</th><th>Protocol</th><th>Priority</th><th>Enabled in Prowlarr</th></tr></thead>
-                      <tbody>
-                        {prowlarrList.map(ix=>(
-                          <tr key={ix.id} className="hover">
-                            <td>
-                              <input type="checkbox" className="checkbox checkbox-xs"
-                                checked={prowlarrSelected.includes(ix.id)}
-                                onChange={e=>{
-                                  setProwlarrSelected(prev => e.target.checked
-                                    ? [...prev, ix.id]
-                                    : prev.filter(id=>id!==ix.id));
-                                }} />
-                            </td>
-                            <td className="font-medium">{ix.name}</td>
-                            <td><span className="badge badge-ghost badge-xs">{ix.protocol}</span></td>
-                            <td>{ix.priority ?? '—'}</td>
-                            <td>{ix.enable ? '✓' : '○'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                <p className="text-[11px] opacity-50">On Finish, any remaining enabled Prowlarr indexers are also synced in the background. Built-ins (YTS, EZTV, 1337x…) always work without Prowlarr.</p>
-              </div>
-            )}
-
-            {cur.id==='subtitles' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Bazarr-style multi-provider subtitles after organize. OpenSubtitles login recommended.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="OpenSubtitles API key" k="opensubtitles_api_key" type="password" hint="opensubtitles.com consumer key" />
-                  <Field label="OpenSubtitles username" k="opensubtitles_username" />
-                  <Field label="OpenSubtitles password" k="opensubtitles_password" type="password" />
-                  <Field label="SubDL API key" k="subdl_api_key" type="password" />
-                  <Field label="Languages (comma ISO)" k="subtitle_languages" placeholder="en,es,fr" />
-                  <Field label="Hearing-impaired" k="subtitle_hearing_impaired" placeholder="prefer | include | exclude" />
-                  <Field label="Providers (comma)" k="subtitle_providers" placeholder="sidecar,opensubtitles,subdl,addic7ed,subscene" hint="Order = preference" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='usenet' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Optional NNTP for seekable Usenet streaming. SABnzbd/NZBGet above handle classic NZB downloads.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="NNTP host" k="nntp_host" />
-                  <Field label="NNTP port" k="nntp_port" type="number" placeholder="563" />
-                  <Field label="NNTP user" k="nntp_user" />
-                  <Field label="NNTP password" k="nntp_pass" type="password" />
-                  <Toggle label="SSL / TLS" k="nntp_ssl" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='vpn' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Optional Gluetun / VPN awareness (kill-switch hints for health checks).</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Toggle label="Enable VPN health checks" k="vpn_enabled" />
-                  <Field label="Provider" k="vpn_provider" placeholder="gluetun / mullvad / ..." />
-                  <Field label="Gluetun control URL" k="vpn_gluetun_url" placeholder="http://gluetun:8000" />
-                  <Field label="Expected country" k="vpn_expected_country" placeholder="NL" />
-                  <Field label="Interface" k="vpn_interface" placeholder="tun0" />
-                  <Field label="Username" k="vpn_username" />
-                  <Field label="Password" k="vpn_password" type="password" />
-                  <Toggle label="Kill-switch (block grabs if VPN down)" k="vpn_kill_switch" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='youtube' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Creator tracking uses public RSS (no Google API). Cookies unlock age-restricted / members videos.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="YouTube library path" k="youtube_library_path" placeholder="/youtube" />
-                  <Field label="yt-dlp path" k="youtube_ytdlp_path" placeholder="yt-dlp" />
-                  <Field label="Format" k="youtube_format" placeholder="best[height<=1080]" />
-                  <Toggle label="Auto-download new uploads" k="youtube_auto_download_default" />
-                  <Field label="Cookies file (Netscape path)" k="youtube_cookies_path" placeholder="/config/youtube-cookies.txt" hint="Export from browser extension" />
-                  <Field label="Cookies from browser" k="youtube_cookies_from_browser" placeholder="chrome | firefox | brave | edge" hint="Alternative to cookies file" />
-                  <Field label="SponsorBlock remove" k="youtube_sponsorblock_remove" placeholder="sponsor,selfpromo,..." />
-                  <Field label="SponsorBlock mark only" k="youtube_sponsorblock_mark" placeholder="optional" />
-                </div>
-                <div className="alert alert-info text-xs">Tip: place a Netscape cookies.txt at the path above, or set cookies-from-browser if yt-dlp can reach your browser profile.</div>
-              </div>
-            )}
-
-            {cur.id==='integrations' && (
-              <div className="space-y-4">
-                <p className="text-sm opacity-70">Debrid providers, media servers, and notification channels.</p>
-                <div className="divider text-xs opacity-50 my-1">Debrid</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Real-Debrid token" k="real_debrid_token" type="password" />
-                  <Field label="TorBox API key" k="torbox_api_key" type="password" />
-                  <Field label="AllDebrid API key" k="alldebrid_api_key" type="password" />
-                  <Field label="Premiumize API key" k="premiumize_api_key" type="password" />
-                  <Field label="Debrid-Link API key" k="debridlink_api_key" type="password" />
-                  <Field label="put.io token" k="putio_token" type="password" />
-                  <Field label="EasyDebrid API key" k="easydebrid_api_key" type="password" />
-                  <Field label="Offcloud API key" k="offcloud_api_key" type="password" />
-                  <Field label="Movie mode" k="movie_download_mode" placeholder="download | strm" hint="strm = stream via debrid without local file" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Media servers</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Jellyfin URL" k="jellyfin_url" placeholder="http://jellyfin:8096" />
-                  <Field label="Jellyfin API key" k="jellyfin_api_key" type="password" />
-                  <Field label="Emby URL" k="emby_url" placeholder="http://emby:8096" />
-                  <Field label="Emby API key" k="emby_api_key" type="password" />
-                </div>
-                <div className="divider text-xs opacity-50 my-1">Notifications</div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Discord webhook URL" k="discord_webhook_url" type="password" placeholder="https://discord.com/api/webhooks/..." />
-                  <Field label="Telegram bot token" k="telegram_bot_token" type="password" />
-                  <Field label="Telegram chat ID" k="telegram_chat_id" />
-                  <Field label="Apprise URL" k="apprise_url" type="password" placeholder="discord://... or other Apprise URI" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='admin' && (
-              <div className="space-y-3">
-                <p className="text-sm opacity-70">Optional login for the UI and *arr-compat API. Leave blank to keep auth disabled.</p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label="Admin username" k="auth_username" placeholder="admin" />
-                  <Field label="Admin password" k="auth_password" type="password" />
-                  <Field label="ARR / request API key" k="arr_api_key" type="password" hint="Jellyseerr-compatible X-Api-Key" />
-                  <Field label="Auth X-API-Key" k="auth_api_key" type="password" hint="Optional header auth for API clients" />
-                </div>
-              </div>
-            )}
-
-            {cur.id==='finish' && (
-              <div className="space-y-3 text-sm">
-                <p>Click <strong>Finish</strong> to save everything and mark setup complete. You can re-open this wizard anytime from Settings → Setup.</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                  {[
-                    ['TMDb', st?.has_tmdb], ['qBittorrent', st?.has_qbit], ['Indexer', st?.has_indexer],
-                    ['NNTP', st?.has_nntp], ['VPN', st?.has_vpn], ['Jellyfin', st?.has_jellyfin],
-                    ['Movies path', st?.movies_path_ok], ['TV path', st?.tv_path_ok],
-                  ].map(([label, ok])=>(
-                    <div key={label} className={'badge badge-lg gap-1 '+(ok?'badge-success':'badge-ghost')}>
-                      {ok?'✓':'○'} {label}
-                    </div>
-                  ))}
-                </div>
-                <button type="button" className="btn btn-sm btn-outline" disabled={saving} onClick={checkPaths}>Re-check library paths</button>
-                {pathCheck && (
-                  <ul className="text-xs space-y-1">
-                    {pathCheck.map(r=>(
-                      <li key={r.key} className={r.writable?'text-success':'text-warning'}>
-                        {r.writable?'✓':'!'} {r.key}: {r.path||'(empty)'} {r.note && `(${r.note})`}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <div className="card-actions justify-between items-center mt-2">
-              <button className="btn btn-ghost btn-sm" disabled={step===0 || saving} onClick={back}>Back</button>
-              <div className="flex gap-2 items-center">
-                {msg && <span className="text-xs opacity-60 max-w-[14rem] truncate">{msg}</span>}
-                <button className="btn btn-ghost btn-sm" onClick={()=>onDone && onDone()}>Skip</button>
-                <button className="btn btn-primary btn-sm" disabled={saving} onClick={next}>
-                  {saving?'Saving…':(step===STEPS.length-1?'Finish':'Save & continue')}
-                </button>
-              </div>
-            </div>
+      {id === "welcome" && (
+        <div className="card bg-base-200 border border-base-content/10">
+          <div className="card-body gap-3">
+            <h2 className="card-title text-lg">Welcome to MediaOs</h2>
+            <p className="text-sm opacity-70">
+              One app for Movies &amp; TV (required), plus optional Music, Books, Live TV, Adult, and more.
+              After this wizard, MediaOs will automatically seed indexers, Live TV guides, and quality profiles.
+            </p>
+            <ul className="text-sm opacity-70 list-disc ml-5 space-y-1">
+              <li>No need to configure Prowlarr/Jackett on day one — built-in indexers work immediately</li>
+              <li>Point folders at your disks (or keep Docker defaults)</li>
+              <li>Advanced clients (qBittorrent, VPN, Jellyfin) stay available under Settings later</li>
+            </ul>
           </div>
+        </div>
+      )}
+
+      {id === "admin" && (
+        <div className="card bg-base-200 border border-base-content/10">
+          <div className="card-body gap-3">
+            <h2 className="card-title text-lg">Admin account</h2>
+            <p className="text-xs opacity-50">This is the main login. You can add more users below.</p>
+            <label className="form-control">
+              <span className="label-text">Username</span>
+              <input className="input input-bordered" value={admin.username}
+                onChange={e => setAdmin(a => ({ ...a, username: e.target.value }))} />
+            </label>
+            <label className="form-control">
+              <span className="label-text">Password</span>
+              <input type="password" className="input input-bordered" value={admin.password}
+                onChange={e => setAdmin(a => ({ ...a, password: e.target.value }))} />
+            </label>
+            <label className="form-control">
+              <span className="label-text">Confirm password</span>
+              <input type="password" className="input input-bordered" value={admin.password2}
+                onChange={e => setAdmin(a => ({ ...a, password2: e.target.value }))} />
+            </label>
+            <label className="form-control">
+              <span className="label-text">Role</span>
+              <select className="select select-bordered" value={admin.role}
+                onChange={e => setAdmin(a => ({ ...a, role: e.target.value }))}>
+                <option value="admin">Admin (full access)</option>
+                <option value="user">User</option>
+              </select>
+            </label>
+
+            <div className="divider text-xs">Optional extra users</div>
+            {extraUsers.map((u, i) => (
+              <div key={i} className="grid grid-cols-3 gap-2">
+                <input className="input input-bordered input-sm" placeholder="Username" value={u.username}
+                  onChange={e => setExtraUsers(list => list.map((x, j) => j === i ? { ...x, username: e.target.value } : x))} />
+                <input type="password" className="input input-bordered input-sm" placeholder="Password" value={u.password}
+                  onChange={e => setExtraUsers(list => list.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} />
+                <select className="select select-bordered select-sm" value={u.role || "user"}
+                  onChange={e => setExtraUsers(list => list.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}>
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+            ))}
+            <button type="button" className="btn btn-sm btn-ghost w-fit"
+              onClick={() => setExtraUsers(x => [...x, { username: "", password: "", role: "user" }])}>
+              + Add user
+            </button>
+          </div>
+        </div>
+      )}
+
+      {id === "modules" && (
+        <div className="card bg-base-200 border border-base-content/10">
+          <div className="card-body gap-3">
+            <h2 className="card-title text-lg">What do you want to manage?</h2>
+            <p className="text-xs opacity-50">Movies and TV are always on. Toggle anything else.</p>
+            <div className="flex flex-wrap gap-2">
+              <span className="badge badge-primary badge-lg">Movies ✓</span>
+              <span className="badge badge-primary badge-lg">TV ✓</span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2 mt-2">
+              {OPTIONAL_MODULES.map(m => (
+                <label key={m.id} className={"flex items-start gap-3 p-3 rounded-lg border cursor-pointer "
+                  + (selectedModules.includes(m.id) ? "border-primary bg-primary/10" : "border-base-content/10")}>
+                  <input type="checkbox" className="checkbox checkbox-primary mt-0.5"
+                    checked={selectedModules.includes(m.id)} onChange={() => toggleMod(m.id)} />
+                  <span>
+                    <span className="font-medium text-sm">{m.label}</span>
+                    {m.hint && <span className="block text-xs opacity-50">{m.hint}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {selectedModules.includes("adult") && (
+              <div className="alert bg-base-300 mt-2 flex-col items-stretch gap-2">
+                <div className="font-semibold text-sm">Adult passcode (required — 5 digits)</div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <input type="password" inputMode="numeric" maxLength={5} className="input input-bordered"
+                    placeholder="•••••" value={adultPin} onChange={e => setAdultPin(e.target.value.replace(/\D/g, "").slice(0, 5))} />
+                  <input type="password" inputMode="numeric" maxLength={5} className="input input-bordered"
+                    placeholder="Confirm" value={adultPin2} onChange={e => setAdultPin2(e.target.value.replace(/\D/g, "").slice(0, 5))} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {id === "paths" && (
+        <div className="card bg-base-200 border border-base-content/10">
+          <div className="card-body gap-3">
+            <h2 className="card-title text-lg">Where is media stored?</h2>
+            <p className="text-xs opacity-50">These are paths <em>inside</em> the container. Map them to your disks in Docker Compose.</p>
+            {[
+              ["movies_library_path", "Movies", true],
+              ["tv_library_path", "TV shows", true],
+              ["downloads_path", "Downloads (incomplete / client)", true],
+              selectedModules.includes("music") && ["music_library_path", "Music", false],
+              selectedModules.includes("books") && ["books_library_path", "Books", false],
+              selectedModules.includes("audiobooks") && ["audiobooks_library_path", "Audiobooks", false],
+              selectedModules.includes("comics") && ["comics_library_path", "Comics", false],
+              selectedModules.includes("manga") && ["manga_library_path", "Manga", false],
+              selectedModules.includes("youtube") && ["youtube_library_path", "YouTube", false],
+              selectedModules.includes("adult") && ["adult_library_path", "Adult", false],
+            ].filter(Boolean).map(([key, label, req]) => (
+              <label key={key} className="form-control">
+                <span className="label-text">{label}{req ? " *" : ""}</span>
+                <input className="input input-bordered font-mono text-sm" value={form[key] || ""}
+                  onChange={e => set(key, e.target.value)} />
+              </label>
+            ))}
+            <button type="button" className="btn btn-sm w-fit" onClick={checkPaths}>Check paths</button>
+            {pathCheck && (
+              <pre className="text-[10px] opacity-60 overflow-auto max-h-32 bg-base-300 p-2 rounded">
+                {JSON.stringify(pathCheck, null, 2)}
+              </pre>
+            )}
+          </div>
+        </div>
+      )}
+
+      {id === "finish" && (
+        <div className="card bg-base-200 border border-base-content/10">
+          <div className="card-body gap-3">
+            <h2 className="card-title text-lg">You are ready</h2>
+            <p className="text-sm opacity-70">
+              Finish will save your admin account, modules, and folders, then start background setup:
+              indexers, quality profiles, Live TV (if enabled), and definitions — no extra steps required.
+            </p>
+            <ul className="text-sm space-y-1">
+              <li><strong>Admin:</strong> {admin.username}</li>
+              <li><strong>Modules:</strong> {selectedModules.join(", ")}</li>
+              <li><strong>Movies:</strong> {form.movies_library_path}</li>
+              <li><strong>TV:</strong> {form.tv_library_path}</li>
+            </ul>
+            <p className="text-xs opacity-50">
+              Later: Settings → Clients / Indexers / Integrations for qBittorrent, Prowlarr, Jellyfin, VPN.
+              Live TV EPG uses iptv-org automatically; optional Node grabber via <code>docker compose --profile full</code>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 justify-between">
+        <button type="button" className="btn btn-ghost" disabled={step === 0 || saving} onClick={back}>Back</button>
+        <div className="flex gap-2">
+          {step < STEPS.length - 1 ? (
+            <button type="button" className="btn btn-primary" onClick={next}>Continue</button>
+          ) : (
+            <button type="button" className="btn btn-primary" disabled={saving} onClick={() => finish(true)}>
+              {saving ? "Saving…" : "Finish & open MediaOs"}
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
-
 
 
 function OverhaulDashboardPage({ setPage }) {
@@ -7683,7 +8197,7 @@ function MusicDetailPage({ id, onBack }) {
   }
   async function openIx() {
     setIxLoading(true); setIxResults([]);
-    try { setIxResults(await api.music.interactive(id) || []); }
+    try { const d = await api.music.interactive(id); setIxResults(d?.results || d || []); }
     catch(e) { setMsg(String(e.message||e)); }
     setIxLoading(false);
   }
@@ -7765,6 +8279,375 @@ function MusicDetailPage({ id, onBack }) {
 
 
 
+
+
+function AdultPage() {
+  const [locked, setLocked] = useState(true);
+  const [pass, setPass] = useState('');
+  const [err, setErr] = useState('');
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [detailId, setDetailId] = useState(null);
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [msg, setMsg] = useState(null);
+  const [addTitle, setAddTitle] = useState('');
+  const [addYear, setAddYear] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+
+  const loadList = useCallback(async () => {
+    try {
+      const rows = await api.adult.list();
+      if (Array.isArray(rows)) { setItems(rows); return true; }
+      return false;
+    } catch { return false; }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await api.adult.status();
+        if (cancelled) return;
+        if (!s.locked) {
+          setLocked(false);
+          await loadList();
+        } else if (getAdultUnlock()) {
+          const ok = await loadList();
+          if (ok) setLocked(false);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [loadList]);
+
+  const unlock = async (e) => {
+    e && e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const r = await api.adult.unlock(pass);
+      if (r.unlock_token) {
+        setAdultUnlock(r.unlock_token);
+        setLocked(false);
+        await loadList();
+      } else setErr(r.detail || r.message || 'Unlock failed');
+    } catch { setErr('Unlock failed'); }
+    finally { setBusy(false); }
+  };
+
+  if (locked) {
+    return (
+      <div className="p-6 max-w-md mx-auto">
+        <div className="card bg-base-200 shadow-xl">
+          <div className="card-body">
+            <h2 className="card-title"><Ic.Shield /> Adult library</h2>
+            <p className="text-sm opacity-70">Passcode protected (Whisparr-class). Enter the passcode to continue.</p>
+            <form onSubmit={unlock} className="space-y-3">
+              <input type="password" className="input input-bordered w-full" placeholder="Passcode"
+                value={pass} onChange={e=>setPass(e.target.value)} autoFocus />
+              {err && <p className="text-error text-sm">{err}</p>}
+              <button type="submit" className="btn btn-primary w-full" disabled={busy || !pass}>Unlock</button>
+            </form>
+            <p className="text-xs opacity-50 mt-2">Set the passcode under Settings → Adult.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (detailId) {
+    return <AdultDetailPage itemId={detailId} onBack={()=>setDetailId(null)} refresh={loadList} />;
+  }
+
+  const filtered = (items||[]).filter(m => {
+    if (q && !(m.title||'').toLowerCase().includes(q.toLowerCase())) return false;
+    if (filter==='monitored' && !m.monitored) return false;
+    if (filter==='missing' && !(['wanted','missing','failed'].includes(m.status))) return false;
+    if (filter==='downloaded' && m.status!=='downloaded' && !m.file_path) return false;
+    return true;
+  });
+
+  async function searchAllMissing() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.adult.searchMissing();
+      setMsg(`Searched ${r.searched||0} · grabbed ${r.grabbed||0}`);
+      await loadList();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+
+  async function addItem(e) {
+    e && e.preventDefault();
+    if (!addTitle.trim()) return;
+    setBusy(true);
+    try {
+      await api.adult.add({ title: addTitle.trim(), year: addYear ? parseInt(addYear,10) : null });
+      setAddTitle(''); setAddYear(''); setShowAdd(false);
+      await loadList();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+
+  return (
+    <LibraryModuleShell
+      title="Adult"
+      active={filter}
+      onNav={(id) => { if (['all','monitored','missing','downloaded'].includes(id)) setFilter(id); }}
+      nav={[
+        { id: 'all', label: 'Library' },
+        { id: 'monitored', label: 'Monitored' },
+        { id: 'missing', label: 'Missing' },
+        { id: 'downloaded', label: 'Downloaded' },
+      ]}
+      tools={<>
+        <input className="mr-search" placeholder="Search adult…" value={q} onChange={e=>setQ(e.target.value)} />
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={searchAllMissing}>Search missing</button>
+        <button className="btn btn-sm" onClick={()=>setShowAdd(v=>!v)}>Add</button>
+        <button className="btn btn-ghost btn-xs" onClick={()=>{ setAdultUnlock(null); setLocked(true); }}>Lock</button>
+      </>}
+    >
+      {msg && <div className="alert alert-info text-xs py-2 mb-3">{msg}</div>}
+      {showAdd && (
+        <div className="mb-4 p-3 rounded-lg bg-base-200 space-y-3">
+          <form onSubmit={async (e)=>{
+            e.preventDefault();
+            if (!addTitle.trim()) return;
+            setBusy(true); setMsg(null);
+            try {
+              const rows = await api.adult.metadataSearch(addTitle.trim());
+              setMetaResults(Array.isArray(rows)?rows:[]);
+              if (!rows || !rows.length) setMsg('No TPDB hits — you can still Add by title below (set TPDB_API_KEY for metadata).');
+            } catch(ex) { setMsg(String(ex.message||ex)); setMetaResults([]); }
+            setBusy(false);
+          }} className="flex flex-wrap gap-2 items-end">
+            <label className="form-control flex-1 min-w-[12rem]"><span className="label-text text-xs">Search metadata (TPDB)</span>
+              <input className="input input-bordered input-sm" value={addTitle} onChange={e=>setAddTitle(e.target.value)} placeholder="Title…" autoFocus />
+            </label>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !addTitle.trim()}>Search</button>
+            <button type="button" className="btn btn-sm" disabled={busy || !addTitle.trim()} onClick={addItem}>Add title only</button>
+          </form>
+          {(metaResults||[]).length>0 && (
+            <div className="grid sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto">
+              {metaResults.map((r,i)=>(
+                <button key={r.external_id||i} type="button" className="card bg-base-100 text-left hover:border-primary border border-base-content/10"
+                  onClick={async()=>{
+                    setBusy(true);
+                    try {
+                      await api.adult.add({
+                        title: r.title,
+                        year: r.year,
+                        external_id: r.external_id,
+                        overview: r.overview,
+                        poster_path: r.poster_path,
+                        search_now: false,
+                      });
+                      setShowAdd(false); setMetaResults([]); setAddTitle('');
+                      await loadList();
+                    } catch(ex) { setMsg(String(ex.message||ex)); }
+                    setBusy(false);
+                  }}>
+                  <div className="card-body p-2 flex-row gap-2 items-center">
+                    {r.poster_path ? <img src={r.poster_path} alt="" className="w-12 h-16 object-cover rounded" /> : <div className="w-12 h-16 bg-base-300 rounded" />}
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{r.title}</div>
+                      <div className="text-xs opacity-50">{[r.year||'—', r.site].filter(Boolean).join(' · ')}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <form onSubmit={addItem} className="flex flex-wrap gap-2 items-end border-t border-base-content/10 pt-2">
+            <label className="form-control"><span className="label-text text-xs">Year (manual)</span>
+              <input className="input input-bordered input-sm w-24" value={addYear} onChange={e=>setAddYear(e.target.value)} placeholder="2024" />
+            </label>
+            <span className="text-xs opacity-50 self-center">Manual add uses the search box title + year</span>
+          </form>
+        </div>
+      )}
+      <div className="poster-grid">
+        {filtered.map(m => (
+          <PosterTile
+            key={m.id}
+            title={m.title}
+            year={m.year}
+            poster={m.poster_path}
+            status={m.status}
+            monitored={m.monitored}
+            onClick={()=>setDetailId(m.id)}
+          />
+        ))}
+        {!filtered.length && <p className="opacity-50 text-sm col-span-full">No titles — use Add or enable the Adult module path.</p>}
+      </div>
+    </LibraryModuleShell>
+  );
+}
+
+function AdultDetailPage({ itemId, onBack, refresh }) {
+  const [item, setItem] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [ixResults, setIxResults] = useState(null);
+  const [ixLoading, setIxLoading] = useState(false);
+
+  const load = useCallback(() => {
+    api.adult.get(itemId).then(setItem).catch(e=>setMsg(String(e.message||e)));
+  }, [itemId]);
+  useEffect(()=>{ load(); }, [load]);
+
+  async function toggleMonitor() {
+    if (!item) return;
+    setBusy(true);
+    try {
+      await api.adult.update(item.id, { monitored: !item.monitored });
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function autoSearch() {
+    setBusy(true); setMsg(null);
+    try {
+      const body = await api.adult.searchNow(itemId);
+      setMsg(body?.title ? `Grabbed: ${body.title}` : 'Search finished (no grab)');
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function openInteractive() {
+    setIxLoading(true); setIxResults([]); setMsg(null);
+    try {
+      const data = await api.adult.interactive(itemId);
+      const rows = data?.results || (Array.isArray(data) ? data : []);
+      setIxResults(rows);
+    } catch(e) { setMsg(String(e.message||e)); }
+    setIxLoading(false);
+  }
+  async function grabRel(rel) {
+    setBusy(true);
+    try {
+      await api.adult.grab(itemId, {
+        title: rel.title,
+        download_url: rel.download_url,
+        indexer: rel.indexer,
+        size: rel.size,
+        seeders: rel.seeders,
+        protocol: rel.protocol,
+        quality_score: rel.score,
+      });
+      setMsg(`Grabbed: ${rel.title}`);
+      setIxResults(null);
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function doRefresh() {
+    setBusy(true);
+    try {
+      await api.adult.refresh(itemId);
+      load(); refresh && refresh();
+      setMsg('Refreshed');
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function clearFile() {
+    setBusy(true);
+    try {
+      await api.adult.file(itemId, { clear: true });
+      load(); refresh && refresh();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function doDelete() {
+    if (!confirm('Remove from adult library?')) return;
+    await api.adult.remove(itemId);
+    onBack();
+    refresh && refresh();
+  }
+
+  if (!item) return <div className="p-6 opacity-50">Loading…</div>;
+
+  return (
+    <MediaDetailShell
+      title={item.title} year={item.year} poster={item.poster_path}
+      status={item.status} monitored={item.monitored}
+      overview={item.overview}
+      filePath={item.file_path} qualityProfile={item.quality_profile}
+      msg={msg} busy={busy} onBack={onBack}
+      actions={<>
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={autoSearch}>Search & grab</button>
+        <button className="btn btn-sm btn-secondary" disabled={busy||ixLoading} onClick={openInteractive}>Interactive search</button>
+        <button className="btn btn-sm" disabled={busy} onClick={toggleMonitor}>{item.monitored?'Unmonitor':'Monitor'}</button>
+        <button className="btn btn-sm" disabled={busy} onClick={doRefresh}>Refresh</button>
+        {item.file_path && <button className="btn btn-sm btn-ghost" disabled={busy} onClick={clearFile}>Clear file</button>}
+        <button className="btn btn-sm btn-ghost text-error" onClick={doDelete}>Delete</button>
+      </>}
+    >
+      <InteractiveResultsTable results={ixResults} loading={ixLoading} busy={busy} onGrab={grabRel} onClose={()=>setIxResults(null)} />
+    </MediaDetailShell>
+  );
+}
+
+
+
+function AdultSettingsPage({ setPage }) {
+  const [pass, setPass] = useState('');
+  const [cur, setCur] = useState('');
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);
+  useEffect(()=>{
+    fetch('/api/adult/status').then(r=>r.json()).then(setStatus).catch(()=>{});
+  }, []);
+  async function savePass(e) {
+    e && e.preventDefault();
+    if (!pass || pass.length < 4) { setMsg('Passcode must be at least 4 characters'); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const body = { passcode: pass };
+      if (status?.passcode_set) body.current_passcode = cur;
+      const r = await fetch('/api/adult/passcode', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+      }).then(x=>x.json());
+      if (r.ok || r.passcode_set) {
+        setMsg('Passcode saved'); setPass(''); setCur('');
+        setStatus(s=>({...(s||{}), passcode_set: true}));
+      } else setMsg(r.detail || r.message || JSON.stringify(r));
+    } catch(ex) { setMsg(String(ex.message||ex)); }
+    setBusy(false);
+  }
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="flex items-center gap-2">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={()=>setPage && setPage('settings-hub')}>← Settings</button>
+      </div>
+      <div>
+        <h1 className="mr-page-title">Adult library</h1>
+        <p className="mr-page-sub">Whisparr-class module — path, passcode gate, and ThePornDB metadata.</p>
+      </div>
+      {msg && <div className="alert alert-info text-sm py-2">{msg}</div>}
+      <div className="card bg-base-200"><div className="card-body gap-3">
+        <h2 className="font-semibold text-sm">Passcode</h2>
+        <p className="text-xs opacity-60">
+          {status?.passcode_set ? 'Passcode is set. Enter current passcode to change it.' : 'No passcode yet — set one to lock the Adult module.'}
+          {status?.passcode_enabled === false && ' (Passcode currently disabled in config.)'}
+        </p>
+        <form onSubmit={savePass} className="flex flex-col gap-2 max-w-sm">
+          {status?.passcode_set && (
+            <input type="password" className="input input-bordered input-sm" placeholder="Current passcode"
+              value={cur} onChange={e=>setCur(e.target.value)} />
+          )}
+          <input type="password" className="input input-bordered input-sm" placeholder="New passcode (min 4)"
+            value={pass} onChange={e=>setPass(e.target.value)} />
+          <button type="submit" className="btn btn-primary btn-sm w-fit" disabled={busy}>{busy?'Saving…':'Save passcode'}</button>
+        </form>
+      </div></div>
+      <ConfigGroupPage group="adult" title="Adult paths & TPDB" Icon={Ic.Shield}
+        description="Library path and ThePornDB API key. Changes apply immediately." hideBack />
+    </div>
+  );
+}
+
 function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
   const em = enabledModules || ['movies','tv'];
   const groups = [
@@ -7786,6 +8669,8 @@ function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
     ]},
     { title: "Modules", desc: "Enable library types and power features", items: [
       { key: "modules", label: "Module Store", hint: "Music, Books, Comics, Live TV, Converter…" },
+      { key: "settings-adult", label: "Adult library", hint: "Path, passcode, ThePornDB API key" },
+      { key: "settings-hunt", label: "Hunt engine", hint: "Aggressive missing + upgrades (NeutArr-class)" },
     ]},
     { title: "Access", desc: "Who can use MediaOs and what they can do", items: [
       { key: "settings-users", label: "Users & permissions", hint: "Admin grants roles and fine-grained rights" },
@@ -7998,9 +8883,81 @@ function UsersPermissionsPage() {
 }
 
 
+
+function HomelabLinksPage() {
+  const [links, setLinks] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const load = useCallback(() => {
+    fetch("/api/homelab-links").then(r => r.json()).then(d => setLinks(d.links || [])).catch(e => setErr(String(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (next) => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/homelab-links", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...(getToken() ? { Authorization: "Bearer " + getToken() } : {}) },
+        body: JSON.stringify({ links: next }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.statusText);
+      const d = await r.json();
+      setLinks(d.links || next);
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  const add = () => {
+    try {
+      const obj = JSON.parse(draft);
+      if (!obj.name || !obj.url) throw new Error("need name and url");
+      save([...(links||[]), obj]);
+      setDraft("");
+    } catch (e) {
+      // simple name|url form
+      const parts = draft.split("|").map(s => s.trim());
+      if (parts.length >= 2) {
+        save([...(links||[]), { name: parts[0], url: parts[1], icon: "box", iframe: false }]);
+        setDraft("");
+      } else setErr("Use: Name|http://url  or JSON {\"name\":\"…\",\"url\":\"…\"}");
+    }
+  };
+
+  return (
+    <div className="page-shell">
+      <h1 className="mr-page-title">Homelab Links</h1>
+      <p className="opacity-70 text-sm mb-4">Quick links to your other self-hosted apps (Organizr-lite). Changes persist.</p>
+      {err && <div className="alert alert-warning text-sm mb-3">{err}</div>}
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 mb-6">
+        {(links||[]).map((l, i) => (
+          <a key={i} href={l.url} target="_blank" rel="noreferrer"
+             className="card bg-base-200 shadow-sm hover:shadow-md transition p-4">
+            <div className="font-semibold">{l.name}</div>
+            <div className="text-xs opacity-60 truncate">{l.url}</div>
+          </a>
+        ))}
+      </div>
+      <div className="flex gap-2 items-center flex-wrap">
+        <input className="input input-bordered input-sm flex-1 min-w-[200px]"
+          placeholder='Name|http://host:port  or JSON'
+          value={draft} onChange={e=>setDraft(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&add()} />
+        <button className="btn btn-sm btn-primary" disabled={busy||!draft.trim()} onClick={add}>Add</button>
+        <button className="btn btn-sm btn-ghost" disabled={busy||!links.length}
+          onClick={()=>save(links.slice(0,-1))}>Remove last</button>
+      </div>
+    </div>
+  );
+}
+
+
 function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], refreshMovies, refreshSeries, setPage, theme, setTheme, setMiniPlayer, enabledModules=['movies','tv'], setEnabledModules, advanced, setAdvanced }) {
   switch(page) {
     case 'widgets': return <OverhaulDashboardPage setPage={setPage} />;
+    case 'homelab': return <HomelabLinksPage />;
     case 'dashboard':    return <><DashboardPage movies={movies} series={series} setPage={setPage} /><CollectionProgressWidget setPage={setPage} /></>;
     case 'comics':       return <ComicsPage setPage={setPage} />;
     case 'youtube':      return <YouTubePage />;
@@ -8014,6 +8971,7 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'quality-lab': return <QualityLabPage />;
     case 'workers': return <div className="p-6 space-y-3 max-w-3xl"><h1 className="mr-page-title">Workers</h1><p className="text-sm opacity-60">Background schedulers: missing search, library watch, Jackett sync (6h), EPG refresh, cleanup, converter watch. Live progress is on Queue (SSE) and History.</p><div className="flex gap-2"><button className="btn btn-sm" onClick={()=>setPage&&setPage('queue')}>Queue</button><button className="btn btn-sm" onClick={()=>setPage&&setPage('activity')}>History</button><button className="btn btn-sm" onClick={()=>setPage&&setPage('logs')}>Logs</button></div></div>;
     case 'parity': return <div className='p-6'><h1 className='mr-page-title'>Stack parity</h1><p className='text-sm opacity-60'>mediaos replaces Sonarr/Radarr/Lidarr/Readarr/Bazarr/Prowlarr for day-to-day. Use Settings → Integrations for migrators, TRaSH, and Jackett sync.</p><ul className='list-disc ml-5 text-sm mt-3 space-y-1'><li>Movies + TV + quality + indexers ✅</li><li>Music artists/albums/tracks ✅</li><li>Books + audiobooks ✅</li><li>Subtitles wanted ✅</li><li>Cleanuparr-style cleaner ✅</li></ul></div>;
+    case 'adult': return <AdultPage />;
     case 'settings-hub': return <SettingsHubPage setPage={setPage} advanced={advanced} setAdvanced={setAdvanced} enabledModules={enabledModules} />;
     case 'settings-users': return <UsersPermissionsPage />;
     case 'modules': return <ModuleStorePage enabledModules={enabledModules} setEnabledModules={setEnabledModules} setPage={setPage} />;
@@ -8035,6 +8993,8 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'settings-library':   return <ConfigGroupPage group="library" title="Library Storage" Icon={Ic.Folder} description="Library and downloads paths — changes apply immediately, no restart." />;
     case 'settings-indexers-cfg': return <ConfigGroupPage group="indexers" title="Indexers / Prowlarr / Jackett" Icon={Ic.Server} description="Prowlarr optional. Jackett sync + Cardigann builtins replace most indexer management." />;
     case 'settings-subtitles': return <SubtitlesSettingsPage setPage={setPage} />;
+    case 'settings-adult': return <AdultSettingsPage setPage={setPage} />;
+    case 'settings-hunt': return <ConfigGroupPage group="hunt" title="Hunt engine" Icon={Ic.Activity} description="Built-in NeutArr/Huntarr-class aggressive missing search + optional upgrades. Runs on a schedule; no extra container." setPage={setPage} />;
     case 'settings-cleanup': return <ConfigGroupPage group="cleanup" title="Queue cleaner" Icon={Ic.AlertTri} description="Cleanuparr-style strikes, stall detection, seed ratio." />;
     case 'settings-system':    return <ConfigGroupPage group="system" title="System" Icon={Ic.Server} description="Search, upgrades, and notification settings — changes apply immediately, no restart." />;
     case 'settings-metadata': return <ConfigGroupPage group="metadata" title="Metadata APIs" Icon={Ic.Compass} description="TMDb, TVDb, ComicVine, Trakt — changes apply immediately." />;
@@ -8048,6 +9008,7 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'books':        return <BooksPage setPage={setPage} />;
     case 'audiobooks':   return <AudiobooksPage setPage={setPage} />;
     case 'calendar':     return <CalendarPage />;
+    case 'library-player': return <LibraryBrowserPage movies={movies} series={series} music={music} books={books} setMiniPlayer={setMiniPlayer} setPage={setPage} />;
     case 'livetv': return <LiveTvPage />;
     case 'converter-dashboard': return <ConverterDashboard setPage={setPage} />;
     case 'converter-gpu': return <ConverterGpuWizard />;
@@ -8055,8 +9016,7 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'converter-scan': return <ConverterScan />;
     case 'converter-presets': return <ConverterPresets />;
     case 'converter': return <ConverterDashboard />;
-    case 'livetv_old':       return <LiveTvPage />;
-    case 'smartlists':   return <SmartListsPage />;
+        case 'smartlists':   return <SmartListsPage />;
     default:             return <><DashboardPage movies={movies} series={series} music={music} books={books} audiobooks={audiobooks} setPage={setPage} /><CollectionProgressWidget setPage={setPage} /></>;
   }
 }
@@ -8103,6 +9063,7 @@ function App() {
   const [music, setMusic] = useState([]);
   const [books, setBooks] = useState([]);
   const [audiobooks, setAudiobooks] = useState([]);
+  const [adult, setAdult] = useState([]);
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [setupChecked, setSetupChecked] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
@@ -8124,6 +9085,9 @@ function App() {
   const refreshAudiobooks = useCallback(async()=>{
     try { setAudiobooks(await api.audiobooks.list()); } catch(e){}
   }, []);
+  const refreshAdult = useCallback(async()=>{
+    try { setAdult(await api.adult.list()); } catch(e){ /* locked or disabled */ }
+  }, []);
   const refreshRequests = useCallback(async()=>{
     try { setPendingRequests((await api.requests.list('pending')).length); } catch(e){}
   }, []);
@@ -8137,7 +9101,7 @@ function App() {
       es.addEventListener('activity', ()=>{});
       es.addEventListener('queue', ()=>{ refreshRequests(); });
     } catch(e) {}
-    refreshMovies(); refreshSeries(); refreshMusic(); refreshBooks(); refreshAudiobooks(); refreshRequests();
+    refreshMovies(); refreshSeries(); refreshMusic(); refreshBooks(); refreshAudiobooks(); refreshAdult(); refreshRequests();
     api.setup.status().then(s=>{ setSetupNeeded(!s.complete); setSetupChecked(true); if(!s.complete) setPage('setup'); }).catch(()=>setSetupChecked(true));
     const t = setTimeout(()=>setSplash(false), 1200);
     const i = setInterval(refreshRequests, 30000);
@@ -8150,6 +9114,7 @@ function App() {
     music: music.length,
     books: books.length,
     audiobooks: audiobooks.length,
+    adult: adult.length,
     requests: pendingRequests,
   };
 
@@ -8172,12 +9137,12 @@ function App() {
         </div>
         <main className="flex-1 mr-content mos-page">
           <MobileBottomNav page={page} setPage={setPage} enabledModules={enabledModules} />
-          <PageContent page={page} movies={movies} series={series}
+          <PageChrome title={page}><PageContent page={page} movies={movies} series={series}
             music={music} books={books} audiobooks={audiobooks}
             refreshMovies={refreshMovies} refreshSeries={refreshSeries}
             setPage={setPage} theme={theme} setTheme={setTheme} setMiniPlayer={setMiniPlayer}
             enabledModules={enabledModules} setEnabledModules={setEnabledModules}
-            advanced={advanced} setAdvanced={setAdvanced} />
+            advanced={advanced} setAdvanced={setAdvanced} /></PageChrome>
         </main>
         {miniPlayer && (
           <div className="fixed inset-x-0 bottom-16 lg:bottom-0 z-40 p-2 bg-base-300/95 border-t border-primary/40 backdrop-blur shadow-lg">
@@ -8215,6 +9180,7 @@ function App() {
         <Sidebar page={page} setPage={p=>{setPage(p);}} counts={counts} onClose={()=>setMobileOpen(false)} advanced={advanced} enabledModules={enabledModules} />
       </div>
     </div>
+    <AiChatPanel />
     </>
   );
 }

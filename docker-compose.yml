@@ -16,6 +16,46 @@ services:
       timeout: 5s
       retries: 5
 
+  # Node: iptv-org/epg grabber (epg-grabber) — builds local XMLTV for fresher guides
+  # MediaOs consumes http://iptv-org-epg:3000/guide.xml automatically via livetv_epg_sidecar_url
+  iptv-org-epg:
+    image: node:20-bookworm-slim
+    working_dir: /epg
+    environment:
+      EPG_SITE: ${EPG_SITE:-tvtv.us}
+      EPG_DAYS: ${EPG_DAYS:-2}
+      EPG_CRON_HOURS: ${EPG_CRON_HOURS:-6}
+    volumes:
+      - iptv_org_epg_data:/epg
+      - ./scripts/epg-sidecar-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    ports:
+      - "${EPG_HOST_PORT:-3099}:3000"
+    restart: unless-stopped
+    profiles: ["full", "epg"]  # docker compose --profile full up -d
+    # To always start with MediaOs: remove profiles line or use --profile full
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      LOG_LEVEL: info
+    ports:
+      - "${FLARESOLVERR_HOST_PORT:-8191}:8191"
+    restart: unless-stopped
+    profiles: ["full", "flaresolverr"]
+
+  # Optional local LLM for Safe AI Assistant (profile: ai)
+  # docker compose --profile ai up -d
+  # then: docker compose exec ollama ollama pull llama3.2
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    profiles: ["ai", "full"]
+
   mediaos:
     image: ghcr.io/newguy467/mediaos:latest
     build: .
@@ -25,6 +65,13 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+      # Auto Live TV + prefer Node sidecar when profile "full"/"epg" is up
+      LIVETV_SEED_IPTV_ORG: ${LIVETV_SEED_IPTV_ORG:-true}
+      LIVETV_AUTO_GRAB: ${LIVETV_AUTO_GRAB:-true}
+      LIVETV_EPG_SIDECAR_URL: ${LIVETV_EPG_SIDECAR_URL:-http://iptv-org-epg:3000/guide.xml}
+      FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: llama3.2
     ports:
       - "8787:8000"
     volumes:

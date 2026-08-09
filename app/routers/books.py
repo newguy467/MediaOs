@@ -9,7 +9,7 @@ from app.auth import require_permission
 from app.database import get_db
 from app.models import ItemStatus, MediaItem, MediaType
 from app.services.grab import grab_release
-from app.services.search import find_best_book_release
+from app.services.search import find_best_book_release, search_book_releases
 
 router = APIRouter(prefix="/books", tags=["books"],
     dependencies=[Depends(require_permission("library.view", "library.manage"))],
@@ -116,6 +116,148 @@ def search_and_grab_book(item_id: int, db: Session = Depends(get_db)):
     grab_release(db, item, release)
     return {"found": True, "title": release.get("title"), "indexer": release.get("indexer")}
 
+
+
+
+
+@router.get("/{item_id}")
+def get_book(item_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.view"))):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    return item
+
+
+@router.get("/{item_id}/interactive-search")
+def interactive_search_book(item_id: int, limit: int = 50, db: Session = Depends(get_db)):
+    from app.services.interactive_search import interactive_book_search
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    item.last_searched_at = datetime.now(timezone.utc)
+    db.add(item)
+    db.commit()
+    return interactive_book_search(item, db=db, limit=limit)
+
+
+@router.post("/{item_id}/grab")
+def grab_book_release(item_id: int, payload: dict, db: Session = Depends(get_db)):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    release = payload.get("release") or payload
+    if not release.get("download_url") and not release.get("magnet"):
+        raise HTTPException(400, "download_url or magnet required")
+    grab_release(db, item, release)
+    return {"ok": True, "title": release.get("title")}
+
+
+
+
+class BookUpdate(BaseModel):
+    title: str | None = None
+    year: int | None = None
+    overview: str | None = None
+    poster_path: str | None = None
+    monitored: bool | None = None
+    quality_profile: str | None = None
+
+
+class BookFileIn(BaseModel):
+    path: str | None = None
+    clear: bool = False
+
+
+class BookBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+    quality_profile: str | None = None
+
+
+@router.patch("/{item_id}", response_model=BookOut)
+def update_book(item_id: int, payload: BookUpdate, db: Session = Depends(get_db)):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(item, k, v)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/{item_id}/refresh")
+def refresh_book(item_id: int, db: Session = Depends(get_db)):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    # Soft refresh — OpenLibrary optional enrichment later
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/{item_id}/file")
+def manage_book_file(item_id: int, payload: BookFileIn, db: Session = Depends(get_db)):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    if payload.clear:
+        item.file_path = None
+        item.status = ItemStatus.missing
+    elif payload.path:
+        item.file_path = payload.path
+        item.status = ItemStatus.downloaded
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/search-missing")
+def search_missing_books(limit: int = 40, db: Session = Depends(get_db)):
+    items = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == MediaType.book,
+            MediaItem.monitored.is_(True),
+            MediaItem.status.in_([ItemStatus.wanted, ItemStatus.missing, ItemStatus.failed]),
+        )
+        .order_by(MediaItem.last_searched_at.nullsfirst())
+        .limit(limit)
+        .all()
+    )
+    searched = grabbed = 0
+    for item in items:
+        searched += 1
+        try:
+            rel = find_best_book_release(item, db=db)
+            item.last_searched_at = datetime.now(timezone.utc)
+            db.add(item)
+            if rel:
+                grab_release(db, item, rel)
+                grabbed += 1
+            db.commit()
+        except Exception:
+            db.rollback()
+    return {"searched": searched, "grabbed": grabbed}
+
+
+@router.post("/bulk")
+def bulk_books(payload: BookBulkIn, db: Session = Depends(get_db)):
+    q = db.query(MediaItem).filter(MediaItem.media_type == MediaType.book, MediaItem.id.in_(payload.ids))
+    n = 0
+    for item in q.all():
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
 
 
 @router.get("/authors/search")

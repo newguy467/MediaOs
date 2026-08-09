@@ -65,7 +65,8 @@ def _bootstrap_sync(*, force_defs: bool = True) -> dict[str, Any]:
             seed = ensure_seed_definitions()
             steps["cardigann_seed"] = seed
             # After seed, pull a wider pack (capped lightly so first-run stays quick)
-            max_files = int(getattr(settings, "cardigann_sync_max_files", 0) or 0) or 120
+            # 0 = full Jackett pack (thousands of defs)
+            max_files = int(getattr(settings, "cardigann_sync_max_files", 0) or 0) or None
             full = sync_definitions(max_files=max_files, force=force_defs)
             steps["cardigann_sync"] = full
         else:
@@ -217,3 +218,24 @@ def _bootstrap_sync(*, force_defs: bool = True) -> dict[str, Any]:
         (steps.get("builtin_indexers") or {}).get("count"),
     )
     return result
+
+
+def load_runtime_settings_from_db() -> None:
+    """Pull select AppSetting rows into process settings (passcode, etc.)."""
+    try:
+        from app.config import settings
+        from app.database import SessionLocal
+        from app.models import AppSetting
+        db = SessionLocal()
+        try:
+            row = db.query(AppSetting).filter(AppSetting.key == "adult_passcode_hash").one_or_none()
+            if row and (row.value or "").strip():
+                settings.adult_passcode_hash = row.value.strip()
+            row2 = db.query(AppSetting).filter(AppSetting.key == "adult_passcode_enabled").one_or_none()
+            if row2 is not None and row2.value is not None:
+                v = str(row2.value).strip().lower()
+                settings.adult_passcode_enabled = v in ("1", "true", "yes", "on")
+        finally:
+            db.close()
+    except Exception as e:
+        log.debug("load_runtime_settings_from_db: %s", e)

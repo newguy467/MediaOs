@@ -15,6 +15,7 @@ from app.services.search import (
     find_best_audiobook_release,
     find_best_book_release,
     find_best_episode_release,
+    find_best_adult_release,
     find_best_movie_release,
     find_best_music_release,
 )
@@ -101,10 +102,23 @@ def list_wanted(
             "status": a.status.value if hasattr(a.status, "value") else str(a.status),
             "poster_path": a.poster_path, "last_searched_at": a.last_searched_at} for a in abs_]
 
+    if mt in ("all", "adult"):
+        adult_items = (
+            db.query(MediaItem)
+            .filter(MediaItem.media_type == MediaType.adult, MediaItem.monitored.is_(True), MediaItem.status.in_(MISSING))
+            .order_by(MediaItem.last_searched_at.nullsfirst())
+            .limit(200)
+            .all()
+        )
+        out["adult"] = [{"id": m.id, "title": m.title, "year": m.year,
+            "status": m.status.value if m.status else None,
+            "last_searched_at": m.last_searched_at} for m in adult_items]
+
     out["counts"] = {
         "movies": len(out["movies"]), "episodes": len(out["episodes"]), "music": len(out["music"]),
         "books": len(out["books"]), "audiobooks": len(out["audiobooks"]),
-        "total": len(out["movies"])+len(out["episodes"])+len(out["music"])+len(out["books"])+len(out["audiobooks"]),
+        "adult": len(out.get("adult") or []),
+        "total": len(out["movies"])+len(out["episodes"])+len(out["music"])+len(out["books"])+len(out["audiobooks"])+len(out.get("adult") or []),
     }
     return out
 
@@ -113,6 +127,8 @@ def _search_item(db: Session, item: MediaItem) -> SearchResultOut:
     try:
         if item.media_type == MediaType.movie:
             rel = find_best_movie_release(item, db=db)
+        elif item.media_type == MediaType.adult:
+            rel = find_best_adult_release(item, db=db)
         elif item.media_type == MediaType.music:
             rel = find_best_music_release(item, db=db)
         elif item.media_type == MediaType.book:
@@ -151,6 +167,14 @@ def search_music(item_id: int, db: Session = Depends(get_db), _perm: list = Depe
 def search_book(item_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("download", "library.manage"))):
     item = db.get(MediaItem, item_id)
     if not item or item.media_type != MediaType.book:
+        raise HTTPException(404, "Not found")
+    return _search_item(db, item)
+
+
+@router.post("/adult/{item_id}/search", response_model=SearchResultOut)
+def search_adult_wanted(item_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("download"))):
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type != MediaType.adult:
         raise HTTPException(404, "Not found")
     return _search_item(db, item)
 

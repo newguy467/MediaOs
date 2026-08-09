@@ -48,6 +48,7 @@ WIZARD_FIELDS: dict[str, type] = {
     "trakt_access_token": str,
     # library paths
     "movies_library_path": str,
+    "adult_library_path": str,
     "tv_library_path": str,
     "music_library_path": str,
     "books_library_path": str,
@@ -189,6 +190,87 @@ class SetupPayload(BaseModel):
     model_config = {"extra": "allow"}
 
 
+
+def _set_enabled_modules(db: Session, modules: list[str]) -> None:
+    from app.models import AppSetting
+    import json
+    mods = list(dict.fromkeys(["movies", "tv"] + [m for m in modules if m]))
+    row = db.query(AppSetting).filter(AppSetting.key == "enabled_modules").first()
+    if not row:
+        row = AppSetting(key="enabled_modules", value=json.dumps(mods))
+    else:
+        row.value = json.dumps(mods)
+    db.add(row)
+    db.commit()
+
+
+def _ensure_admin_user(db: Session, username: str, password: str, role: str = "admin") -> str | None:
+    """Create or update admin from wizard. Returns action note."""
+    from app.models import User
+    from app.auth import hash_password
+    username = (username or "").strip()
+    password = (password or "").strip()
+    if not username or not password:
+        return None
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        existing.password_hash = hash_password(password)
+        existing.role = role or existing.role or "admin"
+        db.add(existing)
+        db.commit()
+        return f"updated user {username}"
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        role=role or "admin",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    return f"created user {username}"
+
+
+def _set_adult_passcode(db: Session, code: str) -> str | None:
+    code = (code or "").strip()
+    if not code:
+        return None
+    if not (code.isdigit() and len(code) == 5):
+        raise HTTPException(400, "Adult passcode must be exactly 5 digits")
+    from app.models import AppSetting
+    from app.services import adult_gate
+    h = adult_gate.set_passcode(code)
+    row = db.query(AppSetting).filter(AppSetting.key == "adult_passcode_hash").first()
+    if not row:
+        row = AppSetting(key="adult_passcode_hash", value=h)
+    else:
+        row.value = h
+    db.add(row)
+    db.commit()
+    return "adult passcode set"
+
+
+def _create_extra_users(db: Session, users: list) -> list[str]:
+    from app.models import User
+    from app.auth import hash_password
+    notes = []
+    for u in users or []:
+        if not isinstance(u, dict):
+            continue
+        un = (u.get("username") or "").strip()
+        pw = (u.get("password") or "").strip()
+        role = (u.get("role") or "user").strip() or "user"
+        if not un or not pw:
+            continue
+        if db.query(User).filter(User.username == un).first():
+            notes.append(f"skip existing {un}")
+            continue
+        db.add(User(username=un, password_hash=hash_password(pw), role=role, is_active=True))
+        notes.append(f"created {un}")
+    if notes:
+        db.commit()
+    return notes
+
+
 def _apply_payload(db: Session, data: dict[str, Any]) -> list[str]:
     """Write non-empty values into settings + AppSetting rows. Returns applied keys."""
     from app.models import AppSetting
@@ -227,6 +309,59 @@ def _apply_payload(db: Session, data: dict[str, Any]) -> list[str]:
         db.commit()
     except Exception:
         db.rollback()
+    
+    # Modules (movies+tv mandatory)
+    mods = data.get("enabled_modules") or data.get("modules")
+    if isinstance(mods, str):
+        mods = [x.strip() for x in mods.split(",") if x.strip()]
+    if isinstance(mods, list) and mods:
+        _set_enabled_modules(db, mods)
+        applied.append("enabled_modules")
+
+    # Admin account
+    admin_user = data.get("auth_username") or data.get("admin_username")
+    admin_pass = data.get("auth_password") or data.get("admin_password")
+    admin_role = data.get("admin_role") or "admin"
+    note = _ensure_admin_user(db, admin_user or "", admin_pass or "", role=str(admin_role))
+    if note:
+        applied.append(note)
+
+    # Extra users [{username,password,role}]
+    extra = data.get("extra_users") or data.get("users") or []
+    for n in _create_extra_users(db, extra):
+        applied.append(n)
+
+    # Adult 5-digit passcode
+    if data.get("adult_passcode") or data.get("adult_pin"):
+        try:
+            n = _set_adult_passcode(db, data.get("adult_passcode") or data.get("adult_pin"))
+            if n:
+                applied.append(n)
+        except HTTPException:
+            raise
+        except Exception as e:
+            applied.append(f"adult_passcode_error:{e}")
+
+    # Sensible defaults for all-in-one (automatic APIs / nodes)
+    defaults_on = {
+        "cardigann_enabled": True,
+        "cardigann_auto_sync": True,
+        "cardigann_auto_sync_on_startup": True,
+        "livetv_seed_iptv_org": True,
+        "livetv_auto_grab": True,
+        "cf_bypass_enabled": True,
+        "cleanup_enabled": True,
+    }
+    if data.get("auto_defaults", True):
+        for k, v in defaults_on.items():
+            if k not in data:
+                try:
+                    if hasattr(settings, k):
+                        setattr(settings, k, v)
+                        applied.append(k)
+                except Exception:
+                    pass
+
     return applied
 
 

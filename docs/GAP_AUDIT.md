@@ -1,3 +1,13 @@
+## Implemented in v4.12.0 (was still open)
+
+| Item | Status |
+|------|--------|
+| Live TV channel editor | PATCH + reorder + bulk + editor list + sort_order |
+| Multi-quality keep | desired_qualities enforced in grab_release |
+| Comic pull auto-grab | auto_grab_from_pull_list in pull sync cycle |
+| Stream next to Grab | Interactive search Stream button → /api/overhaul/streams |
+| Plex/Tautulli now playing | /api/now-playing + dashboard widget |
+
 # Gap audit vs source zips (post 4.0.2)
 
 ## Implemented in MediaOs v4 foundation

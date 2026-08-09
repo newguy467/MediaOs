@@ -1,4 +1,4 @@
-"""3.7 overhaul APIs: stream mode, dashboard widgets, comics pull/arcs, trash import, multi-quality, external arr."""
+"""MediaOs overhaul APIs: stream mode, dashboard widgets, comics pull/arcs, trash import, multi-quality, external arr."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException

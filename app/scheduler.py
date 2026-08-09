@@ -23,7 +23,7 @@ from app.services.search import (
     find_best_movie_release,
     find_best_music_release,
 )
-from app.services.upgrade import process_episode_upgrades, process_movie_upgrades
+from app.services.upgrade import process_adult_upgrades, process_episode_upgrades, process_movie_upgrades
 from app.services.failures import process_failed_downloads
 from app.services.cleanup import run_cleanup_cycle
 from app.services.smartlists import run_all_smart_lists
@@ -344,6 +344,7 @@ def run_cycle() -> None:
         process_completed_audiobook_downloads(db)
         process_completed_comic_downloads(db)
         _search_wanted_movies(db)
+        _search_wanted_adult(db)
         _search_wanted_episodes(db)
         _search_wanted_music(db)
         _search_wanted_books(db)
@@ -351,6 +352,7 @@ def run_cycle() -> None:
         _search_wanted_comics(db)
         _search_wanted_comic_issues(db)
         process_movie_upgrades(db)
+        process_adult_upgrades(db)
         process_episode_upgrades(db)
         try:
             run_all_smart_lists(db)
@@ -502,6 +504,30 @@ def run_iptv_org_resync() -> None:
         db.close()
 
 
+def run_livetv_health() -> None:
+    db = SessionLocal()
+    try:
+        from app.services.livetv import run_channel_health_cycle
+        result = run_channel_health_cycle(db)
+        log.info("LiveTV health: %s", result)
+    except Exception as exc:
+        log.exception("LiveTV health failed: %s", exc)
+    finally:
+        db.close()
+
+
+def run_indexer_health() -> None:
+    db = SessionLocal()
+    try:
+        from app.services.indexer_health import run_indexer_health_cycle
+        result = run_indexer_health_cycle(db)
+        log.info("Indexer health: %s", result)
+    except Exception as exc:
+        log.exception("Indexer health failed: %s", exc)
+    finally:
+        db.close()
+
+
 def run_livetv_epg_sync() -> None:
     db = SessionLocal()
     try:
@@ -516,16 +542,51 @@ def run_livetv_epg_sync() -> None:
 
 
 def run_hunt_cycle_job() -> None:
-    """Aggressive missing/upgrade hunt (Huntarr-inspired)."""
+    """Aggressive missing/upgrade hunt — built-in NeutArr/Huntarr replacement."""
     try:
+        if not getattr(settings, "hunt_enabled", True):
+            return
         from app.services.hunt import run_hunt_cycle
         limit = int(getattr(settings, "hunt_batch_limit", 25) or 25)
+        types = None
+        if not getattr(settings, "hunt_include_adult", True):
+            # default: all types from plan; adult still included unless disabled via media filter later
+            pass
         result = run_hunt_cycle(limit=limit)
         if result.get("processed"):
             log.info("Hunt: planned=%s processed=%s grabbed=%s",
                      result.get("planned"), result.get("processed"), result.get("grabbed"))
     except Exception as exc:
         log.warning("Hunt cycle: %s", exc)
+
+
+
+def _search_wanted_adult(db: Session) -> None:
+    from app.services.search import find_best_adult_release
+    from app.services.grab import grab_release
+    items = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == MediaType.adult,
+            MediaItem.monitored.is_(True),
+            MediaItem.status.in_([ItemStatus.wanted, ItemStatus.missing, ItemStatus.failed]),
+        )
+        .order_by(MediaItem.last_searched_at.nullsfirst())
+        .limit(20)
+        .all()
+    )
+    for item in items:
+        try:
+            release = find_best_adult_release(item, db=db)
+            item.last_searched_at = datetime.now(timezone.utc)
+            db.add(item)
+            if release:
+                grab_release(db, item, release)
+                log.info("Grabbed adult %s → %s", item.title, release.get("title"))
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            log.debug("wanted adult search %s: %s", item.title, e)
 
 
 def start_scheduler() -> BackgroundScheduler:
@@ -594,6 +655,12 @@ def start_scheduler() -> BackgroundScheduler:
     iptv_h = max(1, int(getattr(settings, "livetv_iptv_org_sync_hours", 24) or 24))
     scheduler.add_job(run_iptv_org_resync, "interval", hours=iptv_h, id="mediaos_iptv_org", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_iptv_org_resync, "date", run_date=_utcnow() + timedelta(seconds=80), id="mediaos_iptv_org_startup", replace_existing=True)
+    health_m = max(5, int(getattr(settings, "livetv_health_interval_minutes", 30) or 30))
+    ih_h = max(1, int(getattr(settings, "indexer_health_interval_hours", 6) or 6))
+    scheduler.add_job(run_indexer_health, "interval", hours=ih_h, id="mediaos_indexer_health", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(run_indexer_health, "date", run_date=_utcnow() + timedelta(seconds=240), id="mediaos_indexer_health_startup", replace_existing=True)
+    scheduler.add_job(run_livetv_health, "interval", minutes=health_m, id="mediaos_livetv_health", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(run_livetv_health, "date", run_date=_utcnow() + timedelta(seconds=180), id="mediaos_livetv_health_startup", replace_existing=True)
     scheduler.add_job(run_livetv_epg_sync, "interval", hours=epg_h, id="mediaos_livetv_epg", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_livetv_epg_sync, "date", run_date=_utcnow() + timedelta(seconds=100), id="mediaos_livetv_epg_startup", replace_existing=True)
     # Hunt engine — missing / failed items

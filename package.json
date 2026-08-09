@@ -1,14 +1,17 @@
 {
   "name": "mediaos-ui",
   "private": true,
-  "version": "4.4.0",
+  "version": "4.13.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:ui": "vite build",
+    "typecheck": "echo 'no tsconfig; JSX via vite'"
   },
   "dependencies": {
+    "hls.js": "^1.6.17",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -19,5 +22,6 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "vite": "^5.4.2"
-  }
+  },
+  "description": "MediaOs UI (Vite/React) + hls.js for IPTV/HLS playback"
 }

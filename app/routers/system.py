@@ -247,3 +247,29 @@ def indexer_capabilities():
     from app.services.indexer_capabilities import matrix
     return {"indexers": matrix()}
 
+
+
+# ── Homelab Links (Organizr-lite) ──────────────────────────────────────────
+
+class HomelabLinksBody(BaseModel):
+    links: list[dict]
+
+
+@router.get("/homelab-links")
+def homelab_links_get(db: Session = Depends(get_db)):
+    from app.services.homelab_links import get_links
+    return {"links": get_links(db)}
+
+
+@router.put("/homelab-links")
+def homelab_links_put(body: HomelabLinksBody, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    from app.services.homelab_links import save_links
+    saved = save_links(db, body.links)
+    return {"links": saved, "ok": True}
+
+
+@router.get("/now-playing")
+def now_playing():
+    """Plex/Tautulli now-playing for the dashboard widget."""
+    from app.services.now_playing import get_now_playing
+    return get_now_playing()

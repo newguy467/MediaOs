@@ -6,6 +6,7 @@ library, calendar, queue, status, and search triggers.
 """
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -15,7 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Download, Episode, ItemStatus, MediaItem, MediaType
 from app.services.grab import grab_episode_release, grab_release
-from app.services.search import find_best_episode_release, find_best_movie_release
+from app.services.search import find_best_adult_release, find_best_episode_release, find_best_movie_release
 
 router = APIRouter(tags=["arr-compat"])
 
@@ -34,7 +35,7 @@ def require_arr_key(
         # open mode when no key configured
         return True
     got = (x_api_key or apikey or "").strip()
-    if got != expected:
+    if not secrets.compare_digest(got, expected):
         raise HTTPException(401, "Unauthorized")
     return True
 
@@ -75,6 +76,33 @@ def _movie_resource(item: MediaItem) -> dict:
         else None,
     }
 
+
+
+def _adult_movie_resource(item: MediaItem) -> dict:
+    """Whisparr-shaped movie resource for adult library items."""
+    has_file = bool(item.file_path) and item.status == ItemStatus.downloaded
+    return {
+        "id": item.id,
+        "title": item.title,
+        "sortTitle": item.title,
+        "year": item.year or 0,
+        "overview": item.overview,
+        "status": "released",
+        "monitored": item.monitored,
+        "hasFile": has_file,
+        "isAvailable": has_file,
+        "path": item.file_path or getattr(settings, "adult_library_path", "/adult"),
+        "rootFolderPath": getattr(settings, "adult_library_path", "/adult"),
+        "qualityProfileId": 1,
+        "minimumAvailability": "released",
+        "tmdbId": item.external_id or 0,
+        "imdbId": None,
+        "images": [{"coverType": "poster", "remoteUrl": item.poster_path}] if item.poster_path else [],
+        "added": item.added_at.isoformat() if getattr(item, "added_at", None) else None,
+        "sizeOnDisk": 0,
+        "movieFile": {"path": item.file_path, "quality": {"quality": {"name": "Unknown"}}} if item.file_path else None,
+        "mediaOsLibrary": "adult",
+    }
 
 def _series_resource(item: MediaItem) -> dict:
     eps = list(item.episodes or [])
@@ -183,17 +211,22 @@ def qualityprofile(_: bool = Depends(require_arr_key), db: Session = Depends(get
 # ── Radarr-style movies ───────────────────────────────────────────────────
 
 @router.get("/api/v3/movie")
-def list_movies(_: bool = Depends(require_arr_key), db: Session = Depends(get_db)):
-    items = (
+def arr_list_movies(
+    library: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_arr_key),
+):
+    """Radarr movie list. Pass library=adult for Whisparr-class adult library."""
+    mt = MediaType.adult if (library or "").lower() == "adult" else MediaType.movie
+    rows = (
         db.query(MediaItem)
-        .filter(MediaItem.media_type == MediaType.movie)
+        .filter(MediaItem.media_type == mt)
         .order_by(MediaItem.title)
         .all()
     )
-    return [_movie_resource(i) for i in items]
-
-
-# lookup registered below before int path — see movie_lookup / get_movie_int
+    if mt == MediaType.adult:
+        return [_adult_movie_resource(r) for r in rows]
+    return [_movie_resource(r) for r in rows]
 
 
 @router.post("/api/v3/command")
@@ -220,6 +253,8 @@ async def command(request: Request, _: bool = Depends(require_arr_key), db: Sess
                 continue
             if item and item.media_type == MediaType.movie:
                 rel = find_best_movie_release(item, db=db)
+            elif item and item.media_type == MediaType.adult:
+                rel = find_best_adult_release(item, db=db)
                 if rel:
                     try:
                         grab_release(db, item, rel)
@@ -393,13 +428,39 @@ def language_profiles(_: bool = Depends(require_arr_key)):
 
 
 @router.get("/api/v3/movie/lookup")
-def movie_lookup(term: str = "", _: bool = Depends(require_arr_key)):
-    from app.clients.tmdb import tmdb_client
-
+def movie_lookup(
+    term: str = "",
+    library: str | None = Query(default=None),
+    _: bool = Depends(require_arr_key),
+):
+    """Radarr movie lookup. library=adult → TPDB (Whisparr-class)."""
     term = (term or "").strip()
     if not term:
         return []
-    # tmdb:12345 style
+    if (library or "").lower() == "adult":
+        from app.clients.tpdb import tpdb_client
+        if not tpdb_client.configured():
+            return []
+        rows = []
+        for m in tpdb_client.search_movies(term, limit=15):
+            rows.append({
+                "title": m["title"],
+                "year": m.get("year") or 0,
+                "tmdbId": m.get("external_id"),  # clients reuse tmdbId field
+                "tpdbId": m.get("external_id"),
+                "overview": m.get("overview"),
+                "images": [{"coverType": "poster", "remoteUrl": m["poster_path"]}] if m.get("poster_path") else [],
+                "qualityProfileId": 1,
+                "rootFolderPath": getattr(settings, "adult_library_path", "/adult"),
+                "monitored": True,
+                "minimumAvailability": "released",
+                "addOptions": {"searchForMovie": True},
+                "mediaOsLibrary": "adult",
+            })
+        return rows
+
+    from app.clients.tmdb import tmdb_client
+
     if term.lower().startswith("tmdb:"):
         try:
             mid = int(term.split(":", 1)[1])
@@ -436,19 +497,69 @@ def movie_lookup(term: str = "", _: bool = Depends(require_arr_key)):
 
 
 @router.get("/api/v3/movie/{movie_id}")
-def get_movie(movie_id: int, _: bool = Depends(require_arr_key), db: Session = Depends(get_db)):
+def get_movie(movie_id: int, library: str | None = Query(default=None), _: bool = Depends(require_arr_key), db: Session = Depends(get_db)):
     item = db.get(MediaItem, movie_id)
-    if not item or item.media_type != MediaType.movie:
+    if not item:
+        raise HTTPException(404)
+    if item.media_type == MediaType.adult:
+        return _adult_movie_resource(item)
+    if item.media_type != MediaType.movie:
         raise HTTPException(404)
     return _movie_resource(item)
 
 
 @router.post("/api/v3/movie")
-async def add_movie_v3(request: Request, _: bool = Depends(require_arr_key), db: Session = Depends(get_db)):
-    """Jellyseerr / Radarr-style add movie."""
+async def add_movie_v3(request: Request, library: str | None = Query(default=None), _: bool = Depends(require_arr_key), db: Session = Depends(get_db)):
+    """Jellyseerr / Radarr-style add. library=adult → TPDB / adult library."""
+    body = await request.json()
+    lib = (library or body.get("mediaOsLibrary") or body.get("library") or "").lower()
+
+    if lib == "adult":
+        from app.clients.tpdb import tpdb_client
+        from app.routers.adult import _tpdb_int_id
+
+        raw_id = body.get("tmdbId") or body.get("tpdbId") or body.get("external_id")
+        title = body.get("title") or "Unknown"
+        year = body.get("year")
+        overview = body.get("overview")
+        poster = None
+        if raw_id and tpdb_client.configured():
+            try:
+                details = tpdb_client.get_movie(raw_id)
+                title = details.get("title") or title
+                year = details.get("year") if details.get("year") is not None else year
+                overview = details.get("overview") or overview
+                poster = details.get("poster_path")
+                eid = _tpdb_int_id(details.get("external_id") or raw_id)
+            except Exception:
+                eid = _tpdb_int_id(raw_id)
+        else:
+            eid = _tpdb_int_id(raw_id or f"adult:{title}:{body.get('year') or ''}")
+        existing = (
+            db.query(MediaItem)
+            .filter(MediaItem.media_type == MediaType.adult, MediaItem.external_id == eid)
+            .first()
+        )
+        if existing:
+            return _adult_movie_resource(existing)
+        item = MediaItem(
+            media_type=MediaType.adult,
+            external_id=eid,
+            external_source="tpdb" if raw_id else "manual",
+            title=title,
+            year=year,
+            overview=overview,
+            poster_path=poster,
+            monitored=bool(body.get("monitored", True)),
+            status=ItemStatus.wanted,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return _adult_movie_resource(item)
+
     from app.clients.tmdb import tmdb_client
 
-    body = await request.json()
     tmdb_id = body.get("tmdbId") or body.get("tmdb_id")
     if not tmdb_id:
         raise HTTPException(400, "tmdbId required")

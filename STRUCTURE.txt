@@ -1,4 +1,4 @@
-MediaOs 4.0.0-foundation — folder map
+MediaOs 4.13.3 — folder map
 =====================================
 
 This directory IS the application.
@@ -30,7 +30,7 @@ Existing strong modules (still present):
   arr_migrator.py        — Sonarr/Radarr/… import
   livetv*.py             — Live TV
   rate_limit.py          — indexer host limits
-  … and the rest of the 3.7.x services
+  … and the rest of the core services
 
 Root docs:
 
@@ -38,4 +38,4 @@ Root docs:
   ARCHITECTURE.md    System design
   ROADMAP.md         Phased implementation plan
   README.md          This package overview
-  VERSION            4.0.0-foundation
+  VERSION            4.4.1

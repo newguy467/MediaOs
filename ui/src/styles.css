@@ -940,3 +940,12 @@ a:hover { color: #e9d5ff; }
   background: #8b5cf6 !important;
   color: #fff !important;
 }
+
+
+/* Page chrome — consistent top logo bar across themes */
+.mos-page-chrome {
+  min-height: 100%;
+}
+.logo-mark {
+  border-radius: 0.35rem;
+}

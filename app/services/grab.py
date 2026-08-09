@@ -91,6 +91,7 @@ def _qb_category(media_item: MediaItem, episode: Episode | None = None) -> str:
         "tv": "mediaos-tv",
         "comic": "mediaos-comics",
         "manga": "mediaos-comics",
+        "adult": "mediaos-adult",
     }.get(mt, "mediaos")
 
 
@@ -194,7 +195,66 @@ def _send_usenet(url: str, name: str) -> None:
 
 
 
+
+def _release_matches_desired(media_item: MediaItem, release: dict) -> bool:
+    """Enforce MediaItem.desired_qualities when set (JSON list of resolution labels)."""
+    import json
+    raw = getattr(media_item, "desired_qualities", None)
+    if not raw:
+        return True
+    try:
+        desired = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except Exception:
+        return True
+    if not desired:
+        return True
+    title = (release.get("title") or "").lower()
+    # Also check explicit quality fields
+    q = str(release.get("quality") or release.get("resolution") or "").lower()
+    blob = f"{title} {q}"
+    for d in desired:
+        token = str(d).lower().strip()
+        if not token:
+            continue
+        if token in blob:
+            return True
+        # normalize 2160p / 4k
+        if token in ("2160p", "4k", "uhd") and any(x in blob for x in ("2160p", "4k", "uhd")):
+            return True
+    return False
+
+
+def _already_has_quality(media_item: MediaItem, release: dict) -> bool:
+    """If multi-quality keep is on and file exists matching this quality, skip duplicate."""
+    import json
+    path = getattr(media_item, "file_path", None) or ""
+    if not path:
+        return False
+    raw = getattr(media_item, "desired_qualities", None)
+    if not raw:
+        return False
+    try:
+        desired = json.loads(raw) if isinstance(raw, str) else list(raw)
+    except Exception:
+        return False
+    if len(desired) <= 1:
+        # single target — normal upgrade path handles it
+        return False
+    title = (release.get("title") or "").lower()
+    # If path already encodes same resolution token, treat as have-it
+    pl = path.lower()
+    for d in desired:
+        token = str(d).lower().strip()
+        if token and token in title and token in pl:
+            return True
+    return False
+
+
 def grab_release(db: Session, media_item: MediaItem, release: dict) -> Download:
+    if not _release_matches_desired(media_item, release):
+        raise RuntimeError("Release does not match desired_qualities for this item")
+    if _already_has_quality(media_item, release):
+        raise RuntimeError("Already have this quality on disk (multi-quality keep)")
     ok, reason = vpn_allows_grabs()
     if not ok:
         log.warning("Grab blocked for %s: %s", media_item.title, reason)

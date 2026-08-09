@@ -172,7 +172,7 @@ def install_remote_logos(db: Session, *, limit: int = 500, timeout: float = 12.0
                 db.add(ch)
                 downloaded += 1
                 continue
-            with httpx.Client(timeout=timeout, follow_redirects=True, headers={"User-Agent": "MediaOs/3.7"}) as client:
+            with httpx.Client(timeout=timeout, follow_redirects=True, headers={"User-Agent": "MediaOs/4.7.2"}) as client:
                 r = client.get(logo)
                 if r.status_code >= 400 or not r.content:
                     failed += 1

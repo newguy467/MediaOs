@@ -15,7 +15,15 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.clients.prowlarr import MOVIE_CATEGORY, TV_CATEGORY, prowlarr_client
+from app.clients.prowlarr import (
+    AUDIO_CATEGORY,
+    AUDIOBOOK_CATEGORY,
+    BOOK_CATEGORY,
+    MOVIE_CATEGORY,
+    TV_CATEGORY,
+    XXX_CATEGORY,
+    prowlarr_client,
+)
 from app.models import Episode, MediaItem
 from app.services import rate_limit
 from app.services.quality import rank_releases
@@ -515,4 +523,146 @@ def interactive_series_pack_search(
         t0=t0,
         breakdown=breakdown,
         limit=limit,
+    )
+
+
+def interactive_adult_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    """Whisparr-style interactive search — same envelope as movies, XXX category."""
+    t0 = time.perf_counter()
+    profile = _profile_for_item(db, "adult", item.quality_profile)
+    title = (item.title or "").strip()
+    queries = [title]
+    if item.year:
+        queries.append(f"{title} {item.year}")
+    raw, stats = _gather_releases(queries, XXX_CATEGORY, "movie", db)
+    raw = _parse_enrich(raw)
+    accepted, rejected, breakdown = _score_and_split(
+        raw, profile, db, mode="all", desired_qualities=_desired(item)
+    )
+    return _envelope(
+        media_type="adult",
+        queries=queries,
+        accepted=accepted,
+        rejected=rejected,
+        indexer_stats=stats,
+        total_raw=len(raw),
+        t0=t0,
+        breakdown=breakdown,
+        limit=limit,
+    )
+
+
+# Categories not always re-exported from prowlarr client
+_COMIC_CATEGORY = 7030
+_MANGA_CATEGORY = 7010
+
+
+def _map_rows(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        out.append({
+            "title": r.get("title") or "",
+            "indexer": r.get("indexer"),
+            "size": r.get("size"),
+            "seeders": r.get("seeders"),
+            "download_url": r.get("download_url") or r.get("magnet") or "",
+            "score": r.get("_score") or r.get("score"),
+            "matched_formats": list(r.get("_matched_formats") or []),
+            "protocol": r.get("protocol"),
+            "age_hours": r.get("age_hours") or r.get("age"),
+            "rejected": bool(r.get("rejected")),
+            "rejections": list(r.get("rejections") or []),
+            "info_hash": r.get("info_hash"),
+            "parsed_resolution": (r.get("_parsed") or {}).get("resolution"),
+            "parsed_codec": (r.get("_parsed") or {}).get("codec"),
+            "parsed_source": (r.get("_parsed") or {}).get("source"),
+            "parsed_group": (r.get("_parsed") or {}).get("group"),
+        })
+    return out
+
+
+def interactive_generic_search(
+    item: MediaItem,
+    *,
+    category: int,
+    media_type: str,
+    profile_media: str,
+    queries: list[str] | None = None,
+    db: Session | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Full interactive envelope for any media type / Torznab category."""
+    t0 = time.perf_counter()
+    profile = _profile_for_item(db, profile_media, getattr(item, "quality_profile", None))
+    title = (item.title or "").strip()
+    qs = list(queries or [])
+    if not qs:
+        qs = [title]
+        if getattr(item, "year", None):
+            qs.append(f"{title} {item.year}")
+        if getattr(item, "artist_name", None):
+            qs.insert(0, f"{item.artist_name} {title}")
+    raw, stats = _gather_releases(qs, category, media_type if media_type in ("movie", "tv", "music") else "movie", db)
+    raw = _parse_enrich(raw)
+    accepted, rejected, breakdown = _score_and_split(
+        raw, profile, db, mode="all", desired_qualities=_desired(item)
+    )
+    env = _envelope(
+        media_type=media_type,
+        queries=qs,
+        accepted=accepted,
+        rejected=rejected,
+        indexer_stats=stats,
+        total_raw=len(raw),
+        t0=t0,
+        breakdown=breakdown,
+        limit=limit,
+    )
+    # Normalize keys for UI
+    env["results"] = _map_rows(env.get("results") or env.get("accepted") or accepted[:limit])
+    env["rejected"] = _map_rows(env.get("rejected") or rejected)
+    env["accepted_count"] = len(env["results"])
+    env["rejected_count"] = len(env["rejected"])
+    return env
+
+
+def interactive_music_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    qs = []
+    title = (item.title or "").strip()
+    if item.artist_name:
+        qs.append(f"{item.artist_name} {title.replace(item.artist_name + ' - ', '', 1)}")
+    qs.append(title)
+    if item.year:
+        qs.append(f"{qs[0]} {item.year}")
+    return interactive_generic_search(
+        item, category=AUDIO_CATEGORY, media_type="music", profile_media="music",
+        queries=qs, db=db, limit=limit,
+    )
+
+
+def interactive_book_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    return interactive_generic_search(
+        item, category=BOOK_CATEGORY, media_type="book", profile_media="book",
+        db=db, limit=limit,
+    )
+
+
+def interactive_audiobook_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    return interactive_generic_search(
+        item, category=AUDIOBOOK_CATEGORY, media_type="audiobook", profile_media="movie",
+        db=db, limit=limit,
+    )
+
+
+def interactive_comic_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    return interactive_generic_search(
+        item, category=_COMIC_CATEGORY, media_type="comic", profile_media="comic",
+        db=db, limit=limit,
+    )
+
+
+def interactive_manga_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    return interactive_generic_search(
+        item, category=_MANGA_CATEGORY, media_type="manga", profile_media="manga",
+        db=db, limit=limit,
     )

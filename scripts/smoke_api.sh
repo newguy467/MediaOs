@@ -28,3 +28,14 @@ curl -sf "${AUTH[@]}" "$BASE/api/parity/usenet-stream/status" | grep -q seekable
 
 echo "pass=$pass fail=$fail"
 [[ "$fail" -eq 0 ]]
+
+if curl -sf "${AUTH[@]}" "$BASE/api/ai/status" >/dev/null 2>&1; then
+  echo "  PASS  ai status"
+else
+  echo "  SKIP  ai status (enable with --profile ai)"
+fi
+if curl -sf "${AUTH[@]}" "$BASE/api/homelab-links" >/dev/null 2>&1; then
+  echo "  PASS  homelab-links"
+else
+  echo "  FAIL  homelab-links"; fail=$((fail+1))
+fi

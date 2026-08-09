@@ -1,44 +1,46 @@
-name: Build & push GHCR
+name: Publish Docker image (GHCR)
 
 on:
   push:
     branches: [main, master]
-    tags: ["v*"]
-  pull_request:
-    branches: [main, master]
+    tags:
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Version
+      - name: Read version
         id: ver
         run: |
-          V=$(cat VERSION 2>/dev/null || echo "0.0.0")
-          echo "version=$V" >> $GITHUB_OUTPUT
-          echo "APP_VERSION=$V"
+          FILE=$(tr -d '[:space:]' < VERSION || echo "0.0.0")
+          echo "version=$FILE" >> $GITHUB_OUTPUT
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Login GHCR
-        if: github.event_name != 'pull_request'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Meta
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -46,16 +48,22 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.ver.outputs.version }}
-            type=sha,prefix=sha-
-            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
 
-      - name: Build & push
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: APP_VERSION=${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo "Pushed ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.meta.outputs.tags }}"

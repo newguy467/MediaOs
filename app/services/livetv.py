@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 
 import httpx
@@ -193,51 +193,215 @@ def _parse_xmltv_dt(s: str):
     return None
 
 
+
+def effective_tvg_id(channel) -> str | None:
+    """Prefer manual epg_tvg_id override, else playlist tvg_id."""
+    override = getattr(channel, "epg_tvg_id", None)
+    if override and str(override).strip():
+        return str(override).strip()
+    tvg = getattr(channel, "tvg_id", None)
+    return str(tvg).strip() if tvg else None
+
+
 def fetch_and_index_epg(db: Session) -> dict:
-    """Pull XMLTV from all sources with epg_url and index by tvg_id."""
+    """Pull XMLTV from all source epg_urls + global extra URLs; merge into one cache."""
     import httpx
     from app.clients.stalker import parse_epg_xmltv
+    from app.config import settings
     from app.models import LiveTvSource
+
     global _epg_cache
-    from datetime import datetime, timezone
+    urls: list[str] = []
+    for src in db.query(LiveTvSource).filter(LiveTvSource.enabled.is_(True)).all():
+        u = (getattr(src, "epg_url", None) or "").strip()
+        if u and u not in urls:
+            urls.append(u)
+    # Extra URLs from settings (comma-separated)
+    extra = (getattr(settings, "livetv_epg_extra_urls", "") or "").strip()
+    sidecar = (getattr(settings, "livetv_epg_sidecar_url", "") or "").strip()
+    if sidecar and sidecar not in (extra or ""):
+        extra = (extra + "," + sidecar) if extra else sidecar
+    for part in extra.replace("\n", ",").split(","):
+        u = part.strip()
+        if u and u not in urls:
+            urls.append(u)
 
     programmes = []
-    sources = db.query(LiveTvSource).filter(LiveTvSource.enabled.is_(True)).all()
-    for src in sources:
-        url = getattr(src, "epg_url", None) or None
-        if not url:
-            continue
+    errors = []
+    fetched = 0
+    for url in urls:
         try:
-            r = httpx.get(url, timeout=90.0, follow_redirects=True)
-            r.raise_for_status()
-            programmes.extend(parse_epg_xmltv(r.text))
-        except Exception as exc:
-            log.warning("EPG fetch failed for source %s: %s", src.id, exc)
+            with httpx.Client(timeout=90.0, follow_redirects=True, headers={
+                "User-Agent": "MediaOs/4.9 LiveTV-EPG",
+            }) as client:
+                r = client.get(url)
+                r.raise_for_status()
+                text = r.text
+                # gzip magic handled by httpx if Content-Encoding; some hosts serve .xml.gz raw
+                if url.endswith(".gz") and not text.lstrip().startswith("<"):
+                    import gzip
+                    text = gzip.decompress(r.content).decode("utf-8", errors="replace")
+                programmes.extend(parse_epg_xmltv(text) or [])
+                fetched += 1
+        except Exception as e:
+            log.warning("EPG fetch failed %s: %s", url, e)
+            errors.append({"url": url, "error": str(e)})
 
-    by_tvg: dict[str, list] = {}
+    by_tvg: dict = {}
     for p in programmes:
-        cid = p.get("channel_id") or ""
+        tvg = (p.get("channel") or p.get("tvg_id") or "").strip()
+        if not tvg:
+            continue
         start = _parse_xmltv_dt(p.get("start") or "")
         stop = _parse_xmltv_dt(p.get("stop") or "")
         row = {
-            "title": p.get("title") or "Unknown",
-            "start": start.isoformat() if start else None,
-            "stop": stop.isoformat() if stop else None,
+            "title": p.get("title") or p.get("name"),
+            "start": p.get("start"),
+            "stop": p.get("stop"),
             "start_dt": start,
             "stop_dt": stop,
-            "channel_id": cid,
-            "channel_name": p.get("channel_name"),
+            "desc": p.get("desc") or p.get("description"),
         }
-        by_tvg.setdefault(cid, []).append(row)
-    for cid in by_tvg:
-        by_tvg[cid].sort(key=lambda x: x["start_dt"] or datetime.min.replace(tzinfo=timezone.utc))
+        by_tvg.setdefault(tvg, []).append(row)
+
+    for tvg, rows in by_tvg.items():
+        rows.sort(key=lambda x: x.get("start") or "")
 
     _epg_cache = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "by_tvg": by_tvg,
-        "programmes": programmes,
+        "programmes": programmes[:5],  # sample
+        "urls": urls,
+        "errors": errors,
     }
-    return {"channels": len(by_tvg), "programmes": len(programmes)}
+    return {
+        "urls": len(urls),
+        "fetched": fetched,
+        "channels_with_guide": len(by_tvg),
+        "programmes": sum(len(v) for v in by_tvg.values()),
+        "errors": errors[:8],
+        "fetched_at": _epg_cache["fetched_at"],
+    }
+
+
+def list_epg_channel_ids() -> list[dict]:
+    """Channel ids present in the current EPG cache (for mapping UI)."""
+    out = []
+    for tvg, rows in (_epg_cache.get("by_tvg") or {}).items():
+        sample = rows[0]["title"] if rows else None
+        out.append({"tvg_id": tvg, "programmes": len(rows), "sample_title": sample})
+    out.sort(key=lambda x: x["tvg_id"])
+    return out
+
+
+def suggest_tvg_match(channel_name: str, limit: int = 8) -> list[dict]:
+    """Fuzzy-ish match channel name against EPG ids."""
+    name = (channel_name or "").lower().strip()
+    if not name:
+        return []
+    tokens = [t for t in re.split(r"[^a-z0-9]+", name) if len(t) > 1]
+    scored = []
+    for tvg, rows in (_epg_cache.get("by_tvg") or {}).items():
+        tid = tvg.lower()
+        score = 0
+        if name in tid or tid in name:
+            score += 50
+        for t in tokens:
+            if t in tid:
+                score += 10
+        if score:
+            scored.append({"tvg_id": tvg, "score": score, "programmes": len(rows)})
+    scored.sort(key=lambda x: -x["score"])
+    return scored[:limit]
+
+
+def check_channel_stream(url: str, timeout: float = 8.0) -> tuple[bool, str | None]:
+    """Lightweight reachability probe (HEAD/GET first bytes)."""
+    import httpx
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True, headers={
+            "User-Agent": "MediaOs/4.9 LiveTV-Health",
+        }) as client:
+            # Prefer GET range — many IPTV hosts ignore HEAD
+            r = client.get(url, headers={"Range": "bytes=0-1024"})
+            if r.status_code in (200, 206, 302, 301):
+                return True, None
+            if r.status_code in (401, 403):
+                return True, f"auth {r.status_code}"  # reachable but gated
+            return False, f"http {r.status_code}"
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def run_channel_health_cycle(db: Session) -> dict:
+    """Probe channels; mark failures; delete/disable if offline > 12 hours.
+
+    Policy (settings):
+      livetv_offline_hours (default 12)
+      livetv_offline_action: delete | disable (default delete)
+    """
+    from app.config import settings
+    from app.models import LiveTvChannel
+
+    offline_h = float(getattr(settings, "livetv_offline_hours", 12) or 12)
+    action = (getattr(settings, "livetv_offline_action", "delete") or "delete").lower()
+    batch = int(getattr(settings, "livetv_health_batch", 40) or 40)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=offline_h)
+
+    # Prefer never-checked, then oldest last_check
+    channels = (
+        db.query(LiveTvChannel)
+        .filter(LiveTvChannel.enabled.is_(True))
+        .order_by(LiveTvChannel.last_check_at.nullsfirst())
+        .limit(batch)
+        .all()
+    )
+    ok = fail = deleted = disabled = 0
+    for ch in channels:
+        good, err = check_channel_stream(ch.stream_url)
+        ch.last_check_at = now
+        if good:
+            ch.last_ok_at = now
+            ch.fail_count = 0
+            ch.last_error = None
+            ok += 1
+        else:
+            ch.fail_count = int(ch.fail_count or 0) + 1
+            ch.last_error = err
+            fail += 1
+            last_ok = ch.last_ok_at
+            # Never successfully seen: if fail_count high and first checks span offline window
+            stale = False
+            if last_ok is None:
+                # use first failure streak: if checked enough times over period
+                if ch.fail_count >= 3 and ch.last_check_at:
+                    # treat as offline if we never had ok and failed repeatedly
+                    stale = ch.fail_count >= 6
+            else:
+                if last_ok.tzinfo is None:
+                    last_ok = last_ok.replace(tzinfo=timezone.utc)
+                stale = last_ok < cutoff
+            if stale:
+                if action == "disable":
+                    ch.enabled = False
+                    disabled += 1
+                else:
+                    db.delete(ch)
+                    deleted += 1
+                    continue
+        db.add(ch)
+    db.commit()
+    return {
+        "checked": ok + fail,
+        "ok": ok,
+        "failed": fail,
+        "deleted": deleted,
+        "disabled": disabled,
+        "offline_hours": offline_h,
+        "action": action,
+    }
+
 
 
 def now_next_for_tvg(tvg_id: str | None) -> dict:
@@ -362,7 +526,7 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
         ]
     out_ch = []
     for c in channels:
-        tvg = getattr(c, "tvg_id", None) or getattr(c, "epg_channel_id", None)
+        tvg = effective_tvg_id(c)
         now_next = epg_now_next(tvg) if tvg else {"now": None, "next": None}
         programmes = []
         if tvg:
@@ -405,3 +569,53 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
         "count": len(out_ch),
     }
 
+
+
+def build_xmltv_export(db: Session, base_url: str = "") -> str:
+    """Build a minimal XMLTV document from channels + in-memory EPG cache if present."""
+    from xml.sax.saxutils import escape
+    from app.models import LiveTvChannel
+
+    channels = (
+        db.query(LiveTvChannel)
+        .filter(LiveTvChannel.enabled.is_(True))
+        .order_by(LiveTvChannel.name)
+        .all()
+    )
+    # optional EPG cache from epg module
+    by_tvg = {}
+    try:
+        from app.services import livetv as selfmod
+        cache = getattr(selfmod, "_epg_cache", None) or {}
+        by_tvg = cache.get("by_tvg") or {}
+    except Exception:
+        pass
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE tv SYSTEM "xmltv.dtd">',
+        f'<tv generator-info-name="MediaOs" source-info-name="MediaOs Live TV">',
+    ]
+    for ch in channels:
+        tvg = ch.tvg_id or str(ch.id)
+        parts.append(f'  <channel id="{escape(tvg)}">')
+        parts.append(f'    <display-name>{escape(ch.name or tvg)}</display-name>')
+        if ch.logo:
+            parts.append(f'    <icon src="{escape(ch.logo)}" />')
+        parts.append("  </channel>")
+
+    for ch in channels:
+        tvg = ch.tvg_id or str(ch.id)
+        rows = by_tvg.get(tvg) or []
+        for row in rows[:50]:
+            start = row.get("start") or ""
+            stop = row.get("stop") or ""
+            title = row.get("title") or "Programme"
+            if not start:
+                continue
+            parts.append(f'  <programme start="{escape(str(start))}" stop="{escape(str(stop))}" channel="{escape(tvg)}">')
+            parts.append(f'    <title>{escape(str(title))}</title>')
+            parts.append("  </programme>")
+
+    parts.append("</tv>")
+    return '\n'.join(parts) + '\n'

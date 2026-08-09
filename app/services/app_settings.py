@@ -26,6 +26,10 @@ from app.models import AppSetting
 # type is one of: str, int, float, bool
 SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
     "integrations": {
+        "plex_url": (str, "Plex URL (now-playing)", False),
+        "plex_token": (str, "Plex token", True),
+        "tautulli_url": (str, "Tautulli URL (now-playing)", False),
+        "tautulli_api_key": (str, "Tautulli API key", True),
         "radarr_url": (str, "Radarr URL (for import)", False),
         "radarr_api_key": (str, "Radarr API key", True),
         "sonarr_url": (str, "Sonarr URL (for import)", False),
@@ -71,6 +75,7 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "comics_library_path": (str, "Comics Library Path", False),
         "manga_library_path": (str, "Manga Library Path", False),
         "youtube_library_path": (str, "YouTube Library Path", False),
+        "adult_library_path": (str, "Adult Library Path", False),
         "downloads_path": (str, "Downloads Path", False),
         "movie_naming_folder": (str, "Movie folder naming template", False),
         "episode_naming": (str, "Episode file naming template", False),
@@ -107,6 +112,21 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "subtitle_providers": (str, "Providers (comma list)", False),
         "subdl_api_key": (str, "SubDL API Key", True),
         "subtitle_language_profile_id": (int, "Default language profile id", False),
+    },
+    
+    "adult": {
+        "adult_library_path": (str, "Adult Library Path", False),
+        "adult_passcode_enabled": (bool, "Require passcode to open Adult module", False),
+        "adult_unlock_ttl_minutes": (int, "Adult unlock TTL (minutes)", False),
+        "tpdb_api_key": (str, "ThePornDB API Key (optional metadata)", True),
+    },
+    
+    "hunt": {
+        "hunt_enabled": (bool, "Enable built-in Hunt engine (NeutArr/Huntarr-class)", False),
+        "hunt_interval_minutes": (int, "Hunt interval (minutes)", False),
+        "hunt_batch_limit": (int, "Max items per hunt cycle", False),
+        "hunt_include_adult": (bool, "Include Adult library in hunt", False),
+        "hunt_include_upgrades": (bool, "Also hunt upgrades for downloaded items", False),
     },
     "cleanup": {
         "cleanup_enabled": (bool, "Enable queue cleaner", False),
@@ -179,6 +199,10 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "auth_seed_admin_password": (str, "Seed admin password", True),
     },
     "system": {
+        "livetv_offline_hours": (float, "Live TV: offline hours before remove", False),
+        "livetv_offline_action": (str, "Live TV offline action (delete|disable)", False),
+        "livetv_epg_extra_urls": (str, "Extra XMLTV EPG URLs (comma-separated)", False),
+        "livetv_health_interval_minutes": (int, "Live TV health check interval (min)", False),
         "search_interval_minutes": (int, "Auto-search interval (minutes)", False),
         "min_seeders": (int, "Minimum seeders", False),
         "download_timeout_hours": (int, "Download timeout (hours)", False),
@@ -206,6 +230,7 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "jdupes_enabled": (bool, "Enable jdupes", False),
         "jdupes_path": (str, "jdupes binary path", False),
         "jdupes_hardlink": (bool, "jdupes hardlink mode", False),
+        "library_prefer_hardlink": (bool, "Hardlink into library instead of moving (same filesystem)", False),
         "cross_seed_url": (str, "cross-seed URL", False),
         "cross_seed_api_key": (str, "cross-seed API key", True),
         "log_dir": (str, "Log directory", False),

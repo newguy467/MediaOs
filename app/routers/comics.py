@@ -191,66 +191,17 @@ def search_all_missing_comics(limit: int = 40, db: Session = Depends(get_db), _:
 
 
 @router.get("/{item_id}/interactive-search")
-def interactive_search_comic(item_id: int, limit: int = 40, db: Session = Depends(get_db), _: list = Depends(require_permission("download", "library.view"))):
-    """Alias of /releases with normalized InteractiveRelease shape."""
+def interactive_search_comic(item_id: int, limit: int = 50, db: Session = Depends(get_db), _: list = Depends(require_permission("download", "library.view"))):
+    from app.services.interactive_search import interactive_comic_search, interactive_manga_search
     item = db.get(MediaItem, item_id)
     if not item or item.media_type not in (MediaType.comic, MediaType.manga):
         raise HTTPException(404, "Not found")
-    from app.services.search import search_comic_releases, search_manga_releases
     item.last_searched_at = datetime.now(timezone.utc)
     db.add(item)
     db.commit()
     if item.media_type == MediaType.manga:
-        rows = search_manga_releases(item, db=db, limit=limit)
-    else:
-        rows = search_comic_releases(item, db=db, limit=limit)
-    return [
-        {
-            "title": r.get("title") or "",
-            "indexer": r.get("indexer"),
-            "size": r.get("size"),
-            "seeders": r.get("seeders"),
-            "download_url": r.get("download_url") or r.get("magnet") or "",
-            "score": r.get("_score") or r.get("score"),
-            "matched_formats": list(r.get("_matched_formats") or r.get("matched_formats") or []),
-            "protocol": r.get("protocol"),
-        }
-        for r in rows
-    ]
-
-
-# ── Story arcs + pull list (v4) ────────────────────────────────────────────
-from pydantic import BaseModel, Field
-from app.services import comic_arcs as arcsvc
-
-
-class ArcCreate(BaseModel):
-    name: str
-    description: str | None = None
-    comicvine_id: int | None = None
-    issues: list[dict] | None = None
-
-
-class ArcIssueIn(BaseModel):
-    series_name: str
-    issue_number: str | None = None
-    reading_order: int | None = None
-    media_item_id: int | None = None
-    comic_issue_id: int | None = None
-
-
-class PullCreate(BaseModel):
-    series_name: str
-    issue_number: str | None = None
-    publisher: str | None = None
-    release_date: str | None = None
-    comicvine_id: int | None = None
-    watched: bool = True
-
-
-class PullFlags(BaseModel):
-    watched: bool | None = None
-    grabbed: bool | None = None
+        return interactive_manga_search(item, db=db, limit=limit)
+    return interactive_comic_search(item, db=db, limit=limit)
 
 
 @router.get("/arcs")
