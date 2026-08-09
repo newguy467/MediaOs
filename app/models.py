@@ -29,6 +29,7 @@ class MediaType(str, enum.Enum):
     audiobook = "audiobook"
     comic = "comic"
     manga = "manga"
+    adult = "adult"  # Whisparr-style adult movies (passcode gated)
 
 
 class ItemStatus(str, enum.Enum):
@@ -291,6 +292,10 @@ class LiveTvChannel(Base):
     stream_url: Mapped[str] = mapped_column(Text, nullable=False)
     tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    epg_tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 

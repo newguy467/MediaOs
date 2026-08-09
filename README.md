@@ -1,43 +1,57 @@
-# MediaOs v4 — True All-in-One Media OS
+# MediaOs v4.13.4 — True All-in-One Media OS
 
-**One app that replaces Sonarr + Radarr + Lidarr + Readarr + Bazarr + Prowlarr + Recyclarr + Maintainerr + Huntarr (+ Live TV, comics depth, stream-as-primary, and more).**
+**One app that replaces Sonarr + Radarr + Lidarr + Readarr + Bazarr + Prowlarr + Recyclarr + Maintainerr + Huntarr + NeutArr + Whisparr (+ Live TV, comics depth, stream-as-primary, and more).**
 
-This is the **4.0.0-foundation** package: the big-bang architecture, elevated vision, and enhanced modules on top of the solid 3.7.x codebase.
+Current version: **4.13.4**
 
-## Why v4?
+## Why MediaOs?
 
 People are tired of juggling 8–12 containers just to manage a media library.  
-MediaOs v4 consolidates the entire *arr ecosystem into a single, coherent application with:
+MediaOs consolidates the entire *arr ecosystem into a single, coherent application with:
 
 - Shared pipeline for every media type
 - Live TRaSH Guides quality system
-- Full music hierarchy + comics pull-list/story-arcs
+- Full music hierarchy + comics pull-list / story-arcs
 - Stream-as-primary path
 - Native maintenance rules + hunt engine
+- Built-in stalled-download cleanup (no external Swaparr needed)
+- Native hardlink-into-library option (zero extra disk space while seeding)
+- **Built-in Adult (Whisparr class)** — passcode gate, TPDB metadata, XXX search, arr-compat `library=adult`
+- **Built-in Hunt (NeutArr / Huntarr class)** — no external NeutArr container
+- **Built-in Cleanup (Cleanuparr / Swaparr class)** — stalled strikes, seed goals
 - Basic mode (friendly) + Advanced mode (power)
 - Strong import from existing *arr instances
 
-## Quick start (same as 3.7)
+### New in 4.12.0 — Safe AI + Homelab Links
+
+- Optional local AI (Ollama + **llama3.2**) — sidebar **AI Search** + floating panel
+- Tools: library search, wanted, indexer health, queue, quality suggestions, errors
+- Homelab Links page (persisted) — Organizr-lite quick links
+- `docker compose --profile ai up -d` then `./scripts/pull_ollama_model.sh`
+
+**Still external (on purpose):** download clients (qBittorrent, SABnzbd, …) and your media player (Jellyfin / Plex / Emby).
+
+## Quick start
 
 ```bash
+git clone https://github.com/newguy467/MediaOs.git
+cd MediaOs
 cp .env.example .env
 # edit paths / API keys
+
 docker compose -f docker-compose.standalone.yml up -d --build
 open http://localhost:8787
 ```
 
-## What’s new in this foundation zip
+## What’s in 4.7.1
 
-- `VISION.md` — full replacement scope
-- `ARCHITECTURE.md` — system design
-- `ROADMAP.md` — phased path from foundation → complete AIO
-- Enhanced `trash_guide_fetch.py` (live TRaSH / Recyclarr-style)
-- New `comic_arcs.py` (story-arc + reading order + metatag hooks)
-- New `music_hierarchy.py` (artist → album tree + wanted hierarchy)
-- New `hunt.py` (aggressive missing/upgrade engine)
-- New `maintenance_rules.py` (Maintainerr-style rules)
-- New `homelab_links.py` (Organizr-lite Apps/Links)
-- Existing strengths retained & extended: stream_mode, comic_pull_sync, music_completeness, cleanup, arr_migrator, Live TV, quality engine, etc.
+- Version strings aligned across `VERSION`, `package.json`, `Dockerfile`, and runtime
+- Native hardlink support in the organizer (Settings → Library → “Hardlink into library instead of moving”)
+- Reproducible UI builds via committed `package-lock.json`
+- Improved Basic / Advanced mode gating
+- Live TRaSH Guides sync improvements
+- Health endpoint and startup logs report the correct version
+- Cleanup engine already covers stalled downloads across companion *arr apps — no separate Swaparr required
 
 ## Docs
 
@@ -49,21 +63,11 @@ open http://localhost:8787
 | STRUCTURE.txt | Folder map |
 | docs/ | Screenshots & GitHub Pages site |
 
-## Contributing / Next work
-
-See ROADMAP.md. Highest leverage next steps:
-
-1. Wire live TRaSH sync end-to-end + Quality Profiles admin UI
-2. Full music track-level model + hierarchy UI
-3. Comics story-arc models + pull-list auto-grab polish
-4. Stream button next to Grab in the React UI
-5. Basic vs Advanced mode switch
-
 ## License
 
-MIT (same as upstream MediaOs).  
+MIT.  
 Ideas and patterns drawn from open-source projects including Cinephage, Recyclarr, Mylar3, Headphones, Prismarr, Bobarr, Organizr, and the classic *arr suite — all credit to their authors.
 
 ---
 
-**MediaOs v4 — stop switching apps. Manage everything in one place.**
+**MediaOs — stop switching apps. Manage everything in one place.**

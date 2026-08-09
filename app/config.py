@@ -149,8 +149,12 @@ class Settings(BaseSettings):
     vpn_server_cities: str = ""
     vpn_port_forwarding: bool = False
     # Hunt engine
+    # Built-in NeutArr/Huntarr-class engine (no external NeutArr needed)
+    hunt_enabled: bool = True
     hunt_interval_minutes: int = 60
     hunt_batch_limit: int = 25
+    hunt_include_adult: bool = True  # include Adult module in hunt cycles
+    hunt_include_upgrades: bool = False  # when True, also re-check downloaded for upgrades
 
     # Cross-Seed (https://cross-seed.org) — notify on grab/organize
     cross_seed_url: str = ""  # e.g. http://cross-seed:2468
@@ -164,6 +168,15 @@ class Settings(BaseSettings):
     jdupes_enabled: bool = True
     jdupes_path: str = "jdupes"  # binary on PATH
     jdupes_hardlink: bool = False  # if True, -L hardlink mode when applying
+    # Prefer hardlink when organizing into library (same filesystem required; falls back to move)
+    library_prefer_hardlink: bool = False
+    # Adult (Whisparr-style) module — passcode gate
+    adult_passcode_hash: str = ""  # pbkdf2 hash; empty = module locked until set
+    adult_passcode_enabled: bool = True  # require unlock token for /api/adult/*
+    adult_unlock_ttl_minutes: int = 60
+    # Optional ThePornDB API key for metadata (leave empty to use title-only)
+    tpdb_api_key: str = ""
+
 
     # LunaSea / *arr API compatibility
     arr_api_key: str = ""  # X-Api-Key for /api/v3/* shims; falls back to AUTH_API_KEY
@@ -239,15 +252,27 @@ class Settings(BaseSettings):
     trash_guide_url: str = ""  # optional JSON guide URL for matrix import
     trash_guide_path: str = ""  # optional local JSON path
     comic_pull_sync_hours: int = 12
+    comic_pull_auto_grab: bool = True
+    comic_pull_auto_grab_limit: int = 10
     trash_guide_sync_hours: int = 168  # weekly
+    trash_guide_auto_sync: bool = False  # enable periodic TRaSH guide sync
     livetv_epg_sync_hours: int = 6
     livetv_seed_iptv_org: bool = True  # seed US+Entertainment when no sources
+    livetv_auto_grab: bool = True  # on startup: seed + resync + EPG index
+    # Prefer local Node sidecar when present (compose service iptv-org-epg)
+    livetv_epg_sidecar_url: str = "http://iptv-org-epg:3000/guide.xml"
     livetv_iptv_org_sync_hours: int = 24  # re-sync iptv-org M3U sources
+    livetv_epg_extra_urls: str = ""  # comma-separated extra XMLTV URLs to merge
+    livetv_offline_hours: float = 12  # remove/disable channels offline this long
+    livetv_offline_action: str = "delete"  # delete | disable
+    livetv_health_batch: int = 40  # channels probed per health cycle
+    livetv_health_interval_minutes: int = 30  # stream health check interval
 
 
 
     # YouTube / Creator tracking (yt-dlp)
     youtube_library_path: str = "/youtube"
+    adult_library_path: str = "/adult"
     youtube_check_interval_minutes: int = 60
     youtube_auto_download_default: bool = True
     youtube_ytdlp_path: str = "yt-dlp"
@@ -282,7 +307,11 @@ class Settings(BaseSettings):
     cardigann_enabled: bool = True
     cardigann_auto_sync: bool = True  # pull Jackett YAML defs on startup + weekly
     cardigann_auto_sync_on_startup: bool = True
-    cardigann_sync_max_files: int = 0  # 0 = all; e.g. 80 for lighter first sync
+    indexer_health_enabled: bool = True
+    indexer_health_interval_hours: int = 6
+    indexer_health_fail_disable: int = 5  # consecutive fails before auto-disable
+    cardigann_sync_max_files: int = 0  # 0 = ALL Jackett defs (thousands); set e.g. 120 for light first run
+    cardigann_sync_workers: int = 8  # parallel downloads when syncing full pack
 
     # Logging
     log_level: str = "INFO"  # DEBUG|INFO|WARNING|ERROR
@@ -293,6 +322,13 @@ class Settings(BaseSettings):
     vpn_password: str = ""
     vpn_killswitch: bool = False
     vpn_interface: str = ""
+
+    # Plex / Tautulli now-playing (optional dashboard widget)
+    plex_url: str = ""
+    plex_token: str = ""
+    tautulli_url: str = ""
+    tautulli_api_key: str = ""
+
 
 settings = Settings()
 

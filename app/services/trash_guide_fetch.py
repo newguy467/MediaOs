@@ -31,7 +31,7 @@ log = logging.getLogger("mediaos.trash_fetch")
 # Conservative built-in snapshot so the system works offline / first-run.
 # This is intentionally smaller than full TRaSH; live fetch replaces it.
 _BUILTIN = {
-    "version": "builtin-3.7-fallback",
+    "version": "builtin-4.7-fallback",
     "scores": {
         "resolution": {
             "2160p": 20000, "4k": 20000, "uhd": 20000,
@@ -73,7 +73,7 @@ def _load_url(url: str) -> dict[str, Any]:
         url,
         timeout=45,
         follow_redirects=True,
-        headers={"User-Agent": "MediaOs/4.0 (TRaSH-sync)"},
+        headers={"User-Agent": "MediaOs/4.7.2 (TRaSH-sync)"},
     )
     r.raise_for_status()
     return r.json()

@@ -552,3 +552,26 @@ def is_upgrade(
     if not existing_quality:
         return True
     return resolution_rank(candidate_quality) > resolution_rank(existing_quality)
+
+
+def default_adult_profile() -> QualityProfile:
+    """Dedicated Adult / XXX quality profile (not the movie profile)."""
+    return QualityProfile(
+        name="Adult",
+        upgrades_allowed=True,
+        min_score_increase=5,
+        custom_formats=[
+            CustomFormat("2160p / 4K", 20, title_regex=r"\b(2160p|4k|uhd)\b"),
+            CustomFormat("1080p", 15, title_regex=r"\b1080p\b"),
+            CustomFormat("720p", 8, title_regex=r"\b720p\b"),
+            CustomFormat("WEB-DL / WEBRip", 10, title_regex=r"\b(web-?dl|webrip)\b"),
+            CustomFormat("BluRay", 12, title_regex=r"\b(bluray|bdrip|bd\s?remux)\b"),
+            CustomFormat("HEVC / x265", 6, title_regex=r"\b(hevc|x265|h\.?265)\b"),
+            CustomFormat("x264", 3, title_regex=r"\b(x264|h\.?264|avc)\b"),
+            CustomFormat("HDR", 5, title_regex=r"\b(hdr10?|dv|dolby\s?vision)\b"),
+            CustomFormat("VR", 8, title_regex=r"\b(vr|oculus|quest)\b"),
+            CustomFormat("Cam / TS / TC", -100, title_regex=r"\b(cam|telesync|telecine|hdts|hdtc)\b"),
+            CustomFormat("XXX / Adult tag", 2, title_regex=r"\b(xxx|adult)\b"),
+        ],
+    )
+

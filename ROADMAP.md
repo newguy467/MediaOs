@@ -1,6 +1,6 @@
 # MediaOs v4 Roadmap — Big Bang Foundation → Full Replacement
 
-Version: 4.0.0-foundation
+Version: 4.4.1
 
 ## Phase 0 — Foundation (this package)
 - [x] Elevated vision: full *arr ecosystem replacement
@@ -73,7 +73,7 @@ Version: 4.0.0-foundation
 - Basic vs Advanced mode fully wired
 - End-to-end migration guides + validation checklists
 - Performance pass (large libraries)
-- Public 4.0 release
+- Public 4.x release
 
 ## Continuous
 - Multi-user permissions
@@ -91,7 +91,7 @@ Version: 4.0.0-foundation
 - Keep the shared pipeline sacred: every media type flows through the same search → score → grab/stream → organize path.
 - When porting ideas from Cinephage / Mylar3 / Recyclarr / Headphones / Prismarr, extract the *behavior and data model*, not necessarily the original language or UI framework.
 
-This foundation zip is the starting point for the big-bang v4 effort.
+This 4.4.1 tree continues the big-bang v4 effort.
 
 - [x] Comics story-arc + pull-list UI
 - [x] Hunt worker wired

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MediaOs Changelog — 4.13.3</title>
+  <style>
+    :root {
+      --bg: #0b0914; --line: #2a2448; --text: #f3f0ff;
+      --muted: #9b93c0; --accent: #8b5cf6; --accent2: #a78bfa;
+    }
+    body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.55; }
+    a { color: var(--accent2); }
+    header { display: flex; justify-content: space-between; padding: .85rem 5vw; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(11,9,20,.95); }
+    .brand { font-weight: 700; color: var(--accent); text-decoration: none; }
+    main { max-width: 820px; margin: 0 auto; padding: 2rem 5vw 4rem; }
+    h2 { margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; color: var(--accent2); }
+    li { color: var(--muted); margin: .35rem 0; }
+    li strong { color: var(--text); }
+    p { color: var(--muted); }
+    footer { border-top: 1px solid var(--line); padding: 1.5rem 5vw; color: var(--muted); font-size: .9rem; max-width: 820px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="./">MediaOs</a>
+    <nav><a href="./">Home</a> · <a href="https://github.com/newguy467/MediaOs">GitHub</a></nav>
+  </header>
+  <main>
+<h1>Changelog</h1>
+<h2>4.13.3 — 2026-08-09</h2>
+<p>Docker Compose cleanup. Ten compose files shipped in the zip, three of them</p>
+<p>dead weight — this trims to seven, with every remaining file directly</p>
+<p>referenced by the app&#x27;s own setup wizard or real docs (verified by grep</p>
+<p>before deleting anything, not guessed).</p>
+<h3>Removed</h3>
+<ul>
+<li><code>docker-compose.gpu.yml</code> — duplicated <code>docker-compose.nvidia/intel/amd.yml</code></li>
+</ul>
+<p>  via a messier <code>extends</code>-based pattern; the app&#x27;s own setup wizard and</p>
+<p>  <code>/api/converter</code> endpoints already point users at the three vendor-specific</p>
+<p>  files directly, and nothing in the repo referenced this one.</p>
+<ul>
+<li><code>docker-compose.neutarr.example.yml</code> — was already self-labeled</li>
+</ul>
+<p>  &quot;DEPRECATED — not required&quot; with no services defined, and referenced</p>
+<p>  nowhere.</p>
+<ul>
+<li><code>docker-compose.epg.example.yml</code> — duplicated the <code>iptv-org-epg</code> service</li>
+</ul>
+<p>  that already ships inside <code>docker-compose.yml</code> behind the <code>full</code>/<code>epg</code></p>
+<p>  profile. <code>docs/LIVETV.md</code> was the only reference; updated it to</p>
+<p>  <code>docker compose -f docker-compose.yml --profile epg up -d</code> instead of</p>
+<p>  pointing at a separate file.</p>
+<h3>Fixed</h3>
+<ul>
+<li><code>app/main.py</code> had two more hardcoded stale <code>APP_VERSION</code> fallbacks</li>
+</ul>
+<p>  (<code>4.11.0</code>) beyond the one fixed in 4.13.2 — startup log line and the</p>
+<p>  <code>/api/health</code> response. All three now match the release.</p>
+<h3>Kept (all directly referenced by the app itself)</h3>
+<p><code>docker-compose.yml</code>, <code>docker-compose.standalone.yml</code>,</p>
+<p><code>docker-compose.vpn.example.yml</code>, <code>docker-compose.nvidia.yml</code>,</p>
+<p><code>docker-compose.intel.yml</code>, <code>docker-compose.amd.yml</code>,</p>
+<p><code>docker-compose.integrations.example.yml</code>.</p>
+<h2>4.13.2 — 2026-08-08</h2>
+<p>A critical patch release. <strong>v4.13.1 does not start</strong> due to a syntax error in the</p>
+<p>setup router — this release fixes that plus a second silent-breakage bug in Live</p>
+<p>TV, closes two auth timing/brute-force gaps, and finally ships the two CI</p>
+<p>workflows (<code>ghcr.yml</code>, <code>ui.yml</code>) that have been flagged as missing since the</p>
+<p>4.12 audit. No schema or config changes — if you&#x27;re running 4.13.1 in a</p>
+<p>container, it likely never came up; pull this tag and redeploy.</p>
+<h3>Fixed — critical</h3>
+<ul>
+<li><strong>App would not start.</strong> <code>app/routers/setup.py</code> had a <code>return</code> statement outside its</li>
+</ul>
+<p>  function (bad dedent); since <code>setup</code> is imported unconditionally by <code>app/main.py</code>,</p>
+<p>  this broke the entire application, not just the first-run wizard.</p>
+<ul>
+<li><strong>Live TV entirely broken.</strong> <code>app/services/livetv.py</code> had a stray <code>import re</code> placed</li>
+</ul>
+<p>  before <code>from __future__ import annotations</code>, which Python requires to be the first</p>
+<p>  statement in a file. Every Live TV feature (M3U sync, EPG, XMLTV export, channel</p>
+<p>  health) imports this module and failed at import time.</p>
+<h3>Fixed — security</h3>
+<ul>
+<li><code>arr_compat.require_arr_key</code> now compares the <code>X-Api-Key</code> with</li>
+</ul>
+<p>  <code>secrets.compare_digest</code> instead of <code>!=</code>, matching the constant-time comparison used</p>
+<p>  everywhere else in the auth layer.</p>
+<ul>
+<li><code>/api/auth/login</code> and <code>/api/adult/unlock</code> are now rate-limited (escalating backoff,</li>
+</ul>
+<p>  reusing the existing indexer backoff registry) to blunt credential/passcode</p>
+<p>  brute-forcing.</p>
+<h3>Fixed — other</h3>
+<ul>
+<li><code>app/main.py</code>&#x27;s <code>APP_VERSION</code> fallback was hardcoded to a stale <code>4.11.0</code>; now tracks</li>
+</ul>
+<p>  the release.</p>
+<ul>
+<li><code>organize.py</code>: cross-seed notification for single-episode TV organizes was nested</li>
+</ul>
+<p>  inside the <code>after_organize_episode</code> hook&#x27;s try/except, so it silently never ran if</p>
+<p>  that hook raised. Split into its own independent try block, matching the movie path.</p>
+<ul>
+<li><code>package-lock.json</code>&#x27;s embedded <code>version</code> field was stale at <code>4.11.0</code> (out of sync</li>
+</ul>
+<p>  with <code>package.json</code>); now kept in lockstep.</p>
+<ul>
+<li>Regenerated <code>FILELIST.txt</code> against the actual tree (previously stale, per</li>
+</ul>
+<p>  <code>docs/GAP_AUDIT.md</code>).</p>
+<h3>Added</h3>
+<ul>
+<li><code>.github/workflows/ghcr.yml</code> — multi-arch (amd64/arm64) image build + push to</li>
+</ul>
+<p>  <code>ghcr.io/&lt;repo&gt;</code> on pushes to <code>main</code>/<code>master</code> and on <code>v*</code> tags.</p>
+<ul>
+<li><code>.github/workflows/ui.yml</code> — standalone Vite/React UI build check on PRs and pushes</li>
+</ul>
+<p>  touching <code>ui/**</code>, uploads the build as an artifact.</p>
+<h2>4.13.1 — 2026-08-08</h2>
+<h3>Release automation</h3>
+<ul>
+<li><code>scripts/bump_version.sh</code> — patch/minor/major (or exact X.Y.Z), updates VERSION, tags <code>vX.Y.Z</code></li>
+<li><code>.github/workflows/release.yml</code> — on push of <code>v*</code> tags: build zip, SHA256, GitHub Release</li>
+</ul>
+<h2>4.13.0 — 2026-08-08</h2>
+<h3>Gap close-out</h3>
+<ul>
+<li>Live TV channel editor (enable / logo / group / sort_order, bulk + reorder)</li>
+<li>Multi-quality keep (<code>desired_qualities</code> on grab)</li>
+<li>Comic pull-list auto-grab</li>
+<li>Stream button next to Grab in interactive search</li>
+<li>Plex / Tautulli now-playing widget + <code>/api/now-playing</code></li>
+<li>Safe AI (Ollama + llama3.2), Homelab Links, full-tree packaging</li>
+</ul>
+<h2>4.12.0 — superseded</h2>
+<p>Use 4.13.0+ instead. (Safe AI + Homelab were folded into 4.13.0.)</p>
+  </main>
+  <footer>
+    <p>Version <strong>4.13.3</strong> · Generated from <code>CHANGELOG.md</code> by <code>scripts/build_docs.py</code>.</p>
+  </footer>
+</body>
+</html>

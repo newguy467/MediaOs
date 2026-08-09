@@ -151,6 +151,25 @@ class AddFromCatalogIn(BaseModel):
     extra: dict | None = None
 
 
+
+
+@router.post("/catalog/{def_id}/test")
+def catalog_test(def_id: str, query: str = "ubuntu", db: Session = Depends(get_db)):
+    """Test a catalog definition before adding (Cardigann / builtin search)."""
+    import json
+    try:
+        if def_id.startswith("builtin:"):
+            bid = def_id.split(":", 1)[1]
+            from app.services import builtin_indexers
+            results = builtin_indexers.search(bid, query, limit=5)
+            return {"ok": True, "count": len(results or []), "sample": (results or [])[:3]}
+        results = cardigann_svc.search_definition(def_id, query, config={}, limit=5)
+        return {"ok": True, "count": len(results or []), "sample": [
+            {"title": r.get("title"), "seeders": r.get("seeders")} for r in (results or [])[:3]
+        ]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @router.post("/catalog/add", response_model=IndexerOut)
 def add_from_catalog(payload: AddFromCatalogIn, db: Session = Depends(get_db), _: str = Depends(require_permission("indexers", "settings"))):
     """Add an indexer from the catalog (Cardigann def or builtin) with preconfigured URL."""
@@ -487,6 +506,130 @@ class CredentialsIn(BaseModel):
     extra: dict | None = None
 
 
+
+
+@router.get("/prowlarr/status")
+def prowlarr_status():
+    from app.clients.prowlarr import prowlarr_client
+    from app.config import settings
+    return {
+        "configured": prowlarr_client.enabled(),
+        "url": getattr(settings, "prowlarr_url", "") or None,
+        "test": prowlarr_client.test_connection(),
+    }
+
+
+@router.get("/prowlarr/indexers")
+def prowlarr_list_indexers():
+    """List indexers from Prowlarr (same catalog feel as Prowlarr UI)."""
+    from app.clients.prowlarr import prowlarr_client
+    if not prowlarr_client.enabled():
+        return {"ok": False, "error": "Prowlarr not configured (Settings → Indexer connection)", "indexers": []}
+    try:
+        rows = prowlarr_client.list_indexers()
+        return {"ok": True, "indexers": rows, "count": len(rows)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "indexers": []}
+
+
+@router.post("/prowlarr/indexers/{indexer_id}/test")
+def prowlarr_test_indexer(indexer_id: int):
+    from app.clients.prowlarr import prowlarr_client
+    return prowlarr_client.test_indexer(indexer_id)
+
+
+class ProwlarrAddIn(BaseModel):
+    indexer_id: int
+    name: str | None = None
+    use_flaresolverr: bool | None = None  # override; default from tags
+    enabled: bool = True
+    priority: int | None = None
+
+
+@router.post("/prowlarr/indexers/add", response_model=IndexerOut)
+def prowlarr_add_indexer(payload: ProwlarrAddIn, db: Session = Depends(get_db), _: str = Depends(require_permission("indexers", "settings"))):
+    """Add a Prowlarr indexer into MediaOs as Torznab (via Prowlarr proxy URL)."""
+    from app.clients.prowlarr import prowlarr_client
+    from app.config import settings
+
+    rows = {r["id"]: r for r in prowlarr_client.list_indexers()}
+    src = rows.get(payload.indexer_id)
+    if not src:
+        raise HTTPException(404, "Indexer not found in Prowlarr")
+    name = (payload.name or src.get("name") or f"Prowlarr {payload.indexer_id}").strip()
+    if db.query(Indexer).filter(Indexer.name == name).first():
+        raise HTTPException(409, f"Already added: {name}")
+    use_flare = payload.use_flaresolverr
+    if use_flare is None:
+        use_flare = bool(src.get("needs_flaresolverr"))
+    url = src.get("torznab_url") or ""
+    if not url:
+        raise HTTPException(400, "No Torznab URL from Prowlarr")
+    row = Indexer(
+        name=name,
+        url=url,
+        api_key=getattr(settings, "prowlarr_api_key", None) or "",
+        kind="torznab",
+        enabled=payload.enabled,
+        use_flaresolverr=use_flare,
+        priority=int(payload.priority if payload.priority is not None else src.get("priority") or 25),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _out(row)
+
+
+@router.get("/jackett/indexers")
+def jackett_list_indexers():
+    from app.clients.jackett import jackett_client
+    if not jackett_client.enabled():
+        return {"ok": False, "error": "Jackett not configured", "indexers": []}
+    try:
+        if hasattr(jackett_client, "list_indexers_detailed"):
+            rows = jackett_client.list_indexers_detailed()
+        else:
+            rows = jackett_client.list_indexers()
+        return {"ok": True, "indexers": rows, "count": len(rows)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "indexers": []}
+
+
+class JackettAddIn(BaseModel):
+    indexer_id: str
+    name: str | None = None
+    use_flaresolverr: bool = False
+    enabled: bool = True
+    priority: int = 25
+
+
+@router.post("/jackett/indexers/add", response_model=IndexerOut)
+def jackett_add_indexer(payload: JackettAddIn, db: Session = Depends(get_db), _: str = Depends(require_permission("indexers", "settings"))):
+    from app.clients.jackett import jackett_client
+    if not jackett_client.enabled():
+        raise HTTPException(400, "Jackett not configured")
+    rows = jackett_client.list_indexers_detailed() if hasattr(jackett_client, "list_indexers_detailed") else []
+    src = next((r for r in rows if str(r.get("id")) == str(payload.indexer_id)), None)
+    if not src:
+        raise HTTPException(404, "Indexer not found in Jackett")
+    name = (payload.name or src.get("name") or payload.indexer_id).strip()
+    if db.query(Indexer).filter(Indexer.name == name).first():
+        raise HTTPException(409, f"Already added: {name}")
+    row = Indexer(
+        name=name,
+        url=src.get("torznab_url") or "",
+        api_key=src.get("api_key") or "",
+        kind="torznab",
+        enabled=payload.enabled,
+        use_flaresolverr=payload.use_flaresolverr or bool(src.get("needs_flaresolverr")),
+        priority=payload.priority,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _out(row)
+
+
 @router.put("/{indexer_id}/credentials")
 def set_credentials(indexer_id: int, payload: CredentialsIn, db: Session = Depends(get_db), _: str = Depends(require_permission("indexers", "settings"))):
     """Store private-tracker login/cookie/API key for an indexer row (Cardigann/Torznab)."""
@@ -516,3 +659,59 @@ def get_credentials_meta(indexer_id: int, db: Session = Depends(get_db), _: str 
         except Exception:
             keys = ["(invalid json)"]
     return {"id": row.id, "name": row.name, "keys": keys, "has_api_key": bool(row.api_key)}
+
+@router.post("/health/run")
+def indexer_health_run(db: Session = Depends(get_db), _: str = Depends(require_permission("indexers", "settings"))):
+    from app.services.indexer_health import run_indexer_health_cycle
+    return run_indexer_health_cycle(db)
+
+
+@router.get("/torznab/{indexer_id}/api")
+def torznab_proxy(
+    indexer_id: int,
+    t: str = "search",
+    q: str = "",
+    apikey: str | None = None,
+    cat: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Minimal Torznab-compatible feed for one MediaOs indexer (ecosystem bridge)."""
+    from fastapi.responses import Response
+    from xml.sax.saxutils import escape
+    import json
+
+    row = db.get(Indexer, indexer_id)
+    if not row or not row.enabled:
+        raise HTTPException(404, "Indexer not found")
+    results = []
+    try:
+        if row.kind in ("torznab", "newznab"):
+            results = torznab_client.search(row.url, query=q or " ", apikey=row.api_key, limit=50)
+        elif row.kind == "cardigann":
+            creds = json.loads(row.credentials_json or "{}")
+            def_id = creds.get("cardigann_id") or row.name
+            results = cardigann_svc.search_definition(def_id, q or "ubuntu", config=creds, limit=50)
+        elif row.kind == "builtin":
+            from app.services import builtin_indexers
+            creds = json.loads(row.credentials_json or "{}")
+            bid = (creds.get("cardigann_id") or "").replace("builtin:", "") or row.name.lower()
+            results = builtin_indexers.search(bid, q or "ubuntu", limit=50)
+    except Exception as e:
+        raise HTTPException(502, str(e)) from e
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0"><channel><title>MediaOs Torznab</title>',
+    ]
+    for r in results or []:
+        title = escape(str(r.get("title") or "release"))
+        link = escape(str(r.get("download_url") or r.get("magnet_url") or ""))
+        size = int(r.get("size") or 0)
+        parts.append("<item>")
+        parts.append(f"<title>{title}</title>")
+        parts.append(f"<guid>{link}</guid>")
+        parts.append(f"<link>{link}</link>")
+        parts.append(f'<enclosure url="{link}" length="{size}" type="application/x-bittorrent" />')
+        parts.append("</item>")
+    parts.append("</channel></rss>")
+    return Response(content="\n".join(parts), media_type="application/rss+xml")

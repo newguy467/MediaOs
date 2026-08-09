@@ -47,6 +47,7 @@ class ChannelOut(BaseModel):
     stream_url: str
     tvg_id: str | None
     enabled: bool
+    sort_order: int = 0
 
     class Config:
         from_attributes = True
@@ -114,7 +115,10 @@ def list_channels(
         query = query.filter(LiveTvChannel.group_title == group)
     if q:
         query = query.filter(LiveTvChannel.name.ilike(f"%{q}%"))
-    return query.order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(limit).all()
+    try:
+        return query.order_by(LiveTvChannel.sort_order, LiveTvChannel.group_title, LiveTvChannel.name).limit(limit).all()
+    except Exception:
+        return query.order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(limit).all()
 
 
 @router.get("/groups")
@@ -142,7 +146,7 @@ def epg_guide(source_id: int | None = None, limit: int = 500, refresh: bool = Fa
     """EPG now/next guide from stored channels + XMLTV on sources."""
     from app.database import SessionLocal
     from app.models import LiveTvChannel
-    from app.services.livetv import fetch_and_index_epg, now_next_for_tvg, _epg_cache
+    from app.services.livetv import effective_tvg_id, fetch_and_index_epg, now_next_for_tvg, _epg_cache
     db = SessionLocal()
     try:
         if refresh or not (_epg_cache.get("by_tvg")):
@@ -153,7 +157,7 @@ def epg_guide(source_id: int | None = None, limit: int = 500, refresh: bool = Fa
         channels = db.query(LiveTvChannel).order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(limit).all()
         out = []
         for ch in channels:
-            nn = now_next_for_tvg(ch.tvg_id)
+            nn = now_next_for_tvg(effective_tvg_id(ch))
             out.append({
                 "id": ch.id,
                 "name": ch.name,
@@ -339,3 +343,297 @@ def logos_install_remote(
     """Cache channel tvg-logo HTTP URLs locally under data/channel-logos/remote/."""
     from app.services.livetv_logos import install_remote_logos
     return install_remote_logos(db, limit=max(1, min(limit, 2000)))
+
+
+@router.get("/export/playlist.m3u")
+def export_m3u_playlist(
+    request: Request,
+    source_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """M3U for Jellyfin Live TV / other players.
+
+    Channel URLs point at MediaOs proxy so Jellyfin pulls through us:
+      /api/livetv/stream/{channel_id}
+    Set Jellyfin → Live TV → M3U Tuner → this playlist URL.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    base = str(request.base_url).rstrip("/")
+    q = db.query(LiveTvChannel).filter(LiveTvChannel.enabled.is_(True))
+    if source_id is not None:
+        q = q.filter(LiveTvChannel.source_id == source_id)
+    channels = q.order_by(LiveTvChannel.group_title, LiveTvChannel.name).all()
+    lines = ["#EXTM3U"]
+    for ch in channels:
+        group = ch.group_title or "MediaOs"
+        logo = ch.logo or ""
+        tvg = ch.tvg_id or str(ch.id)
+        name = (ch.name or f"Channel {ch.id}").replace("\n", " ")
+        lines.append(
+            f'#EXTINF:-1 tvg-id="{tvg}" tvg-name="{name}" '
+            f'tvg-logo="{logo}" group-title="{group}",{name}'
+        )
+        lines.append(f"{base}/api/livetv/stream/{ch.id}")
+    body = '\n'.join(lines) + '\n'
+    return PlainTextResponse(
+        body,
+        media_type="application/x-mpegURL",
+        headers={"Content-Disposition": 'attachment; filename="mediaos-livetv.m3u"'},
+    )
+
+
+@router.get("/export/guide.xml")
+def export_xmltv_guide(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """XMLTV guide export for Jellyfin (pair with playlist.m3u)."""
+    from fastapi.responses import Response
+    from app.services.livetv import build_xmltv_export
+
+    xml = build_xmltv_export(db, base_url=str(request.base_url).rstrip("/"))
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": 'attachment; filename="mediaos-guide.xml"'},
+    )
+
+
+@router.get("/stream/{channel_id}")
+def proxy_channel_stream(channel_id: int, request: Request, db: Session = Depends(get_db)):
+    """Proxy live stream — used by in-app player and Jellyfin M3U tuner."""
+    from fastapi.responses import StreamingResponse, RedirectResponse
+    import httpx
+
+    ch = db.get(LiveTvChannel, channel_id)
+    if not ch or not ch.enabled:
+        raise HTTPException(404, "Channel not found")
+    url = (ch.stream_url or "").strip()
+    if not url:
+        raise HTTPException(404, "No stream URL")
+
+    # HLS playlists: redirect so clients follow upstream
+    if ".m3u8" in url.lower() or url.lower().endswith(".m3u"):
+        return RedirectResponse(url, status_code=302)
+
+    def gen():
+        try:
+            with httpx.stream("GET", url, timeout=60.0, follow_redirects=True, headers={
+                "User-Agent": "MediaOs/4.8 LiveTV",
+            }) as resp:
+                resp.raise_for_status()
+                for chunk in resp.iter_bytes(64 * 1024):
+                    yield chunk
+        except Exception as e:
+            log = __import__("logging").getLogger("mediaos.livetv")
+            log.warning("stream proxy failed ch=%s: %s", channel_id, e)
+            return
+
+    media = "video/mp2t"
+    if url.endswith(".mp4"):
+        media = "video/mp4"
+    return StreamingResponse(gen(), media_type=media, headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/jellyfin-setup")
+def jellyfin_livetv_setup(request: Request):
+    """Instructions + URLs for wiring MediaOs Live TV into Jellyfin."""
+    base = str(request.base_url).rstrip("/")
+    return {
+        "playlist_url": f"{base}/api/livetv/export/playlist.m3u",
+        "guide_url": f"{base}/api/livetv/export/guide.xml",
+        "steps": [
+            "In Jellyfin Dashboard → Live TV → Add tuner → M3U Tuner",
+            f"Playlist URL: {base}/api/livetv/export/playlist.m3u",
+            "Add guide data provider → XMLTV",
+            f"Guide URL: {base}/api/livetv/export/guide.xml",
+            "Refresh guide data in Jellyfin after MediaOs EPG sync",
+        ],
+        "note": "Channel streams are proxied through MediaOs so one auth/network path serves both apps.",
+    }
+
+
+
+@router.get("/epg/presets")
+def epg_presets():
+    """iptv-org/epg (epg-grabber) published XMLTV guide presets."""
+    from app.services.livetv_defaults import list_epg_presets
+    return {
+        "presets": list_epg_presets(),
+        "docs": "https://github.com/iptv-org/epg",
+        "note": "These are XMLTV files produced by epg-grabber / iptv-org grabbers. MediaOs consumes them; it does not scrape sites itself.",
+    }
+
+
+@router.post("/epg/presets/{key}/bind")
+def bind_epg_preset(
+    key: str,
+    source_id: int | None = None,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """Attach an EPG preset URL to a source (or all iptv-org sources)."""
+    from app.services.livetv_defaults import _epg_by_key
+    from app.models import LiveTvSource
+
+    ep = _epg_by_key(key)
+    if not ep:
+        raise HTTPException(404, "Unknown EPG preset")
+    q = db.query(LiveTvSource)
+    if source_id is not None:
+        q = q.filter(LiveTvSource.id == source_id)
+    updated = 0
+    for src in q.all():
+        src.epg_url = ep["url"]
+        db.add(src)
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated, "epg_url": ep["url"]}
+
+
+@router.get("/epg/channels")
+def epg_channel_list():
+    from app.services.livetv import list_epg_channel_ids, _epg_cache
+    return {
+        "channels": list_epg_channel_ids()[:5000],
+        "fetched_at": (_epg_cache or {}).get("fetched_at"),
+        "urls": (_epg_cache or {}).get("urls") or [],
+    }
+
+
+@router.get("/channels/{channel_id}/suggest-epg")
+def suggest_epg(channel_id: int, db: Session = Depends(get_db)):
+    from app.services.livetv import suggest_tvg_match
+    ch = db.get(LiveTvChannel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Not found")
+    return {"channel_id": channel_id, "name": ch.name, "suggestions": suggest_tvg_match(ch.name)}
+
+
+class ChannelPatch(BaseModel):
+    enabled: bool | None = None
+    tvg_id: str | None = None
+    epg_tvg_id: str | None = None
+    name: str | None = None
+    group_title: str | None = None
+    logo: str | None = None
+    sort_order: int | None = None
+
+
+@router.patch("/channels/{channel_id}")
+def patch_channel(channel_id: int, payload: ChannelPatch, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage", "settings"))):
+    ch = db.get(LiveTvChannel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Not found")
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if hasattr(ch, k):
+            setattr(ch, k, v)
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+    return {
+        "id": ch.id,
+        "name": ch.name,
+        "tvg_id": ch.tvg_id,
+        "epg_tvg_id": getattr(ch, "epg_tvg_id", None),
+        "enabled": ch.enabled,
+        "logo": ch.logo,
+        "group_title": ch.group_title,
+        "sort_order": getattr(ch, "sort_order", 0) or 0,
+    }
+
+
+@router.post("/health/run")
+def run_health(db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage", "settings"))):
+    from app.services.livetv import run_channel_health_cycle
+    return run_channel_health_cycle(db)
+
+
+@router.get("/health/status")
+def health_status(db: Session = Depends(get_db)):
+    from app.models import LiveTvChannel
+    from sqlalchemy import func
+    total = db.query(LiveTvChannel).count()
+    enabled = db.query(LiveTvChannel).filter(LiveTvChannel.enabled.is_(True)).count()
+    with_err = db.query(LiveTvChannel).filter(LiveTvChannel.fail_count > 0).count()
+    return {"total": total, "enabled": enabled, "with_failures": with_err}
+
+
+# ── Channel editor (enable / order / logos / groups) ────────────────────────
+
+class ChannelReorderBody(BaseModel):
+    """Ordered list of channel ids — position in list = sort_order."""
+    channel_ids: list[int]
+
+
+@router.get("/channels/editor")
+def list_channels_editor(
+    source_id: int | None = None,
+    group: str | None = None,
+    include_disabled: bool = True,
+    limit: int = 2000,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """Full channel list for the editor (includes disabled by default)."""
+    q = db.query(LiveTvChannel)
+    if source_id is not None:
+        q = q.filter(LiveTvChannel.source_id == source_id)
+    if group:
+        q = q.filter(LiveTvChannel.group_title == group)
+    if not include_disabled:
+        q = q.filter(LiveTvChannel.enabled.is_(True))
+    try:
+        rows = q.order_by(LiveTvChannel.sort_order, LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
+    except Exception:
+        rows = q.order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
+    return rows
+
+
+@router.post("/channels/reorder")
+def reorder_channels(
+    body: ChannelReorderBody,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """Set sort_order from list order (0..n)."""
+    updated = 0
+    for idx, cid in enumerate(body.channel_ids[:5000]):
+        ch = db.get(LiveTvChannel, cid)
+        if ch is None:
+            continue
+        ch.sort_order = idx
+        updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
+
+
+@router.post("/channels/bulk")
+def bulk_channels(
+    body: dict,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """
+    Bulk enable/disable or set group.
+    body: { "channel_ids": [1,2], "enabled": true } or { "channel_ids": [...], "group_title": "Sports" }
+    """
+    ids = body.get("channel_ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(400, "channel_ids required")
+    enabled = body.get("enabled")
+    group_title = body.get("group_title")
+    n = 0
+    for cid in ids[:5000]:
+        ch = db.get(LiveTvChannel, int(cid))
+        if not ch:
+            continue
+        if enabled is not None:
+            ch.enabled = bool(enabled)
+        if group_title is not None:
+            ch.group_title = str(group_title)[:120] or None
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}

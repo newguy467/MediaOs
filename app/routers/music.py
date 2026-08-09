@@ -525,27 +525,16 @@ def get_music(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{item_id}/interactive-search")
-def interactive_search_music(item_id: int, limit: int = 40, db: Session = Depends(get_db)):
+def interactive_search_music(item_id: int, limit: int = 50, db: Session = Depends(get_db)):
+    from app.services.interactive_search import interactive_music_search
     item = db.get(MediaItem, item_id)
     if not item or item.media_type != MediaType.music:
         raise HTTPException(404, "Not found")
     item.last_searched_at = datetime.now(timezone.utc)
     db.add(item)
     db.commit()
-    rows = search_music_releases(item, db=db, limit=limit)
-    return [
-        {
-            "title": r.get("title") or "",
-            "indexer": r.get("indexer"),
-            "size": r.get("size"),
-            "seeders": r.get("seeders"),
-            "download_url": r.get("download_url") or r.get("magnet") or "",
-            "score": r.get("_score"),
-            "matched_formats": list(r.get("_matched_formats") or []),
-            "protocol": r.get("protocol"),
-        }
-        for r in rows
-    ]
+    data = interactive_music_search(item, db=db, limit=limit)
+    return data
 
 
 @router.post("/{item_id}/grab")

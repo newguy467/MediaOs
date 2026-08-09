@@ -6,6 +6,7 @@ from app.clients.prowlarr import (
     BOOK_CATEGORY,
     MOVIE_CATEGORY,
     TV_CATEGORY,
+    XXX_CATEGORY,
     prowlarr_client,
 )
 from app.config import settings
@@ -463,3 +464,55 @@ def search_season_releases(
     rows = _search_ranked_list(query, TV_CATEGORY, profile, db=db, media="tv", limit=limit)
     # Prefer pack-looking titles in order (already scored)
     return rows
+
+
+def find_best_adult_release(
+    media_item, db=None
+):
+    """Best adult/XXX release for auto-grab."""
+    query = media_item.title
+    if getattr(media_item, "year", None):
+        query = f"{query} {media_item.year}"
+    profile = _profile_for_item(db, "adult", getattr(media_item, "quality_profile", None))
+    return _find_best(query, XXX_CATEGORY, profile, db=db, media="movie")
+
+
+def search_adult_releases(media_item, db=None, limit: int = 40) -> list[dict]:
+    """Ranked adult releases for interactive search (Torznab cat 6000)."""
+    query = media_item.title
+    if getattr(media_item, "year", None):
+        query = f"{query} {media_item.year}"
+    profile = _profile_for_item(db, "adult", getattr(media_item, "quality_profile", None))
+    releases: list = []
+    try:
+        from app.clients.prowlarr import prowlarr_client
+        releases = list(prowlarr_client.search(query, category=XXX_CATEGORY) or [])
+    except Exception as exc:
+        log.warning("Prowlarr adult search failed: %s", exc)
+    try:
+        releases = enrich_many(releases + _search_builtin_indexers(query, XXX_CATEGORY, db))
+    except Exception as exc:
+        log.debug("builtin adult indexers: %s", exc)
+    try:
+        releases = enrich_many(releases + _search_builtin_public_indexers(query, "movie"))
+    except Exception as exc:
+        log.debug("public adult indexers: %s", exc)
+    blocked = _blocked_titles(db)
+    filtered = []
+    for r in releases:
+        title = (r.get("title") or "").lower()
+        if any(b in title for b in blocked):
+            continue
+        filtered.append(r)
+    # score/rank similar to movies
+    try:
+        from app.services.quality.matrix import score_release
+        for r in filtered:
+            try:
+                r["score"] = score_release(r, profile) if profile else r.get("score") or 0
+            except Exception:
+                r.setdefault("score", 0)
+        filtered.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+    except Exception:
+        pass
+    return filtered[:limit]

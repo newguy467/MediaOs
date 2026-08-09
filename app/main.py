@@ -36,6 +36,7 @@ from app.routers import (
     indexers,
     livetv,
     movies,
+    adult,
     music,
     podcasts,
     player,
@@ -55,6 +56,7 @@ from app.routers import (
     overhaul,
     modules,
     hunt,
+    ai,
 )
 from app.routers import settings as settings_router
 from app.scheduler import start_scheduler
@@ -68,8 +70,8 @@ log = logging.getLogger("mediaos")
 
 app = FastAPI(
     title="MediaOs",
-    version=os.environ.get("APP_VERSION", "3.7.3"),
-    description="All-in-one media manager — movies, TV, music, books, audiobooks, comics, Live TV, converter",
+    version=os.environ.get("APP_VERSION", "4.13.3"),
+    description="All-in-one media manager — movies, TV, music, books, audiobooks, comics, adult, Live TV, converter",
 )
 
 
@@ -103,6 +105,7 @@ async def request_logging_middleware(request: Request, call_next):
         request_id_var.reset(token)
 
 app.include_router(movies.router, prefix="/api")
+app.include_router(adult.router, prefix="/api")
 app.include_router(tv.router, prefix="/api")
 app.include_router(music.router, prefix="/api")
 app.include_router(books.router, prefix="/api")
@@ -137,6 +140,7 @@ app.include_router(player.router, prefix="/api")
 app.include_router(converter.router, prefix="/api")
 app.include_router(modules.router, prefix="/api")
 app.include_router(hunt.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
 
 
 class LoginBody(BaseModel):
@@ -145,12 +149,25 @@ class LoginBody(BaseModel):
 
 
 @app.post("/api/auth/login")
-def auth_login(body: LoginBody):
+def auth_login(body: LoginBody, request: Request):
     if not _auth_enabled():
         return {"token": None, "auth_required": False}
+    from app.services import rate_limit
+
+    client_ip = request.client.host if request.client else "unknown"
+    rl_key = f"login:{client_ip}:{body.username.strip().lower()}"
+    remaining = rate_limit.remaining_backoff(rl_key)
+    if remaining > 0:
+        return JSONResponse(
+            {"detail": f"Too many failed attempts. Try again in {int(remaining)}s."},
+            status_code=429,
+            headers={"Retry-After": str(int(remaining) + 1)},
+        )
     result = try_login(body.username, body.password)
     if not result:
+        rate_limit.record_failure(rl_key, "invalid credentials", base_seconds=15.0)
         return JSONResponse({"detail": "Invalid credentials"}, status_code=401)
+    rate_limit.record_success(rl_key)
     token, role = result
     return {
         "token": token,
@@ -320,6 +337,10 @@ def on_startup():
                     "ALTER TABLE media_items ADD COLUMN series_status VARCHAR",
                     "ALTER TABLE media_items ADD COLUMN desired_qualities VARCHAR",
                     "ALTER TABLE media_items ADD COLUMN series_name VARCHAR",
+                    "ALTER TABLE livetv_channels ADD COLUMN sort_order INTEGER DEFAULT 0",
+                    "ALTER TABLE livetv_channels ADD COLUMN epg_tvg_id VARCHAR",
+                    "ALTER TABLE livetv_channels ADD COLUMN fail_count INTEGER DEFAULT 0",
+                    "ALTER TABLE livetv_channels ADD COLUMN last_check_at TIMESTAMP WITH TIME ZONE",
                     # music_tracks created via metadata.create_all
                 ):
                     try:
@@ -335,6 +356,23 @@ def on_startup():
         db.close()
     _seed_admin_if_needed()
     app.state.scheduler = start_scheduler()
+    # Automatic Live TV: iptv-org playlists + EPG (zero-touch)
+    try:
+        from app.config import settings as _livetv_s
+        if getattr(_livetv_s, "livetv_seed_iptv_org", True):
+            from app.scheduler import run_iptv_org_resync, run_livetv_epg_sync
+            import threading
+            def _livetv_boot():
+                try:
+                    run_iptv_org_resync()
+                    run_livetv_epg_sync()
+                except Exception as _le:
+                    log.warning("LiveTV auto boot: %s", _le)
+            threading.Thread(target=_livetv_boot, name="livetv-boot", daemon=True).start()
+            log.info("LiveTV auto: iptv-org seed/resync + EPG scheduled in background")
+    except Exception as _e:
+        log.debug("LiveTV auto skip: %s", _e)
+
     # Zero-touch startup: seed defs, and if wizard already done run full bootstrap
     try:
         from app.routers.setup import is_setup_complete
@@ -346,6 +384,11 @@ def on_startup():
         elif getattr(_s, "cardigann_auto_sync_on_startup", True):
             from app.services.definition_sync import ensure_seed_definitions
             ensure_seed_definitions()
+        try:
+            from app.services.bootstrap import load_runtime_settings_from_db
+            load_runtime_settings_from_db()
+        except Exception as _le:
+            log.debug("runtime settings load: %s", _le)
         # Jackett list sync on startup when enabled
         if getattr(_s, "jackett_sync_on_startup", True) and (getattr(_s, "jackett_url", None) or "").strip():
             from app.scheduler import run_jackett_sync
@@ -355,7 +398,7 @@ def on_startup():
                 log.debug("jackett startup sync: %s", je)
     except Exception as _e:
         log.warning("startup bootstrap: %s", _e)
-    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "3.7.3"))
+    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "4.13.3"))
 
 
 @app.get("/api/health")
@@ -377,7 +420,7 @@ def health():
     return {
         "status": "ok" if db_ok else "degraded",
         "database": db_ok,
-        "version": os.environ.get("APP_VERSION", "3.7.3"),
+        "version": os.environ.get("APP_VERSION", "4.13.3"),
         "auth_required": _auth_enabled(),
         "flaresolverr": flaresolverr_client.get_status(),
         "vpn": get_vpn_status(),
@@ -398,6 +441,8 @@ def health():
             "apprise",
             "jellyfin-refresh",
             "opensubtitles",
+            "hardlink-organize",
+            "trash-guide-sync",
             "auth-basic",
             "auth-api-key",
             "auth-bearer",

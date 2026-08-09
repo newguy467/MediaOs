@@ -25,6 +25,15 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    profiles: ["ai"]
+
   mediaos:
     image: ghcr.io/newguy467/mediaos:latest
     build: .
@@ -34,6 +43,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: llama3.2
       QBIT_URL: http://qbittorrent:8080
       JELLYFIN_URL: http://jellyfin:8096
       # Builtin indexers use CF bypass: curl_cffi first, then FlareSolverr if set.
@@ -96,3 +107,5 @@ services:
 
 volumes:
   mediaos_pg:
+
+# For built-in EPG grabber: use docker-compose.yml --profile full

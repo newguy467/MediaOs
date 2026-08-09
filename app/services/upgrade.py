@@ -13,7 +13,7 @@ from app.config import settings
 from app.models import Episode, ItemStatus, MediaItem, MediaType
 from app.services.activity import log_activity
 from app.services.grab import grab_episode_release, grab_release
-from app.services.search import find_best_episode_release, find_best_movie_release
+from app.services.search import find_best_adult_release, find_best_episode_release, find_best_movie_release
 from app.services.quality.parser import parse_release_title
 from app.services.quality.profiles import is_resolution_downgrade
 
@@ -169,3 +169,58 @@ def process_episode_upgrades(db: Session) -> int:
             db.rollback()
 
     return upgraded
+
+
+def process_adult_upgrades(db: Session) -> int:
+    """Same upgrade-on-better path as movies, for MediaType.adult."""
+    if not settings.upgrade_enabled:
+        return 0
+    items = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == MediaType.adult,
+            MediaItem.monitored.is_(True),
+            MediaItem.status == ItemStatus.downloaded,
+        )
+        .all()
+    )
+    grabbed = 0
+    for item in items:
+        if not _should_search(item.last_searched_at):
+            continue
+        try:
+            release = find_best_adult_release(item, db=db)
+        except Exception as e:
+            log.debug("adult upgrade search failed %s: %s", item.title, e)
+            continue
+        item.last_searched_at = _utcnow()
+        db.add(item)
+        if not release:
+            db.commit()
+            continue
+        new_score = release.get("score") or release.get("_score")
+        try:
+            new_score = int(new_score) if new_score is not None else None
+        except Exception:
+            new_score = None
+        if not _is_upgrade(item.quality_score, new_score):
+            db.commit()
+            continue
+        if settings.upgrade_prevent_resolution_downgrade:
+            try:
+                parsed = parse_release_title(release.get("title") or "")
+                # if we cannot parse, allow
+            except Exception:
+                parsed = {}
+        try:
+            grab_release(db, item, release)
+            if new_score is not None:
+                item.quality_score = new_score
+            db.add(item)
+            db.commit()
+            grabbed += 1
+            log_activity(db, "upgrade", f"Adult upgrade: {item.title} → {release.get('title')}")
+        except Exception as e:
+            db.rollback()
+            log.warning("adult upgrade grab failed %s: %s", item.title, e)
+    return grabbed

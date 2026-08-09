@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -230,7 +231,21 @@ def _resolve_torrent(download: Download, category: str) -> dict | None:
     return None
 
 
-def _move_video(video_file: Path, dest_path: Path, *, replace: bool = True) -> None:
+def _same_filesystem(a: Path, b: Path) -> bool:
+    """Return True if both paths are on the same device (hardlink possible)."""
+    try:
+        return a.stat().st_dev == b.stat().st_dev if b.exists() else a.stat().st_dev == b.parent.stat().st_dev
+    except OSError:
+        return False
+
+
+def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> None:
+    """Place *src* at *dest_path*.
+
+    When ``settings.library_prefer_hardlink`` is True and both paths share a
+    filesystem, create a hardlink (torrent client keeps seeding the original).
+    Otherwise fall back to ``shutil.move``.
+    """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     if dest_path.exists():
         if replace:
@@ -242,7 +257,22 @@ def _move_video(video_file: Path, dest_path: Path, *, replace: bool = True) -> N
         else:
             log.warning("Destination already exists, skipping: %s", dest_path)
             return
-    shutil.move(str(video_file), str(dest_path))
+
+    prefer_link = bool(getattr(settings, "library_prefer_hardlink", False))
+    if prefer_link and _same_filesystem(src, dest_path.parent):
+        try:
+            os.link(str(src), str(dest_path))
+            log.info("Hardlinked %s → %s", src, dest_path)
+            return
+        except OSError as exc:
+            log.warning("Hardlink failed (%s); falling back to move: %s", src, exc)
+
+    shutil.move(str(src), str(dest_path))
+
+
+def _move_video(video_file: Path, dest_path: Path, *, replace: bool = True) -> None:
+    """Backward-compatible alias used by movie/TV organize paths. """
+    _place_file(video_file, dest_path, replace=replace)
 
 
 def _cleanup_torrent(download: Download, content_path: Path | None) -> None:
@@ -262,6 +292,15 @@ def _cleanup_torrent(download: Download, content_path: Path | None) -> None:
             log.warning("Could not clean leftover path %s: %s", content_path, exc)
 
 
+
+
+def _library_root_for(item: MediaItem) -> Path:
+    if item.media_type == MediaType.adult:
+        return Path(getattr(settings, "adult_library_path", None) or settings.movies_library_path)
+    if item.media_type == MediaType.movie:
+        return Path(settings.movies_library_path)
+    return Path(settings.movies_library_path)
+
 def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
     """Organize finished movie torrents. Skips strm-mode rows (already organized)."""
     organized: list[MediaItem] = []
@@ -272,7 +311,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
     )
     for download in downloads:
         item = download.media_item
-        if not item or item.media_type != MediaType.movie:
+        if not item or item.media_type not in (MediaType.movie, MediaType.adult):
             continue
         # strm grabs are marked organized immediately
         if (download.release_title or "").startswith("STRM:") or (
@@ -307,7 +346,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         qtoken = trash_naming.quality_token_from_release(download.release_title)
         folder = trash_naming.movie_folder(item.title, item.year, tmdb_id=tmdb_id, quality=qtoken)
         file_stem = trash_naming.movie_file(item.title, item.year, quality=qtoken, tmdb_id=tmdb_id)
-        dest_dir = Path(settings.movies_library_path) / folder
+        dest_dir = _library_root_for(item) / folder
         dest_path = dest_dir / f"{file_stem}{video_file.suffix.lower()}"
         try:
             _move_video(video_file, dest_path)
@@ -574,10 +613,10 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 from app.services.hooks import after_organize_episode
 
                 after_organize_episode(db, series, episode, dest_path)
-                try:
-                    notify_cross_seed(info_hash=download.torrent_hash, path=str(dest_path))
-                except Exception:
-                    pass
+            except Exception:
+                pass
+            try:
+                notify_cross_seed(info_hash=download.torrent_hash, path=str(dest_path))
             except Exception:
                 pass
 
@@ -618,9 +657,9 @@ def process_completed_music_downloads(db: Session) -> list[MediaItem]:
                     if f.is_file() and f.suffix.lower() in audio_ext:
                         target = dest_dir / f.name
                         if not target.exists():
-                            shutil.move(str(f), str(target))
+                            _place_file(f, target)
             elif content_path.is_file():
-                shutil.move(str(content_path), str(dest_dir / content_path.name))
+                _place_file(content_path, dest_dir / content_path.name)
         except Exception as exc:
             log.error("Music organize failed for %s: %s", title, exc)
             continue
@@ -689,7 +728,7 @@ def process_completed_book_downloads(db: Session) -> list[MediaItem]:
             for f in files:
                 target = dest_dir / f.name
                 if not target.exists():
-                    shutil.move(str(f), str(target))
+                    _place_file(f, target)
                 if primary is None or f.suffix.lower() in {".epub", ".mobi", ".pdf"}:
                     primary = target if target.exists() else dest_dir / f.name
         except Exception as exc:
@@ -759,12 +798,12 @@ def process_completed_audiobook_downloads(db: Session) -> list[MediaItem]:
                     target = dest_dir / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
-                        shutil.move(str(f), str(target))
+                        _place_file(f, target)
             else:
                 for f in files:
                     target = dest_dir / f.name
                     if not target.exists():
-                        shutil.move(str(f), str(target))
+                        _place_file(f, target)
         except Exception as exc:
             log.error("Audiobook organize failed for %s: %s", item.title, exc)
             continue
@@ -969,7 +1008,7 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
                     target = dest_dir / f"{_sanitize(stem)}_{idx}{suffix}"
                 if not target.exists():
                     try:
-                        shutil.move(str(f), str(target))
+                        _place_file(f, target)
                     except Exception as move_exc:
                         log.warning("Comic move failed %s → %s: %s", f, target, move_exc)
                         target = f  # keep original if move fails

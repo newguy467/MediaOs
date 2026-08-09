@@ -81,6 +81,15 @@ OPTIONAL_MODULES = [
         "requires_path": "podcasts_library_path",
     },
     {
+        "id": "adult",
+        "label": "Adult (Whisparr)",
+        "description": "Built-in Whisparr replacement — adult movies, passcode gated, hunted by native Hunt engine",
+        "icon": "shield",
+        "default": False,
+        "requires_path": "adult_library_path",
+        "passcode_gated": True,
+    },
+    {
         "id": "converter",
         "label": "Converter",
         "description": "HandBrake-style transcoding queue (GPU/CPU)",

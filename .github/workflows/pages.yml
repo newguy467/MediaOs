@@ -1,15 +1,24 @@
 name: GitHub Pages
+
 on:
   push:
     branches: [main, master]
+    paths:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "VERSION"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
   group: pages
   cancel-in-progress: true
+
 jobs:
   deploy:
     environment:
@@ -18,12 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Sync changelog into docs
+        run: |
+          python3 scripts/build_docs.py || true
       - name: Setup Pages
         uses: actions/configure-pages@v5
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

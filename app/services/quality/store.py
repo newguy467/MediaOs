@@ -19,6 +19,7 @@ from app.services.quality.profiles import (
     default_manga_profile,
     default_comic_digital_profile,
     default_comic_any_profile,
+    default_adult_profile,
 )
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ def seed_default_profiles(db: Session) -> None:
         ("audiobook", default_audiobook_profile(), True),
         ("comic", default_comic_profile(), True),
         ("manga", default_manga_profile(), True),
+        ("adult", default_adult_profile(), True),
         ("comic", default_comic_digital_profile(), False),
         ("comic", default_comic_any_profile(), False),
         ("music", music, True),

@@ -158,16 +158,87 @@ def sync_from_comicvine(db: Session, *, days_ahead: int = 14) -> dict[str, Any]:
     return {"source": "comicvine", "checked_volumes": checked, "added": added, "errors": errors[:10]}
 
 
+def auto_grab_from_pull_list(db: Session, *, limit: int = 15) -> dict[str, Any]:
+    """Grab releases for pull-list rows not yet grabbed (rate-limited)."""
+    from app.models import ComicPullList, ComicIssue, MediaItem, MediaType
+    from app.services.search import search_comic_releases, search_manga_releases
+    from app.services.grab import grab_release
+
+    rows = (
+        db.query(ComicPullList)
+        .filter(ComicPullList.grabbed.is_(False))
+        .order_by(ComicPullList.id.asc())
+        .limit(max(1, min(limit, 40)))
+        .all()
+    )
+    grabbed = skipped = errors = 0
+    for row in rows:
+        try:
+            item = None
+            # Prefer explicit library link
+            mid = getattr(row, "media_item_id", None)
+            if mid:
+                item = db.get(MediaItem, mid)
+            # Legacy / optional fields
+            if item is None and getattr(row, "issue_id", None):
+                iss = db.get(ComicIssue, row.issue_id)
+                if iss and getattr(iss, "volume_id", None):
+                    item = db.get(MediaItem, iss.volume_id)
+            if item is None and getattr(row, "volume_id", None):
+                item = db.get(MediaItem, row.volume_id)
+            if item is None:
+                title = (getattr(row, "title", None) or getattr(row, "series_name", None) or "").strip()
+                if title:
+                    item = (
+                        db.query(MediaItem)
+                        .filter(
+                            MediaItem.media_type.in_([MediaType.comic, MediaType.manga]),
+                            MediaItem.title.ilike(f"%{title[:80]}%"),
+                        )
+                        .first()
+                    )
+            if item is None:
+                skipped += 1
+                continue
+            is_manga = item.media_type == MediaType.manga
+            releases = (search_manga_releases if is_manga else search_comic_releases)(item, db=db, limit=5)
+            if not releases:
+                skipped += 1
+                continue
+            grab_release(db, item, releases[0])
+            row.grabbed = True
+            db.add(row)
+            grabbed += 1
+        except Exception as e:
+            log.warning("pull auto-grab failed row=%s: %s", getattr(row, "id", None), e)
+            errors += 1
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+    return {"grabbed": grabbed, "skipped": skipped, "errors": errors, "examined": len(rows)}
+
+
 def run_pull_list_sync(db: Session | None = None) -> dict[str, Any]:
-    from app.database import SessionLocal
-    close = False
-    if db is None:
+    """Sync pull list then optionally auto-grab missing issues."""
+    own = db is None
+    if own:
+        from app.database import SessionLocal
         db = SessionLocal()
-        close = True
     try:
         local = sync_from_local_issues(db)
         cv = sync_from_comicvine(db)
-        return {"ok": True, "local": local, "comicvine": cv}
+        auto = {"grabbed": 0, "skipped": 0, "errors": 0, "examined": 0}
+        from app.config import settings
+        if getattr(settings, "comic_pull_auto_grab", True):
+            auto = auto_grab_from_pull_list(
+                db, limit=int(getattr(settings, "comic_pull_auto_grab_limit", 10) or 10)
+            )
+        return {"local": local, "comicvine": cv, "auto_grab": auto}
     finally:
-        if close:
+        if own:
             db.close()

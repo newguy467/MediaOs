@@ -155,7 +155,8 @@ def sync_definitions(
 
     with httpx.Client(timeout=30.0, headers=headers, follow_redirects=True) as client:
         # modest parallelism
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        workers = int(getattr(__import__('app.config', fromlist=['settings']).settings, 'cardigann_sync_workers', 8) or 8)
+    with ThreadPoolExecutor(max_workers=max(2, min(workers, 16))) as pool:
             futs = {pool.submit(_download_one, n, dest, client): n for n in names}
             for fut in as_completed(futs):
                 result = fut.result()
