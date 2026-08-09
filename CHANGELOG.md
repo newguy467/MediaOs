@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.13.5 — 2026-08-09
+CI import/collection fixes so unit tests pass on push.
+
+### Fixed
+- **comics router**: define `ArcCreate`, `ArcIssueIn`, `PullCreate`, `PullFlags` and import `comic_arcs as arcsvc`
+- **indexers router**: define `CredentialsIn` before first use
+- **tests**: `test_trash_and_migrate` uses current `import_trash_payload` API
+
+
 ## 4.13.4 — 2026-08-09
 Patch on top of 4.13.3 (boot-safe + compose cleanup).
 
