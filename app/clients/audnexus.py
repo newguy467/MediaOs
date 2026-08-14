@@ -1,12 +1,26 @@
 """Audnexus audiobook metadata (Readarr/audiobook enhancement)."""
 from __future__ import annotations
 
+import hashlib
 import logging
 
 import httpx
 
 log = logging.getLogger(__name__)
 BASE = "https://api.audnex.us"
+
+
+def _stable_int_id(s: str) -> int:
+    """Deterministic string -> int id, stable across process restarts.
+
+    Python's built-in hash() is salted per-process for str objects
+    (PYTHONHASHSEED) unless hash randomization is explicitly disabled, so it
+    must not be used here — using it would make external_id matching for
+    the same ASIN silently fail after every app restart, creating duplicate
+    MediaItem rows instead of recognizing an already-added audiobook.
+    """
+    digest = hashlib.sha256(s.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % (10**12)
 
 
 class AudnexusClient:
@@ -41,7 +55,7 @@ class AudnexusClient:
                 a.get("name") if isinstance(a, dict) else str(a) for a in authors[:3]
             )
             return {
-                "external_id": abs(hash(asin)) % (10**12),
+                "external_id": _stable_int_id(asin),
                 "asin": asin,
                 "title": data.get("title") or data.get("name"),
                 "year": None,

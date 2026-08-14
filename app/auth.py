@@ -30,7 +30,7 @@ _security_bearer = HTTPBearer(auto_error=False)
 
 # token -> (username, expires_at, role)
 _tokens: dict[str, tuple[str, float, str]] = {}
-_TOKEN_TTL_SEC = 60 * 60 * 24 * 7  # 7 days
+_TOKEN_TTL_SEC = 60 * 60 * 4  # 4h legacy fallback only
 
 # Prefer sessions service when available
 def _issue_token(username: str, role: str = "user", **kw):
@@ -83,6 +83,15 @@ def _db_user_count() -> int:
 
 
 def _auth_enabled() -> bool:
+    """Auth gate.
+
+    - AUTH_REQUIRE=false → open install (no login required), even if credentials exist.
+    - AUTH_REQUIRE=true (default) → auth required when any credential source exists
+      (env username/API key or at least one active DB user). Bootstrap seeds an admin
+      on first run so production defaults stay locked.
+    """
+    if not bool(getattr(settings, "auth_require", True)):
+        return False
     return bool(
         (settings.auth_username or "").strip()
         or (settings.auth_api_key or "").strip()
@@ -91,17 +100,28 @@ def _auth_enabled() -> bool:
 
 
 def create_token(username: str, role: str = "admin") -> str:
-    token = secrets.token_urlsafe(32)
-    _tokens[token] = (username, time.time() + _TOKEN_TTL_SEC, role)
-    if len(_tokens) > 500:
-        now = time.time()
-        for k, (_, exp, _) in list(_tokens.items()):
-            if exp < now:
-                _tokens.pop(k, None)
-    return token
+    """Issue a bearer token. Prefer DB-backed sessions; legacy in-memory is last resort."""
+    try:
+        from app.services.sessions import create_session
+        result = create_session(username, role)
+        return result["access_token"]
+    except Exception:
+        token = secrets.token_urlsafe(32)
+        _tokens[token] = (username, time.time() + _TOKEN_TTL_SEC, role)
+        if len(_tokens) > 500:
+            now = time.time()
+            for k, (_, exp, _) in list(_tokens.items()):
+                if exp < now:
+                    _tokens.pop(k, None)
+        return token
 
 
 def revoke_token(token: str) -> None:
+    try:
+        from app.services.sessions import revoke_access
+        revoke_access(token)
+    except Exception:
+        pass
     _tokens.pop(token, None)
 
 

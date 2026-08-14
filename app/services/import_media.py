@@ -72,6 +72,24 @@ def _guess_series_episode(name: str) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _require_within_downloads(source_path: str) -> Path:
+    """Resolve source_path and reject anything outside DOWNLOADS_PATH.
+
+    Manual import is reachable by any user with `library.manage`, and
+    source_path is a raw string from the request body — without this check
+    it's an arbitrary-file-move primitive (any file the app process can
+    read/write, anywhere on disk, could be moved into a served library
+    folder or off of a path the app depends on).
+    """
+    root = _downloads_root().resolve()
+    candidate = Path(source_path)
+    resolved = candidate if candidate.is_absolute() else (root / candidate)
+    resolved = resolved.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"source_path must be inside the downloads folder: {source_path}")
+    return resolved
+
+
 def import_to_movie(
     db: Session,
     *,
@@ -86,7 +104,7 @@ def import_to_movie(
     unless media_item_id is set — matching Radarr manual import behavior of
     linking to a tracked movie).
     """
-    src = Path(source_path)
+    src = _require_within_downloads(source_path)
     if not src.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 
@@ -168,7 +186,7 @@ def import_to_episode(
     season: int | None = None,
     episode: int | None = None,
 ) -> dict:
-    src = Path(source_path)
+    src = _require_within_downloads(source_path)
     if not src.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
 

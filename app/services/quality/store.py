@@ -109,14 +109,6 @@ def seed_default_profiles(db: Session) -> None:
     """Insert built-in profiles if the table is empty."""
     if db.query(QualityProfileRecord).count() > 0:
         return
-    music = default_movie_profile()
-    music.name = "Music - Prefer lossless / higher bitrate"
-    music.cutoff = "480p"  # unused for audio; kept for schema
-    music.min_seeders = 2
-    music.custom_formats = [
-        cf for cf in music.custom_formats
-        if not cf.reject or cf.name in ("CAM", "TeleSync")
-    ]
     for media_type, profile, is_default in [
         ("movie", default_movie_profile(), True),
         ("tv", default_tv_profile(), True),
@@ -128,7 +120,6 @@ def seed_default_profiles(db: Session) -> None:
         ("adult", default_adult_profile(), True),
         ("comic", default_comic_digital_profile(), False),
         ("comic", default_comic_any_profile(), False),
-        ("music", music, True),
     ]:
         fields = profile_to_record_fields(profile, media_type)
         row = QualityProfileRecord(**fields, is_default=is_default)

@@ -158,3 +158,55 @@ def run_all_smart_lists(db: Session) -> dict:
             log.exception("Smart list %s failed: %s", sl.name, exc)
             db.rollback()
     return {"lists": len(lists), "added": total}
+
+
+def continue_watching_candidates(db: Session, limit: int = 30) -> list[dict]:
+    """Smart-list style source from local scrobbling progress (MediaOS v2)."""
+    from app.models import WatchProgress, MediaItem
+    rows = (
+        db.query(WatchProgress)
+        .filter(WatchProgress.progress_percent > 5, WatchProgress.progress_percent < 95)
+        .order_by(WatchProgress.last_watched_at.desc())
+        .limit(limit)
+        .all()
+    )
+    out = []
+    for p in rows:
+        title = None
+        media_type = None
+        if p.media_item_id:
+            mi = db.get(MediaItem, p.media_item_id)
+            if mi:
+                title = mi.title
+                media_type = mi.media_type.value if hasattr(mi.media_type, "value") else str(mi.media_type)
+        out.append({
+            "media_item_id": p.media_item_id,
+            "game_id": p.game_id,
+            "title": title,
+            "media_type": media_type,
+            "progress_percent": p.progress_percent,
+            "source": "local_scrobble",
+        })
+    return out
+
+
+def tracking_status_list(db: Session, status: str = "in_progress", limit: int = 50) -> list[dict]:
+    from app.models import TrackedItem
+    rows = (
+        db.query(TrackedItem)
+        .filter(TrackedItem.status == status)
+        .order_by(TrackedItem.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "media_item_id": t.media_item_id,
+            "game_id": t.game_id,
+            "status": t.status,
+            "progress_percent": t.progress_percent,
+            "rating": t.rating,
+        }
+        for t in rows
+    ]

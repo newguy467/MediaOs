@@ -74,6 +74,7 @@ def add_series(payload: SeriesCreate, db: Session = Depends(get_db), _: list = D
         raise HTTPException(409, "Series already in library")
 
     details = tvdb_client.get_series(payload.external_id)
+    import json as _json
     series = MediaItem(
         media_type=MediaType.tv,
         external_id=details["external_id"],
@@ -88,6 +89,13 @@ def add_series(payload: SeriesCreate, db: Session = Depends(get_db), _: list = D
         status=ItemStatus.wanted,
         quality_profile=payload.quality_profile,
         monitor_mode=payload.monitor or "all",
+        tvdb_id=int(details["external_id"]) if details.get("external_id") else None,
+        imdb_id=details.get("imdb_id"),
+        external_ids=_json.dumps({
+            "tvdb": details.get("external_id"),
+            "imdb": details.get("imdb_id"),
+            **(details.get("external_ids") or {}),
+        }),
     )
     db.add(series)
     db.flush()
@@ -116,6 +124,43 @@ def add_series(payload: SeriesCreate, db: Session = Depends(get_db), _: list = D
 
     return _to_series_out(series)
 
+
+
+@router.post("/from-tmdb")
+def add_tv_from_tmdb(body: dict, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage", "download"))):
+    """Add series using TMDb ID (provider IDs persisted like TVDb path)."""
+    from app.clients.tmdb import tmdb_client
+    import json as _json
+    tmdb_id = body.get("tmdb_id") or body.get("external_id")
+    if not tmdb_id:
+        raise HTTPException(400, "tmdb_id required")
+    details = tmdb_client.get_tv(int(tmdb_id))
+    existing = (
+        db.query(MediaItem)
+        .filter(MediaItem.media_type == MediaType.tv, MediaItem.external_id == int(details["external_id"]), MediaItem.external_source == "tmdb")
+        .first()
+    )
+    if existing:
+        raise HTTPException(409, "Series already in library")
+    series = MediaItem(
+        media_type=MediaType.tv,
+        external_id=int(details["external_id"]),
+        external_source="tmdb",
+        title=details["title"],
+        year=details.get("year"),
+        overview=details.get("overview"),
+        poster_path=details.get("poster_path"),
+        monitored=bool(body.get("monitored", True)),
+        status=ItemStatus.wanted,
+        quality_profile=body.get("quality_profile"),
+        imdb_id=details.get("imdb_id"),
+        tvdb_id=details.get("tvdb_id"),
+        external_ids=_json.dumps(details.get("external_ids") or {}),
+    )
+    db.add(series)
+    db.commit()
+    db.refresh(series)
+    return {"ok": True, "id": series.id, "title": series.title, "imdb_id": series.imdb_id, "tvdb_id": series.tvdb_id}
 
 @router.get("", response_model=list[SeriesOut])
 def list_series(db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.view"))):

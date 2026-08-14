@@ -78,7 +78,6 @@ class PullFlags(BaseModel):
     watched: bool | None = None
     grabbed: bool | None = None
 
-
 @router.get("/search")
 def search_comics(query: str, source: str = Query("all")):
     results = []
@@ -312,10 +311,10 @@ def patch_pull(pull_id: int, body: PullFlags, db: Session = Depends(get_db), _: 
 def sync_pull(db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage", "download"))):
     """Trigger weekly pull-list sync if comic_pull_sync service is available."""
     try:
-        from app.services.comic_pull_sync import sync_weekly_pull
-        return sync_weekly_pull(db)
+        from app.services.comic_pull_sync import run_pull_list_sync
+        return run_pull_list_sync(db)
     except ImportError:
-        return {"ok": False, "message": "comic_pull_sync.sync_weekly_pull not available — use manual pull entries"}
+        return {"ok": False, "message": "comic_pull_sync not available — use manual pull entries"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -531,3 +530,82 @@ def tag_manga(item_id: int, db: Session = Depends(get_db), _: list = Depends(req
     db.add(item)
     db.commit()
     return {"ok": True, "id": item_id, "quality_profile": "manga"}
+
+
+@router.get("/arcs/{arc_id}/reading-order")
+def arc_reading_order(arc_id: int, db: Session = Depends(get_db)):
+    """Ordered issues for a story arc (Mylar-style reading order)."""
+    data = arcsvc.get_arc(db, arc_id)
+    if not data:
+        raise HTTPException(404, "arc not found")
+    issues = data.get("issues") or data.get("items") or []
+    # ensure sorted by reading_order / sequence if present
+    def _key(x):
+        return (
+            x.get("reading_order")
+            if isinstance(x, dict) and x.get("reading_order") is not None
+            else x.get("sequence")
+            if isinstance(x, dict)
+            else 0,
+            x.get("issue_number") if isinstance(x, dict) else 0,
+        )
+    try:
+        issues = sorted(issues, key=_key)
+    except Exception:
+        pass
+    return {"arc_id": arc_id, "title": data.get("title") or data.get("name"), "issues": issues, "count": len(issues)}
+
+
+@router.post("/{item_id}/metatag")
+def metatag_comic(item_id: int, body: dict | None = None, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage"))):
+    """Apply ComicInfo-style metadata to on-disk comic (best-effort)."""
+    item = db.get(MediaItem, item_id)
+    if not item:
+        raise HTTPException(404, "not found")
+    body = body or {}
+    meta = {
+        "title": body.get("title") or item.title,
+        "series": body.get("series") or item.title,
+        "number": body.get("number") or body.get("issue_number"),
+        "year": body.get("year") or item.year,
+        "summary": body.get("summary") or item.overview,
+        "publisher": body.get("publisher"),
+        "web": body.get("web"),
+    }
+    path = item.file_path
+    written = False
+    note = "metadata stored on item"
+    if path:
+        try:
+            from pathlib import Path as P
+            sidecar = P(path).with_suffix(P(path).suffix + ".comicinfo.xml") if P(path).suffix else P(str(path) + ".comicinfo.xml")
+            # minimal ComicInfo.xml
+            import html
+            xml = (
+                '<?xml version="1.0" encoding="utf-8"?>\n'
+                "<ComicInfo>\n"
+                f"  <Title>{html.escape(str(meta.get('title') or ''))}</Title>\n"
+                f"  <Series>{html.escape(str(meta.get('series') or ''))}</Series>\n"
+                f"  <Number>{html.escape(str(meta.get('number') or ''))}</Number>\n"
+                f"  <Year>{html.escape(str(meta.get('year') or ''))}</Year>\n"
+                f"  <Summary>{html.escape(str(meta.get('summary') or ''))}</Summary>\n"
+                f"  <Publisher>{html.escape(str(meta.get('publisher') or ''))}</Publisher>\n"
+                "</ComicInfo>\n"
+            )
+            # write next to file when path is a file; else into folder
+            target = P(path)
+            if target.is_file():
+                out = target.parent / "ComicInfo.xml"
+            else:
+                out = target / "ComicInfo.xml"
+            out.write_text(xml, encoding="utf-8")
+            written = True
+            note = str(out)
+        except Exception as e:
+            note = f"sidecar failed: {e}"
+    # persist overview if provided
+    if body.get("summary"):
+        item.overview = body["summary"]
+        db.add(item)
+        db.commit()
+    return {"ok": True, "item_id": item_id, "written": written, "path": note, "meta": meta}

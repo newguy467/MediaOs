@@ -949,3 +949,206 @@ a:hover { color: #e9d5ff; }
 .logo-mark {
   border-radius: 0.35rem;
 }
+
+
+/* ========== Light theme overrides (dark-mode toggle) ========== */
+html[data-theme="light"],
+html[data-theme="cupcake"],
+html[data-theme="corporate"],
+html[data-theme="emerald"] {
+  color-scheme: light;
+}
+html[data-theme="light"] body,
+html[data-theme="cupcake"] body,
+html[data-theme="corporate"] body,
+html[data-theme="emerald"] body {
+  background: #f3f4f6 !important;
+  color: #1f2937 !important;
+}
+html[data-theme="light"] .mr-sidebar,
+html[data-theme="cupcake"] .mr-sidebar,
+html[data-theme="corporate"] .mr-sidebar,
+html[data-theme="emerald"] .mr-sidebar {
+  background: #ffffff !important;
+  border-right-color: rgba(0,0,0,0.08) !important;
+}
+html[data-theme="light"] .mr-nav-item,
+html[data-theme="cupcake"] .mr-nav-item,
+html[data-theme="corporate"] .mr-nav-item,
+html[data-theme="emerald"] .mr-nav-item {
+  color: #4b5563 !important;
+}
+html[data-theme="light"] .mr-nav-item.active,
+html[data-theme="cupcake"] .mr-nav-item.active,
+html[data-theme="corporate"] .mr-nav-item.active,
+html[data-theme="emerald"] .mr-nav-item.active {
+  color: #fff !important;
+  background: #8b5cf6 !important;
+}
+html[data-theme="light"] .card,
+html[data-theme="light"] .bg-base-200,
+html[data-theme="cupcake"] .card,
+html[data-theme="corporate"] .card,
+html[data-theme="emerald"] .card {
+  background-color: #ffffff !important;
+  border-color: rgba(0,0,0,0.08) !important;
+  color: #1f2937 !important;
+}
+html[data-theme="light"] .mr-tile,
+html[data-theme="light"] .mr-row,
+html[data-theme="light"] .mr-server-card,
+html[data-theme="cupcake"] .mr-tile,
+html[data-theme="corporate"] .mr-tile,
+html[data-theme="emerald"] .mr-tile {
+  background: #fff !important;
+  border-color: rgba(0,0,0,0.08) !important;
+  color: #1f2937 !important;
+}
+html[data-theme="light"] .mr-page-title,
+html[data-theme="light"] h1,
+html[data-theme="cupcake"] .mr-page-title,
+html[data-theme="corporate"] .mr-page-title,
+html[data-theme="emerald"] .mr-page-title {
+  color: #111827 !important;
+}
+html[data-theme="light"] .input,
+html[data-theme="light"] .select,
+html[data-theme="light"] .textarea,
+html[data-theme="cupcake"] .input,
+html[data-theme="corporate"] .input,
+html[data-theme="emerald"] .input {
+  background-color: #fff !important;
+  border-color: rgba(0,0,0,0.15) !important;
+  color: #111827 !important;
+}
+html[data-theme="light"] .mr-content a,
+html[data-theme="cupcake"] .mr-content a {
+  color: #6d28d9;
+}
+
+
+/* Fixed top-left logo chrome */
+.mos-top-logo-bar { position: sticky; top: 0; z-index: 30; }
+.logo-mark { transition: filter 0.3s ease; }
+
+/* Cinephage-style active nav marker */
+.mr-nav-item.active { position: relative; }
+.mr-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.22rem;
+  height: 1.1rem;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+/* Module panels — mockup rounded cards */
+.mr-module {
+  border-radius: 1.25rem;
+  overflow: hidden;
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  background: rgba(18, 16, 31, 0.55);
+}
+
+
+/* ========== MOCKUP FIDELITY (user composite) ========== */
+html[data-theme="mediaos"] body {
+  background:
+    radial-gradient(900px 480px at 0% 0%, rgba(139,92,246,0.14), transparent 55%),
+    radial-gradient(700px 400px at 100% 10%, rgba(88,28,135,0.12), transparent 50%),
+    #0b0914 !important;
+}
+
+.mr-sidebar {
+  width: 15.5rem !important;
+  background: linear-gradient(180deg, #141022 0%, #0c0a14 100%) !important;
+  border-right: 1px solid rgba(139,92,246,0.14) !important;
+}
+
+.mr-nav-item {
+  margin: 0.2rem 0.7rem !important;
+  padding: 0.7rem 0.95rem !important;
+  border-radius: 0.85rem !important;
+  font-weight: 500 !important;
+}
+.mr-nav-item.active {
+  background: #8b5cf6 !important;
+  box-shadow: 0 8px 24px rgba(139,92,246,0.4) !important;
+}
+
+.mr-brand-title {
+  font-size: 1.1rem !important;
+  font-weight: 800 !important;
+}
+
+.mr-server-card {
+  margin: 0.75rem !important;
+  border-radius: 1rem !important;
+  background: #1a152e !important;
+  border: 1px solid rgba(139,92,246,0.18) !important;
+}
+
+/* Floating module panels like the 6-up mockup */
+.mos-mock-panel.mr-module {
+  border-radius: 1.35rem !important;
+  border: 1px solid rgba(139,92,246,0.16) !important;
+  background: rgba(22, 18, 40, 0.92) !important;
+  box-shadow: 0 20px 50px -20px rgba(0,0,0,0.65), 0 0 0 1px rgba(139,92,246,0.05);
+  min-height: calc(100vh - 6.5rem);
+}
+.mos-mock-panel .mr-module-nav {
+  width: 11rem !important;
+  background: rgba(12, 10, 22, 0.9) !important;
+  border-right: 1px solid rgba(139,92,246,0.1) !important;
+  padding-top: 1.15rem !important;
+}
+.mos-mock-panel .mr-module-nav button.active {
+  background: #8b5cf6 !important;
+  color: #fff !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 6px 18px rgba(139,92,246,0.35);
+}
+
+.poster-grid {
+  grid-template-columns: repeat(auto-fill, minmax(9.75rem, 1fr)) !important;
+  gap: 1.1rem !important;
+}
+.mr-tile {
+  border-radius: 1rem !important;
+  border: 1px solid rgba(139,92,246,0.12) !important;
+  background: #1a152e !important;
+}
+.mr-tile .art {
+  border-radius: 1rem 1rem 0 0;
+}
+.mr-tile .pill.hd {
+  background: rgba(139,92,246,0.55) !important;
+  color: #f5f3ff !important;
+}
+
+.mr-page-title {
+  font-size: 1.35rem !important;
+  letter-spacing: -0.03em !important;
+}
+
+.mr-search, .mos-top-logo-bar .search {
+  border-radius: 999px !important;
+  background: #1a152e !important;
+  border: 1px solid rgba(139,92,246,0.2) !important;
+}
+
+/* Books shelves stronger */
+.mr-shelf {
+  border-radius: 1.1rem !important;
+  border: 1px solid rgba(139,92,246,0.14) !important;
+}
+
+/* Audiobook rows */
+.mr-row {
+  border-radius: 1rem !important;
+  background: #1a152e !important;
+}

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     qbit_url: str = "http://qbittorrent:8080"
     qbit_username: str = "admin"
-    qbit_password: str = "adminadmin"
+    qbit_password: str = ""  # set via QBIT_PASSWORD — no weak default
 
     # Extra torrent clients (MediaOs parity)
     torrent_client: str = "qbittorrent"  # qbittorrent | transmission | deluge | rtorrent | aria2
@@ -120,7 +120,14 @@ class Settings(BaseSettings):
     # Auth (empty username + empty api key + no DB users = disabled)
     auth_username: str = ""
     auth_password: str = ""
-    auth_api_key: str = ""  # X-API-Key header; optional alongside basic
+    auth_api_key: str = ""
+    # When true and no auth is configured, generate a one-time API key under /data
+    auth_require: bool = True  # safer default; set AUTH_REQUIRE=false only for local dev
+    cors_origins: str = ""  # comma-separated; empty = same-origin only; "*" for LAN labs
+    # Redis (optional): multi-worker rate limits, session cache, scheduler leader election
+    redis_url: str = ""  # e.g. redis://redis:6379/0 — empty = process-local fallbacks
+    scheduler_leader_ttl_seconds: int = 45  # leader lock TTL; renew on each job tick
+    auth_bootstrap_generate: bool = True  # generate bootstrap key file if open install  # X-API-Key header; optional alongside basic
 
     # FlareSolverr (optional Cloudflare bypass for direct fetches)
     flaresolverr_url: str = ""  # e.g. http://flaresolverr:8191
@@ -168,8 +175,12 @@ class Settings(BaseSettings):
     jdupes_enabled: bool = True
     jdupes_path: str = "jdupes"  # binary on PATH
     jdupes_hardlink: bool = False  # if True, -L hardlink mode when applying
-    # Prefer hardlink when organizing into library (same filesystem required; falls back to move)
-    library_prefer_hardlink: bool = False
+    # Prefer hardlink when organizing into library (same filesystem required; falls back to move).
+    # Default True so torrent clients keep seeding. Override with LIBRARY_PREFER_HARDLINK=false.
+    library_prefer_hardlink: bool = True
+    # After a successful hardlink, leave the torrent in the client so seeding continues.
+    # Set LIBRARY_REMOVE_DOWNLOAD_AFTER_HARDLINK=true to remove the client item (files kept).
+    library_remove_download_after_hardlink: bool = False
     # Adult (Whisparr-style) module — passcode gate
     adult_passcode_hash: str = ""  # pbkdf2 hash; empty = module locked until set
     adult_passcode_enabled: bool = True  # require unlock token for /api/adult/*
@@ -190,7 +201,7 @@ class Settings(BaseSettings):
     # Usenet (NZBGet)
     nzbget_url: str = ""  # e.g. http://nzbget:6789
     nzbget_username: str = "nzbget"
-    nzbget_password: str = "tegbzn6789"
+    nzbget_password: str = ""  # set via NZBGET_PASSWORD — no weak default
     nzbget_category: str = "mediaos"
     # Preferred usenet client when both configured: sabnzbd | nzbget | auto
     usenet_client: str = "auto"
@@ -267,6 +278,17 @@ class Settings(BaseSettings):
     livetv_offline_action: str = "delete"  # delete | disable
     livetv_health_batch: int = 40  # channels probed per health cycle
     livetv_health_interval_minutes: int = 30  # stream health check interval
+    livetv_max_concurrent: int = 2  # multi-tuner concurrent recording limit
+
+    # Virtual TV (library → 24/7 channels)
+    virtualtv_enabled: bool = True
+    virtualtv_data_path: str = "data/livetv/virtual"  # HLS output + concat playlists live here
+    virtualtv_schedule_horizon_hours: int = 12  # how far ahead to keep the schedule filled
+    virtualtv_schedule_interval_minutes: int = 15  # how often to top the schedule back up
+    virtualtv_stream_restart_hours: float = 4.0  # rebuild the ffmpeg concat feed this often to pick up new schedule
+    virtualtv_default_repeat_protection_days: int = 7
+    virtualtv_hls_segment_seconds: int = 6
+    virtualtv_hls_playlist_size: int = 10
 
 
 
@@ -298,6 +320,16 @@ class Settings(BaseSettings):
     converter_max_workers: int = 2  # parallel ffmpeg jobs
     converter_schedule_start_hour: int | None = None  # 0-23, None = always
     converter_schedule_end_hour: int | None = None  # exclusive end hour local/UTC
+    # Tdarr-class health verification after encode
+    converter_health_check: bool = True
+    converter_health_min_duration_ratio: float = 0.95  # output duration >= ratio * source
+    converter_health_min_size_ratio: float = 0.05  # reject near-empty outputs
+    converter_max_attempts: int = 3  # re-queue on fail/health fail
+    converter_auto_seed_libraries: bool = True  # seed /movies,/tv,… as watch folders
+    # Optional external Tdarr server (classic Tdarr UI/nodes alongside native queue)
+    tdarr_url: str = ""  # e.g. http://tdarr:8265
+    tdarr_api_key: str = ""
+    tdarr_enabled: bool = False
 
     # Movie Collections / Sagas (TMDb collection grouping) — beyond MediaOs
     collection_auto_add_default: bool = True
@@ -312,16 +344,22 @@ class Settings(BaseSettings):
     indexer_health_fail_disable: int = 5  # consecutive fails before auto-disable
     cardigann_sync_max_files: int = 0  # 0 = ALL Jackett defs (thousands); set e.g. 120 for light first run
     cardigann_sync_workers: int = 8  # parallel downloads when syncing full pack
+    cardigann_sync_interval_hours: int = 168  # weekly, matches the current hardcoded schedule
+    cardigann_fail_open: bool = True  # continue grabs if a single definition fails to parse
 
     # Logging
     log_level: str = "INFO"  # DEBUG|INFO|WARNING|ERROR
     log_dir: str = ""  # empty = auto /config/logs
 
+    # Plugin / Module marketplace (GitHub-backed catalog)
+    plugins_path: str = ""  # empty = /config/plugins or data/plugins
+    plugin_registry_url: str = ""  # optional remote catalog JSON (GitHub raw)
+    plugin_trusted_owners: str = ""  # comma-separated GitHub owners; empty = allow all
+    plugins: str = ""  # comma-separated Python modules to import (env PLUGINS also works)
+
 
     vpn_username: str = ""
     vpn_password: str = ""
-    vpn_killswitch: bool = False
-    vpn_interface: str = ""
 
     # Plex / Tautulli now-playing (optional dashboard widget)
     plex_url: str = ""
@@ -330,6 +368,18 @@ class Settings(BaseSettings):
     tautulli_api_key: str = ""
 
 
+    # Games / IGDB (Questarr)
+    igdb_client_id: str = ""
+    igdb_client_secret: str = ""
+    games_library_path: str = "/games"
+    trakt_scrobble_out: bool = True
+    webhook_secret: str = ""  # shared secret for /api/webhooks/*
+    steam_api_key: str = ""
+    steam_id: str = ""  # 64-bit steam id
+    # UI simplicity (bobarr)
+    library_mode: bool = False  # when True, hide advanced nav by default
+
 settings = Settings()
+
 
 

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import require_admin, require_permission
 from app.database import get_db
 from app.models import Episode, MediaItem, MediaType
 from app.services import naming as naming_svc
@@ -131,3 +131,40 @@ def naming_templates():
         },
         "notes": "MediaOs organize uses these templates by default. TMDB/TVDB IDs may be appended as {tmdb-123} for *arr parity; Jellyfin ignores unknown braces.",
     }
+
+
+# ── Maintenance rules (Maintainerr-style) ───────────────────────────────────
+
+class MaintenanceRulesBody(BaseModel):
+    rules: list[dict]
+
+
+class MaintenanceRunBody(BaseModel):
+    dry_run: bool | None = True
+
+
+@router.get("/maintenance/rules")
+def maintenance_status(db: Session = Depends(get_db)):
+    from app.services.maintenance_rules import status
+    return status(db)
+
+
+@router.put("/maintenance/rules")
+def maintenance_save(
+    body: MaintenanceRulesBody,
+    db: Session = Depends(get_db),
+    _=Depends(require_permission("settings")),
+):
+    from app.services.maintenance_rules import save_rules
+    return {"ok": True, "rules": save_rules(db, body.rules)}
+
+
+@router.post("/maintenance/run")
+def maintenance_run(
+    body: MaintenanceRunBody | None = None,
+    db: Session = Depends(get_db),
+    _=Depends(require_permission("settings")),
+):
+    from app.services.maintenance_rules import evaluate_rules
+    dry = True if body is None else body.dry_run
+    return evaluate_rules(db, dry_run=dry)

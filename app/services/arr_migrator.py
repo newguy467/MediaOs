@@ -14,6 +14,22 @@ from app.services.sse import publish as sse_publish
 log = logging.getLogger(__name__)
 
 
+def _stable_int_id(s: str) -> int:
+    """Deterministic string -> int id, stable across process restarts.
+
+    Python's built-in hash() is salted per-process for str objects
+    (PYTHONHASHSEED) unless hash randomization is explicitly disabled, so it
+    must not be used here — using it would make external_id matching for
+    non-numeric foreign ids (e.g. MusicBrainz release-group ids) silently
+    fail after every app restart, creating duplicate MediaItem rows instead
+    of updating the existing one.
+    """
+    import hashlib
+
+    digest = hashlib.sha256(s.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % (10**9)
+
+
 def _client(base_url: str, api_key: str) -> httpx.Client:
     return httpx.Client(
         base_url=base_url.rstrip("/"),
@@ -44,14 +60,19 @@ def migrate_radarr(db: Session, *, url: str, api_key: str, monitor: bool = True)
             .first()
         )
         if row is None:
+            imdb = m.get("imdbId") or m.get("imdb_id")
+            import json as _json
             row = MediaItem(
                 media_type=MediaType.movie,
                 external_id=int(tmdb),
+                external_source="tmdb",
                 title=title,
                 year=year,
                 monitored=bool(m.get("monitored", monitor)),
                 status=ItemStatus.downloaded if has_file else ItemStatus.wanted,
                 file_path=path if has_file else None,
+                imdb_id=imdb,
+                external_ids=_json.dumps({k:v for k,v in {"tmdb": int(tmdb), "imdb": imdb}.items() if v}),
                 overview=(m.get("overview") or "")[:2000] or None,
                 quality_profile=(m.get("qualityProfile") or {}).get("name") if isinstance(m.get("qualityProfile"), dict) else (m.get("qualityProfileId") and str(m.get("qualityProfileId"))),
             )
@@ -65,6 +86,14 @@ def migrate_radarr(db: Session, *, url: str, api_key: str, monitor: bool = True)
                 row.file_path = path
                 row.status = ItemStatus.downloaded
             row.monitored = bool(m.get("monitored", row.monitored))
+            if not row.imdb_id and (m.get("imdbId") or m.get("imdb_id")):
+                row.imdb_id = m.get("imdbId") or m.get("imdb_id")
+            if not row.external_source:
+                row.external_source = "tmdb"
+            if not row.external_ids:
+                import json as _json
+                row.external_ids = _json.dumps({k:v for k,v in {"tmdb": int(tmdb), "imdb": row.imdb_id}.items() if v})
+
             db.add(row)
             updated += 1
     db.commit()
@@ -104,11 +133,14 @@ def migrate_sonarr(db: Session, *, url: str, api_key: str, monitor: bool = True)
                 row = MediaItem(
                     media_type=MediaType.tv,
                     external_id=external,
+                    external_source="tvdb",
                     title=title,
                     year=year,
                     monitored=bool(s.get("monitored", monitor)),
                     status=ItemStatus.wanted,
                     file_path=path,
+                    tvdb_id=int(external) if external else None,
+                    imdb_id=s.get("imdbId") or s.get("imdb_id"),
                     overview=(s.get("overview") or "")[:2000] or None,
                     quality_profile=series_type,  # stash series type until dedicated column used
                 )
@@ -220,7 +252,7 @@ def migrate_lidarr(db: Session, *, url: str, api_key: str, monitor: bool = True)
         path = a.get("path")
         # external_id: hash string to int stable-ish for non-int ids
         try:
-            ext = int(mbid) if str(mbid).isdigit() else abs(hash(str(mbid))) % (10**9)
+            ext = int(mbid) if str(mbid).isdigit() else _stable_int_id(str(mbid))
         except Exception:
             skipped += 1
             continue
@@ -286,7 +318,7 @@ def migrate_readarr(db: Session, *, url: str, api_key: str, monitor: bool = True
         has_file = bool(b.get("statistics", {}).get("bookFileCount") or b.get("grabbed"))
         path = b.get("path")
         try:
-            ext = int(foreign) if str(foreign).isdigit() else abs(hash(str(foreign))) % (10**9)
+            ext = int(foreign) if str(foreign).isdigit() else _stable_int_id(str(foreign))
         except Exception:
             skipped += 1
             continue

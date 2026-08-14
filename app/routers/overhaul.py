@@ -308,3 +308,134 @@ def livetv_now_next(tvg_id: str | None = None, db: Session = Depends(get_db),
     if tvg_id:
         return now_next_for_tvg(tvg_id)
     return channel_lineup(db)
+
+
+@router.get("/external-arr")
+def list_external_arr(db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    rows = db.query(ExternalArrInstance).order_by(ExternalArrInstance.name).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "kind": r.kind,
+                "base_url": r.base_url,
+                "enabled": r.enabled,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/external-arr")
+def add_external_arr(body: dict, db: Session = Depends(get_db), _: list = Depends(require_permission("settings"))):
+    row = ExternalArrInstance(
+        name=body.get("name") or "arr",
+        kind=body.get("kind") or "sonarr",
+        base_url=body.get("base_url") or "",
+        api_key=body.get("api_key") or "",
+        enabled=bool(body.get("enabled", True)),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "id": row.id}
+
+
+@router.get("/widget-layout")
+def get_widget_layout(db: Session = Depends(get_db)):
+    from app.models import AppSetting
+    row = db.query(AppSetting).filter(AppSetting.key == "dashboard_widget_layout").first()
+    if not row:
+        return {"layout": ["activity", "queue", "calendar", "continue_watching", "wanted", "health"]}
+    import json
+    try:
+        return {"layout": json.loads(row.value)}
+    except Exception:
+        return {"layout": []}
+
+
+@router.put("/widget-layout")
+def set_widget_layout(body: dict, db: Session = Depends(get_db), _: list = Depends(require_permission("settings"))):
+    from app.models import AppSetting
+    import json
+    layout = body.get("layout") or []
+    row = db.query(AppSetting).filter(AppSetting.key == "dashboard_widget_layout").first()
+    if not row:
+        row = AppSetting(key="dashboard_widget_layout", value=json.dumps(layout))
+        db.add(row)
+    else:
+        row.value = json.dumps(layout)
+    db.commit()
+    return {"ok": True, "layout": layout}
+
+
+@router.get("/external-arr/{instance_id}/status")
+def external_arr_status(instance_id: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    """Live queue + calendar snapshot from remote Sonarr/Radarr/Lidarr."""
+    import requests
+    row = db.get(ExternalArrInstance, instance_id)
+    if not row or not row.enabled:
+        raise HTTPException(404, "Instance not found or disabled")
+    base = (row.base_url or "").rstrip("/")
+    headers = {"X-Api-Key": row.api_key}
+    out = {"id": row.id, "name": row.name, "kind": row.kind, "ok": False, "queue": [], "calendar": [], "error": None}
+    try:
+        # Queue
+        qpath = "/api/v3/queue" if row.kind in ("sonarr", "radarr", "lidarr") else "/api/queue"
+        qr = requests.get(f"{base}{qpath}", headers=headers, params={"pageSize": 20}, timeout=12)
+        if qr.ok:
+            data = qr.json()
+            records = data.get("records") if isinstance(data, dict) else data
+            out["queue"] = [
+                {
+                    "title": r.get("title") or r.get("sourceTitle") or r.get("series", {}).get("title"),
+                    "status": r.get("status"),
+                    "tracked": r.get("trackedDownloadStatus"),
+                    "sizeleft": r.get("sizeleft"),
+                }
+                for r in (records or [])[:20]
+            ]
+        # Calendar (sonarr/radarr)
+        if row.kind in ("sonarr", "radarr"):
+            from datetime import datetime, timedelta, timezone
+            start = datetime.now(timezone.utc).date().isoformat()
+            end = (datetime.now(timezone.utc).date() + timedelta(days=14)).isoformat()
+            cr = requests.get(
+                f"{base}/api/v3/calendar",
+                headers=headers,
+                params={"start": start, "end": end, "unmonitored": "false"},
+                timeout=12,
+            )
+            if cr.ok:
+                cal = cr.json() or []
+                out["calendar"] = [
+                    {
+                        "title": c.get("title") or (c.get("series") or {}).get("title"),
+                        "airDate": c.get("airDateUtc") or c.get("airDate") or c.get("inCinemas"),
+                        "hasFile": c.get("hasFile"),
+                    }
+                    for c in cal[:30]
+                ]
+        # System status ping
+        sr = requests.get(f"{base}/api/v3/system/status", headers=headers, timeout=8)
+        out["ok"] = sr.ok or bool(out["queue"]) or bool(out["calendar"])
+        if sr.ok:
+            st = sr.json()
+            out["version"] = st.get("version")
+            out["appName"] = st.get("appName")
+    except Exception as e:
+        out["error"] = str(e)
+    return out
+
+
+@router.get("/external-arr/status-all")
+def external_arr_status_all(db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    rows = db.query(ExternalArrInstance).filter(ExternalArrInstance.enabled == True).all()
+    results = []
+    for r in rows:
+        try:
+            results.append(external_arr_status(r.id, db, _))
+        except Exception as e:
+            results.append({"id": r.id, "name": r.name, "ok": False, "error": str(e)})
+    return {"items": results}

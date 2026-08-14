@@ -72,6 +72,44 @@ Guide:     /api/livetv/export/guide.xml
 
 Streams are proxied through MediaOs so both UIs share one path.
 
+## Virtual channels (personal media → 24/7 TV)
+
+Turn your own movie/TV library into scheduled channels, merged into the
+same playlist/guide above — no separate Jellyfin setup.
+
+```
+GET    /api/livetv/virtual/channels
+POST   /api/livetv/virtual/channels
+PATCH  /api/livetv/virtual/channels/{id}
+DELETE /api/livetv/virtual/channels/{id}
+GET    /api/livetv/virtual/channels/{id}/schedule
+GET    /api/livetv/virtual/channels/{id}/now-next
+POST   /api/livetv/virtual/channels/{id}/rebuild
+```
+
+A channel is a content filter (`media_types`, optional `genre_filter` /
+`title_filter` / `year_min` / `year_max` / explicit `media_item_ids`) plus
+scheduling rules (`randomize`, `repeat_protection_days`,
+`prime_time_movies`). MediaOs continuously builds a schedule from whatever
+in your library matches, then runs one ffmpeg process per channel to turn
+that schedule into a live HLS feed at
+`/api/livetv/virtual/stream/{id}/stream.m3u8`.
+
+| Setting | Default |
+|---------|---------|
+| `virtualtv_enabled` | `true` |
+| `virtualtv_schedule_horizon_hours` | 12 |
+| `virtualtv_schedule_interval_minutes` | 15 |
+| `virtualtv_stream_restart_hours` | 4.0 |
+| `virtualtv_default_repeat_protection_days` | 7 |
+
+The ffmpeg feed restarts on `virtualtv_stream_restart_hours` so newly
+scheduled content gets picked up — expect a ~1-2s reconnect at each
+rotation. Genre filtering is a plain substring match against title/overview
+today (no structured genre tags yet). Not yet built: bumpers/trailers,
+commercial injection, music/sports channels, DVR or pause/rewind on virtual
+channels.
+
 ## Companion grabber (optional)
 
 If public guides are thin for your region, run [iptv-org/epg](https://github.com/iptv-org/epg) as a sidecar, serve `guide.xml`, and set that URL as `epg_url` or in `livetv_epg_extra_urls`.

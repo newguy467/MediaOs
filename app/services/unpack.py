@@ -16,8 +16,24 @@ ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".tgz", ".tbz2"}
 
 def _extract_zip(archive: Path, dest: Path) -> bool:
     try:
+        dest_resolved = dest.resolve()
         with zipfile.ZipFile(archive, "r") as zf:
-            zf.extractall(dest)
+            for member in zf.infolist():
+                # Zip-slip guard: archive content comes from torrent/usenet
+                # downloads (fully untrusted / attacker-controlled), so a
+                # crafted entry name like "../../../etc/cron.d/x" must not
+                # be able to write outside dest. Resolve and confine each
+                # member instead of trusting zf.extractall().
+                target = (dest_resolved / member.filename).resolve()
+                if target != dest_resolved and dest_resolved not in target.parents:
+                    log.warning("Skipping unsafe zip entry in %s: %r", archive, member.filename)
+                    continue
+                if member.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(target, "wb") as out:
+                    shutil.copyfileobj(src, out)
         return True
     except Exception as exc:
         log.warning("zip extract failed %s: %s", archive, exc)

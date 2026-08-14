@@ -57,6 +57,7 @@ WIZARD_FIELDS: dict[str, type] = {
     "comics_library_path": str,
     "manga_library_path": str,
     "youtube_library_path": str,
+    "games_library_path": str,
     "downloads_path": str,
     "movie_naming_folder": str,
     "episode_naming": str,
@@ -126,8 +127,6 @@ WIZARD_FIELDS: dict[str, type] = {
     "vpn_opvn_password": str,
     "vpn_opvn_user": str,
     "vpn_service_provider": str,
-    "vpn_killswitch": bool,
-    "vpn_interface": str,
     "vpn_gluetun_url": str,
     "vpn_expected_country": str,
     # youtube
@@ -468,6 +467,7 @@ def check_paths(payload: dict[str, Any]):
         "movies_library_path", "tv_library_path", "music_library_path",
         "books_library_path", "audiobooks_library_path", "podcasts_library_path",
         "comics_library_path", "manga_library_path", "youtube_library_path",
+        "games_library_path",
         "downloads_path",
     ]
     results = []
@@ -699,6 +699,20 @@ class GuidedStep(BaseModel):
     done: bool
     action: str | None = None  # UI page key hint
     help: str | None = None
+
+    def __init__(
+        self,
+        id: str,
+        title: str,
+        detail: str,
+        done: bool,
+        action: str | None = None,
+        help: str | None = None,
+    ) -> None:
+        # Pydantic BaseModel only accepts keyword args by default; every call
+        # site in this file builds GuidedStep positionally, so accept the
+        # same positional signature here and forward as keywords.
+        super().__init__(id=id, title=title, detail=detail, done=done, action=action, help=help)
 
 
 @router.get("/guided")

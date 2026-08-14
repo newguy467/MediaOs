@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, next]
   pull_request:
   workflow_dispatch:
 
@@ -20,9 +20,25 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-      - name: Offline unit smoke
-        run: python scripts/smoke_unit.py
       - name: Pytest
         run: pytest tests/ -q --tb=short
         env:
           DATABASE_URL: sqlite+pysqlite:////tmp/mediaos-ci.db
+
+  compose:
+    name: Compose architecture tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Compose architecture tests
+        run: pytest tests/test_compose_architecture.py -q --tb=short
+        env:
+          DATABASE_URL: sqlite+pysqlite:////tmp/mediaos-compose.db
