@@ -1,6 +1,8 @@
 """Discover / Overseerr-style endpoints — trending, upcoming, now playing."""
 from __future__ import annotations
 
+import hashlib
+
 from app.auth import require_permission
 from fastapi import Depends, APIRouter, Query
 
@@ -10,32 +12,62 @@ from app.clients.trakt import trakt_client
 router = APIRouter(prefix="/discover", tags=["discover"], dependencies=[Depends(require_permission("discover.view", "library.view"))])
 
 
+def _stable_int_id(key: str) -> int:
+    """Deterministic string -> int id, stable across process restarts.
+
+    Python's built-in hash() is salted per-process for str objects
+    (PYTHONHASHSEED) unless hash randomization is explicitly disabled, so it
+    must not be used here — using it would make external_id matching for the
+    same key silently fail after every app restart, creating duplicate rows
+    instead of recognizing an already-added item. Same fix pattern as
+    app/clients/openlibrary.py, app/clients/audnexus.py, and
+    app/services/arr_migrator.py.
+    """
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % (10**12)
+
+
 @router.get("/movies/trending")
 def movies_trending(limit: int = Query(20, ge=1, le=50)):
     try:
-        return {"results": trakt_client.trending_movies(limit) or tmdb_client.trending_movies(limit)}
+        results = trakt_client.trending_movies(limit)
+        if results:
+            return {"results": results}
     except Exception:
+        pass
+    try:
         return {"results": tmdb_client.trending_movies(limit) if hasattr(tmdb_client, "trending_movies") else []}
+    except Exception:
+        return {"results": []}
 
 
 @router.get("/movies/popular")
 def movies_popular(page: int = 1):
-    if hasattr(tmdb_client, "popular_movies"):
-        return {"results": tmdb_client.popular_movies(page=page)}
+    try:
+        if hasattr(tmdb_client, "popular_movies"):
+            return {"results": tmdb_client.popular_movies(page=page)}
+    except Exception:
+        pass
     return {"results": []}
 
 
 @router.get("/movies/now-playing")
 def movies_now_playing(page: int = 1):
-    if hasattr(tmdb_client, "now_playing"):
-        return {"results": tmdb_client.now_playing(page=page)}
+    try:
+        if hasattr(tmdb_client, "now_playing"):
+            return {"results": tmdb_client.now_playing(page=page)}
+    except Exception:
+        pass
     return {"results": []}
 
 
 @router.get("/movies/upcoming")
 def movies_upcoming(page: int = 1):
-    if hasattr(tmdb_client, "upcoming"):
-        return {"results": tmdb_client.upcoming(page=page)}
+    try:
+        if hasattr(tmdb_client, "upcoming"):
+            return {"results": tmdb_client.upcoming(page=page)}
+    except Exception:
+        pass
     return {"results": []}
 
 
@@ -178,7 +210,7 @@ def genres(media: str = Query("movie", pattern="^(movie|tv)$")):
 def _music_row(r: dict, year_fallback: int | None = None) -> dict:
     key = r.get("external_id") or r.get("id") or r.get("album") or r.get("title")
     return {
-        "external_id": r.get("external_id") or abs(hash(str(key))) % (10**12),
+        "external_id": r.get("external_id") or _stable_int_id(str(key)),
         "external_mbid": r.get("external_mbid") or r.get("id"),
         "title": r.get("album") or r.get("title"),
         "artist": r.get("artist"),

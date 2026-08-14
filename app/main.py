@@ -4,6 +4,7 @@ import logging
 import uuid
 import secrets
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,8 +56,15 @@ from app.routers import (
     quality_ui,
     overhaul,
     modules,
+    plugins as plugins_router,
     hunt,
     ai,
+    games,
+    scrobbling,
+    tracking,
+    homelab,
+    webhooks,
+    imports_tracking,
 )
 from app.routers import settings as settings_router
 from app.scheduler import start_scheduler
@@ -69,10 +77,22 @@ log = logging.getLogger("mediaos")
 
 
 app = FastAPI(
-    title="MediaOs",
-    version=os.environ.get("APP_VERSION", "4.13.3"),
-    description="All-in-one media manager — movies, TV, music, books, audiobooks, comics, adult, Live TV, converter",
+    title="MediaOS",
+    version=os.environ.get("APP_VERSION", "next"),
+    description="All-in-one media & games OS — movies, TV, music, books, audiobooks, comics, adult, Live TV, games, scrobbling, tracking",
 )
+
+# CORS: same-origin UI needs none; allow configured origins for split frontends / LAN apps.
+# Set CORS_ORIGINS=* only for trusted private networks.
+_cors_origins = [o.strip() for o in (getattr(settings, "cors_origins", "") or "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if _cors_origins == ["*"] else _cors_origins,
+        allow_credentials=_cors_origins != ["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.middleware("http")
@@ -139,8 +159,15 @@ app.include_router(youtube.router, prefix="/api")
 app.include_router(player.router, prefix="/api")
 app.include_router(converter.router, prefix="/api")
 app.include_router(modules.router, prefix="/api")
+app.include_router(plugins_router.router, prefix="/api")
 app.include_router(hunt.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(games.router, prefix="/api")
+app.include_router(scrobbling.router, prefix="/api")
+app.include_router(tracking.router, prefix="/api")
+app.include_router(homelab.router, prefix="/api")
+app.include_router(webhooks.router, prefix="/api")
+app.include_router(imports_tracking.router, prefix="/api")
 
 
 class LoginBody(BaseModel):
@@ -262,6 +289,52 @@ async def optional_auth_middleware(request: Request, call_next):
     )
 
 
+
+
+def _ensure_bootstrap_auth() -> None:
+    """Require authentication on fresh installs without shipping a default secret.
+
+    If the administrator did not configure AUTH_* values and no DB users exist,
+    generate a one-time local admin credential and persist it under data_path/bootstrap.
+    The password is never returned by an API endpoint.
+    """
+    if (settings.auth_username or settings.auth_api_key or settings.auth_seed_admin_username):
+        return
+    try:
+        from app.models import User
+        db = SessionLocal()
+        try:
+            if db.query(User).filter(User.is_active.is_(True)).count() > 0:
+                return
+        finally:
+            db.close()
+    except Exception:
+        return
+    from pathlib import Path as _P
+    root = _P(getattr(settings, "data_path", None) or "/app/data") / "bootstrap"
+    root.mkdir(parents=True, exist_ok=True)
+    cred_file = root / "admin-credentials.txt"
+    if cred_file.exists():
+        lines = cred_file.read_text(encoding="utf-8").splitlines()
+        vals = dict(line.split("=", 1) for line in lines if "=" in line)
+        user = vals.get("username", "").strip()
+        pw = vals.get("password", "").strip()
+        if user and pw:
+            settings.auth_username = user
+            settings.auth_password = pw
+            return
+    user = "admin"
+    pw = secrets.token_urlsafe(24)
+    settings.auth_username = user
+    settings.auth_password = pw
+    cred_file.write_text(f"username={user}\npassword={pw}\n", encoding="utf-8")
+    try:
+        cred_file.chmod(0o600)
+    except OSError:
+        pass
+    log.warning("Generated first-run admin credentials at %s", cred_file)
+
+
 def _seed_admin_if_needed() -> None:
     seed_user = (settings.auth_seed_admin_username or "").strip()
     seed_pw = (settings.auth_seed_admin_password or "").strip()
@@ -319,42 +392,62 @@ def _ensure_download_cleanup_columns():
 
 @app.on_event("startup")
 def on_startup():
+    # Alembic is the single authoritative schema manager.
+    try:
+        import os as _os
+        from alembic import command as _alembic_command
+        from alembic.config import Config as _AlembicConfig
+        _alembic_cfg = _AlembicConfig(_os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "alembic.ini"))
+        _alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        _alembic_command.upgrade(_alembic_cfg, "head")
+        log.info("database migrations at Alembic head")
+    except Exception as exc:
+        log.exception("database migration failed; refusing to continue with an unknown schema")
+        raise RuntimeError("MediaOS database migration failed") from exc
+    try:
+        from app.services.plugins import load_plugins, run_hook
+        load_plugins()
+        try:
+            run_hook("startup")
+        except Exception as _he:
+            log.debug("plugin startup hooks: %s", _he)
+    except Exception as _pe:
+        log.debug('plugins: %s', _pe)
     Base.metadata.create_all(bind=engine)
+    try:
+        from app.services.converter import seed_default_presets as _seed_cp, seed_library_watch_folders as _seed_wf
+        _db = SessionLocal()
+        try:
+            _seed_cp(_db)
+            _seed_wf(_db)
+        finally:
+            _db.close()
+    except Exception as _ce:
+        log.debug("converter seed: %s", _ce)
+
+    # Versioned soft migrations (replaces ad-hoc ALTER lists)
+    try:
+        from app.services.schema_migrate import run_schema_migrations
+        mig = run_schema_migrations(engine)
+        if mig.get("applied"):
+            log.info("schema migrations applied: %s", [a["version"] for a in mig["applied"]])
+    except Exception as exc:
+        log.warning("schema migrate: %s", exc)
+    # Legacy ensure (kept for safety on very old DBs)
     try:
         _ensure_download_cleanup_columns()
     except Exception as exc:
         log.warning('schema ensure cleanup columns: %s', exc)
     db = SessionLocal()
     try:
-        seed_convert_presets(db); # Soft schema adds
-        try:
-            with engine.begin() as conn:
-                for stmt in (
-                    "ALTER TABLE episodes ADD COLUMN absolute_episode_number INTEGER",
-                    "ALTER TABLE media_items ADD COLUMN series_type VARCHAR",
-                    "ALTER TABLE indexers ADD COLUMN credentials_json TEXT",
-                    "ALTER TABLE users ADD COLUMN permissions_json TEXT",
-                    "ALTER TABLE media_items ADD COLUMN series_status VARCHAR",
-                    "ALTER TABLE media_items ADD COLUMN desired_qualities VARCHAR",
-                    "ALTER TABLE media_items ADD COLUMN series_name VARCHAR",
-                    "ALTER TABLE livetv_channels ADD COLUMN sort_order INTEGER DEFAULT 0",
-                    "ALTER TABLE livetv_channels ADD COLUMN epg_tvg_id VARCHAR",
-                    "ALTER TABLE livetv_channels ADD COLUMN fail_count INTEGER DEFAULT 0",
-                    "ALTER TABLE livetv_channels ADD COLUMN last_check_at TIMESTAMP WITH TIME ZONE",
-                    # music_tracks created via metadata.create_all
-                ):
-                    try:
-                        conn.execute(text(stmt))
-                    except Exception:
-                        pass
-        except Exception as e:
-            log.debug("schema soft-migrate: %s", e)
+        seed_convert_presets(db)
         seed_default_profiles(db)
         from app.services.app_settings import load_overrides
         load_overrides(db)
     finally:
         db.close()
     _seed_admin_if_needed()
+    _ensure_bootstrap_auth()
     app.state.scheduler = start_scheduler()
     # Automatic Live TV: iptv-org playlists + EPG (zero-touch)
     try:
@@ -398,7 +491,7 @@ def on_startup():
                 log.debug("jackett startup sync: %s", je)
     except Exception as _e:
         log.warning("startup bootstrap: %s", _e)
-    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "4.13.3"))
+    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "next"))
 
 
 @app.get("/api/health")
@@ -420,7 +513,7 @@ def health():
     return {
         "status": "ok" if db_ok else "degraded",
         "database": db_ok,
-        "version": os.environ.get("APP_VERSION", "4.13.3"),
+        "version": os.environ.get("APP_VERSION", "next"),
         "auth_required": _auth_enabled(),
         "flaresolverr": flaresolverr_client.get_status(),
         "vpn": get_vpn_status(),
@@ -431,6 +524,10 @@ def health():
             "books",
             "audiobooks",
             "livetv",
+            "games",
+            "scrobbling",
+            "unified-tracking",
+            "dvr",
             "discover",
             "quality-profiles",
             "manual-import",
@@ -512,6 +609,17 @@ def health():
             "comics-detail-ui",
             "builtin-media-player",
             "file-converter",
+            "games-interactive-search",
+            "games-grab-queue",
+            "dashboard-widgets-v2",
+            "schema-migrations",
+            "continue-watching",
+            "homelab-links",
+            "tmdb-tv-path",
+            "games-organize",
+            "diagnostics",
+            "homelab-health",
+            "backup-restore",
         ],
     }
 

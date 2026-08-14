@@ -1,67 +1,55 @@
+# Environment & secrets — NEVER commit real values
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Databases & runtime data
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/mediaos/
+data/test-*.db
+config/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+.eggs/
+dist/
+build/
+.eggs/
+.pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.pytest_cache/
 .coverage
 htmlcov/
 .tox/
-.nox/
-.hypothesis/
-.venv/
-venv/
-ENV/
-env/
-.env
-.env.local
-.env.*.local
 
-# Node / Vite UI
+# Node / UI build artifacts
 node_modules/
-ui/dist/
-app/static/dist/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+ui/node_modules/
+# NOTE: app/static/ ships a PRE-BUILT UI bundle as part of the project.
+# Do NOT ignore app/static/ — it is the deliverable. Rebuilds from ui/
+# overwrite it in place.
 
-# IDE / OS
-.idea/
+# IDE / editor
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
 .DS_Store
-Thumbs.db
 
-# Docker / data
-data/
-config/
-*.db
-*.sqlite
-*.sqlite3
+# Docker
+docker-compose.override.yml
 
-# Secrets & local overrides
-.env
-*.pem
-secrets/
+# Logs
+*.log
+logs/

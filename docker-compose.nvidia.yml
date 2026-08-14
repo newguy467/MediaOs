@@ -1,5 +1,6 @@
 # Overlay: enable NVIDIA GPU for the main mediaos service
 #   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+# healthcheck / restart inherit from base compose when merged
 services:
   mediaos:
     gpus: all

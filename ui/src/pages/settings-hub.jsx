@@ -1,0 +1,105 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { PageChrome } from "../components/ui.jsx";
+import Ic from "../icons.jsx";
+import { setAdvancedFlag } from "../storage.js";
+
+function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
+  const em = enabledModules || ['movies','tv'];
+  const groups = [
+    { title: "Library", desc: "Where files live and how they are named (Jellyfin-compatible)", items: [
+      { key: "settings-library", label: "Paths & naming", hint: "Movies / TV / Music folders, episode templates" },
+      { key: "settings-quality", label: "Quality profiles", hint: "Scoring, custom formats, upgrades" },
+      { key: "settings-quality-matrix", label: "Quality matrices", hint: "Resolution / source / codec / groups tables" },
+    ]},
+    { title: "Downloads", desc: "Clients, indexers, and queue cleanup", items: [
+      { key: "settings-downloads", label: "Download clients", hint: "qBittorrent, SABnzbd, Transmission…" },
+      { key: "settings-indexers", label: "Indexers", hint: "Prowlarr, Jackett, Cardigann, builtins" },
+      { key: "settings-indexers-cfg", label: "Indexer connection", hint: "URLs and API keys" },
+      { key: "settings-cleanup", label: "Queue cleaner", hint: "Stalls, seed limits, orphans" },
+    ]},
+    { title: "Media tools", desc: "Subtitles and HandBrake×Tdarr converter", items: [
+      { key: "settings-subtitles", label: "Subtitles", hint: "OpenSubtitles, language profiles" },
+      { key: "converter", label: "Converter queue", hint: "Transcode presets, watch folders, GPU" },
+      { key: "converter-presets", label: "Converter presets", hint: "H.264 / HEVC / NVENC / QSV / AMF" },
+    ]},
+    { title: "Modules", desc: "Enable library types and power features", items: [
+      { key: "modules", label: "Module Store", hint: "Music, Books, Comics, Live TV, Converter…" },
+      { key: "settings-adult", label: "Adult library", hint: "Path, passcode, ThePornDB API key" },
+      { key: "settings-hunt", label: "Hunt engine", hint: "Aggressive missing + upgrades (NeutArr-class)" },
+    ]},
+    { title: "Access", desc: "Who can use MediaOs and what they can do", items: [
+      { key: "settings-users", label: "Users & permissions", hint: "Admin grants roles and fine-grained rights" },
+      { key: "settings-auth", label: "Auth / API keys", hint: "Login, X-API-Key" },
+      { key: "settings-sessions", label: "Sessions", hint: "Active tokens" },
+    ]},
+    { title: "Integrations", desc: "Metadata, debrid, notifications, media servers", items: [
+      { key: "settings-metadata", label: "Metadata APIs", hint: "TMDb, TVDb, ComicVine, Trakt" },
+      { key: "settings-debrid", label: "Debrid", hint: "Real-Debrid, TorBox, AllDebrid…" },
+      { key: "settings-integrations", label: "Notifications & servers", hint: "Discord, Telegram, Jellyfin refresh" },
+      { key: "settings-youtube", label: "YouTube", hint: "Creators, cookies, SponsorBlock" },
+      { key: "settings-vpn", label: "VPN", hint: "Gluetun health / kill-switch" },
+      { key: "settings-usenet", label: "Usenet / NNTP", hint: "NNTP streaming" },
+    ]},
+    { title: "Appearance & system", desc: "Look and feel, logs, wizard", items: [
+      { key: "settings-themes", label: "Themes", hint: "mediaos purple and DaisyUI themes" },
+      { key: "settings-system", label: "System", hint: "Search interval, upgrades, logs" },
+      { key: "settings-setup", label: "Setup wizard", hint: "Re-run first-run bootstrap" },
+    ]},
+  ];
+  // Filter groups by advanced mode + enabled modules
+  const filtered = groups.map(g => {
+    let items = g.items.filter(it => {
+      if (it.key === 'settings-quality-matrix' && !advanced) return false;
+      if ((it.key === 'converter' || it.key === 'converter-presets') && !em.includes('converter') && !advanced) return false;
+      if (it.key === 'settings-adult' && !em.includes('adult')) return false;
+      if (it.key === 'settings-youtube' && !em.includes('youtube')) return false;
+      return true;
+    });
+    return { ...g, items };
+  }).filter(g => g.items.length > 0);
+
+  return (
+    <div className="space-y-5 max-w-5xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="mr-page-title">Settings</h1>
+          <p className="mr-page-sub">Grouped by area — changes apply immediately (no restart).</p>
+        </div>
+        <div className="card bg-base-200 border border-base-content/10 shadow-sm">
+          <div className="card-body p-3 flex-row items-center gap-3">
+            <div className="text-xs">
+              <div className="font-semibold">{advanced ? 'Advanced' : 'Basic'} mode</div>
+              <div className="opacity-50">Power tools &amp; extra modules</div>
+            </div>
+            <input type="checkbox" className="toggle toggle-primary" checked={!!advanced}
+              onChange={e=>{ const v=e.target.checked; setAdvancedFlag(v); setAdvanced && setAdvanced(v); }} />
+          </div>
+        </div>
+      </div>
+      {filtered.map(g=>(
+        <div key={g.title} className="space-y-2">
+          <div>
+            <h2 className="font-semibold text-sm tracking-wide uppercase opacity-70">{g.title}</h2>
+            <p className="text-xs opacity-50">{g.desc}</p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {g.items.map(it=>(
+              <button key={it.key} type="button"
+                className="card bg-base-200 hover:bg-base-300 text-left border border-base-content/5 hover:border-primary/40 transition-all hover:shadow-md"
+                onClick={()=>setPage && setPage(it.key)}>
+                <div className="card-body p-3 gap-0.5">
+                  <div className="font-medium text-sm">{it.label}</div>
+                  <div className="text-[11px] opacity-50 leading-snug">{it.hint}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+export default SettingsHubPage;
+export { SettingsHubPage };

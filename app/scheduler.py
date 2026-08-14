@@ -30,6 +30,22 @@ from app.services.smartlists import run_all_smart_lists
 from app.services.podcasts import check_and_download_all as _check_podcasts
 from app.services.converter import process_queue_batch as _convert_tick, watch_folder_scan as _convert_watch, within_convert_schedule
 
+def _leader_job(fn):
+    """Skip scheduled work when another replica holds the scheduler lock."""
+    def _wrapped(*args, **kwargs):
+        try:
+            from app.services.leader import is_leader, refresh_leader
+            refresh_leader()
+            if not is_leader():
+                return None
+        except Exception:
+            pass
+        return fn(*args, **kwargs)
+    _wrapped.__name__ = getattr(fn, "__name__", "job")
+    _wrapped.__wrapped__ = fn
+    return _wrapped
+
+
 log = logging.getLogger(__name__)
 
 
@@ -466,7 +482,7 @@ def run_jackett_sync() -> None:
         finally:
             db.close()
     except Exception as exc:
-        log.debug("jackett sync: %s", exp if False else exc)
+        log.debug("jackett sync: %s", exc)
 
 
 
@@ -527,6 +543,44 @@ def run_indexer_health() -> None:
     finally:
         db.close()
 
+
+
+def run_virtualtv_schedule() -> None:
+    """Top up virtual (personal-media) channel schedules + write concat playlists."""
+    db = SessionLocal()
+    try:
+        from app.config import settings
+        if not getattr(settings, "virtualtv_enabled", True):
+            return
+        from app.services.virtual_channels import regenerate_all
+        result = regenerate_all(db)
+        log.info("VirtualTV schedule: %s", result)
+    except Exception as exc:
+        log.exception("VirtualTV schedule failed: %s", exc)
+    finally:
+        db.close()
+
+
+def run_virtualtv_streams() -> None:
+    """Make sure every enabled virtual channel has a live ffmpeg/HLS feed running,
+    and stop feeds for channels that got disabled."""
+    db = SessionLocal()
+    try:
+        from app.config import settings
+        if not getattr(settings, "virtualtv_enabled", True):
+            return
+        from app.models import LiveTvVirtualChannel as VC
+        from app.services import virtual_stream_engine as engine
+
+        for ch in db.query(VC).all():
+            if ch.enabled:
+                engine.ensure_running(db, ch)
+            elif engine.is_running(ch.id) or ch.stream_status != "stopped":
+                engine.stop_and_mark(db, ch)
+    except Exception as exc:
+        log.exception("VirtualTV stream supervisor failed: %s", exc)
+    finally:
+        db.close()
 
 def run_livetv_epg_sync() -> None:
     db = SessionLocal()
@@ -589,11 +643,93 @@ def _search_wanted_adult(db: Session) -> None:
             log.debug("wanted adult search %s: %s", item.title, e)
 
 
+
+
+def run_livetv_series_rules() -> None:
+    """Auto-apply series-record rules against recent EPG grid programmes."""
+    db = SessionLocal()
+    try:
+        from app.services.livetv_dvr import apply_series_rules_to_epg, list_series_rules
+        rules = list_series_rules(db)
+        if not any(r.get("enabled") for r in rules):
+            return
+        # Pull a compact EPG window from service if available
+        items = []
+        try:
+            from app.services import livetv as livetv_svc
+            if hasattr(livetv_svc, "epg_programmes_for_rules"):
+                items = livetv_svc.epg_programmes_for_rules(db, hours=48) or []
+            elif hasattr(livetv_svc, "get_guide"):
+                guide = livetv_svc.get_guide(db) or {}
+                for ch in guide.get("channels") or []:
+                    for prog in ch.get("programmes") or ch.get("programs") or []:
+                        items.append({
+                            "title": prog.get("title") or prog.get("name"),
+                            "channel_id": ch.get("id") or ch.get("channel_id"),
+                            "starts_at": prog.get("start") or prog.get("starts_at"),
+                            "ends_at": prog.get("stop") or prog.get("ends_at"),
+                            "subtitle": prog.get("desc") or prog.get("subtitle"),
+                            "tvg_id": ch.get("tvg_id") or ch.get("epg_tvg_id"),
+                            "stream_url": ch.get("stream_url"),
+                        })
+        except Exception as e:
+            log.debug("series-rules epg gather: %s", e)
+        if not items:
+            return
+        scheduled = apply_series_rules_to_epg(db, items)
+        if scheduled:
+            log.info("Series-rules auto-applied: %s recordings", len(scheduled))
+    except Exception as exc:
+        log.warning("Series-rules cycle: %s", exc)
+    finally:
+        db.close()
+
+
+def run_announce_lab() -> None:
+    """Poll indexers for announce-lab filters (autobrr-style, in-process)."""
+    db = SessionLocal()
+    try:
+        from app.services.announce_lab import list_filters, run_cycle
+        if not any(f.get("enabled") for f in list_filters(db)):
+            return
+        result = run_cycle(db)
+        if result.get("matched"):
+            log.info("Announce lab: matched=%s checked=%s", result.get("matched"), result.get("checked"))
+    except Exception as exc:
+        log.exception("Announce lab cycle failed: %s", exc)
+    finally:
+        db.close()
+
+
+def run_maintenance_rules() -> None:
+    db = SessionLocal()
+    try:
+        from app.services.maintenance_rules import list_rules, evaluate_rules
+        if not any(r.get("enabled") for r in list_rules(db)):
+            return
+        # Scheduled runs stay dry-run unless rule.dry_run_default is False
+        result = evaluate_rules(db, dry_run=None)
+        if result.get("actions_proposed"):
+            log.info("Maintenance rules: %s", result.get("message"))
+    except Exception as exc:
+        log.exception("Maintenance rules failed: %s", exc)
+    finally:
+        db.close()
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
+    try:
+        from app.services.leader import try_become_leader, instance_id
+        if try_become_leader():
+            log.info("Scheduler leader election: this instance is leader (%s)", instance_id())
+        else:
+            log.info("Scheduler leader election: follower — jobs will no-op until lock free (%s)", instance_id())
+    except Exception as e:
+        log.debug("Leader election init: %s", e)
+
     minutes = max(1, int(settings.search_interval_minutes))
     scheduler.add_job(
-        run_cycle,
+        _leader_job(run_cycle),
         "interval",
         minutes=minutes,
         id="mediaos_cycle",
@@ -603,7 +739,7 @@ def start_scheduler() -> BackgroundScheduler:
     )
     # Run once shortly after startup so first adds don't wait a full interval
     scheduler.add_job(
-        run_cycle,
+        _leader_job(run_cycle),
         "date",
         run_date=_utcnow() + timedelta(seconds=15),
         id="mediaos_startup_cycle",
@@ -612,7 +748,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     podcast_minutes = max(5, int(settings.podcast_check_interval_minutes))
     scheduler.add_job(
-        run_podcast_cycle,
+        _leader_job(run_podcast_cycle),
         "interval",
         minutes=podcast_minutes,
         id="mediaos_podcast_cycle",
@@ -621,7 +757,7 @@ def start_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
     scheduler.add_job(
-        run_podcast_cycle,
+        _leader_job(run_podcast_cycle),
         "date",
         run_date=_utcnow() + timedelta(seconds=25),
         id="mediaos_podcast_startup_cycle",
@@ -638,18 +774,18 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_queue_sse_tick, "interval", seconds=5, id="mediaos_queue_sse", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_cleanuparr_cycle, "interval", minutes=cleanup_min, id="mediaos_cleanup_cycle", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_cleanuparr_cycle, "date", run_date=_utcnow() + timedelta(seconds=70), id="mediaos_cleanup_startup", replace_existing=True)
-    scheduler.add_job(run_convert_cycle, "interval", seconds=45, id="mediaos_convert_cycle", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_convert_cycle), "interval", seconds=45, id="mediaos_convert_cycle", replace_existing=True, max_instances=1, coalesce=True)
     watch_min = max(5, int(getattr(settings, "converter_watch_interval_minutes", 15) or 15))
-    scheduler.add_job(run_convert_watch_cycle, "interval", minutes=watch_min, id="mediaos_convert_watch", replace_existing=True, max_instances=1, coalesce=True)
-    scheduler.add_job(run_convert_watch_cycle, "date", run_date=_utcnow() + __import__("datetime").timedelta(seconds=90), id="mediaos_convert_watch_startup", replace_existing=True)
-    scheduler.add_job(run_youtube_cycle, "interval", minutes=yt_minutes, id="mediaos_youtube_cycle", replace_existing=True, max_instances=1, coalesce=True)
-    scheduler.add_job(run_youtube_cycle, "date", run_date=_utcnow() + timedelta(seconds=40), id="mediaos_youtube_startup_cycle", replace_existing=True)
+    scheduler.add_job(_leader_job(run_convert_watch_cycle), "interval", minutes=watch_min, id="mediaos_convert_watch", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_convert_watch_cycle), "date", run_date=_utcnow() + __import__("datetime").timedelta(seconds=90), id="mediaos_convert_watch_startup", replace_existing=True)
+    scheduler.add_job(_leader_job(run_youtube_cycle), "interval", minutes=yt_minutes, id="mediaos_youtube_cycle", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_youtube_cycle), "date", run_date=_utcnow() + timedelta(seconds=40), id="mediaos_youtube_startup_cycle", replace_existing=True)
 
     pull_h = max(1, int(getattr(settings, "comic_pull_sync_hours", 12) or 12))
     trash_h = max(1, int(getattr(settings, "trash_guide_sync_hours", 168) or 168))
     epg_h = max(1, int(getattr(settings, "livetv_epg_sync_hours", 6) or 6))
-    scheduler.add_job(run_comic_pull_sync, "interval", hours=pull_h, id="mediaos_comic_pull", replace_existing=True, max_instances=1, coalesce=True)
-    scheduler.add_job(run_comic_pull_sync, "date", run_date=_utcnow() + timedelta(seconds=120), id="mediaos_comic_pull_startup", replace_existing=True)
+    scheduler.add_job(_leader_job(run_comic_pull_sync), "interval", hours=pull_h, id="mediaos_comic_pull", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_comic_pull_sync), "date", run_date=_utcnow() + timedelta(seconds=120), id="mediaos_comic_pull_startup", replace_existing=True)
     scheduler.add_job(run_trash_guide_sync, "interval", hours=trash_h, id="mediaos_trash_guide", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_trash_guide_sync, "date", run_date=_utcnow() + timedelta(seconds=150), id="mediaos_trash_guide_startup", replace_existing=True)
     iptv_h = max(1, int(getattr(settings, "livetv_iptv_org_sync_hours", 24) or 24))
@@ -661,12 +797,29 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler.add_job(run_indexer_health, "date", run_date=_utcnow() + timedelta(seconds=240), id="mediaos_indexer_health_startup", replace_existing=True)
     scheduler.add_job(run_livetv_health, "interval", minutes=health_m, id="mediaos_livetv_health", replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(run_livetv_health, "date", run_date=_utcnow() + timedelta(seconds=180), id="mediaos_livetv_health_startup", replace_existing=True)
-    scheduler.add_job(run_livetv_epg_sync, "interval", hours=epg_h, id="mediaos_livetv_epg", replace_existing=True, max_instances=1, coalesce=True)
-    scheduler.add_job(run_livetv_epg_sync, "date", run_date=_utcnow() + timedelta(seconds=100), id="mediaos_livetv_epg_startup", replace_existing=True)
+
+    vtv_sched_m = max(5, int(getattr(settings, "virtualtv_schedule_interval_minutes", 15) or 15))
+    scheduler.add_job(_leader_job(run_virtualtv_schedule), "interval", minutes=vtv_sched_m, id="mediaos_virtualtv_schedule", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_virtualtv_schedule), "date", run_date=_utcnow() + timedelta(seconds=210), id="mediaos_virtualtv_schedule_startup", replace_existing=True)
+    # Leader-gated: engine.ensure_running() tracks running ffmpeg/HLS
+    # processes in an in-process dict, not shared state, and every replica
+    # writes to the same HLS playlist path — without a single writer,
+    # multiple replicas would each spawn their own ffmpeg process per
+    # channel, all competing to write the same output file.
+    scheduler.add_job(_leader_job(run_virtualtv_streams), "interval", minutes=2, id="mediaos_virtualtv_streams", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_virtualtv_streams), "date", run_date=_utcnow() + timedelta(seconds=230), id="mediaos_virtualtv_streams_startup", replace_existing=True)
+
+    scheduler.add_job(_leader_job(run_announce_lab), "interval", minutes=5, id="mediaos_announce_lab", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_maintenance_rules), "interval", hours=12, id="mediaos_maintenance_rules", replace_existing=True, max_instances=1, coalesce=True)
+
+    scheduler.add_job(_leader_job(run_livetv_epg_sync), "interval", hours=epg_h, id="mediaos_livetv_epg", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_livetv_epg_sync), "date", run_date=_utcnow() + timedelta(seconds=100), id="mediaos_livetv_epg_startup", replace_existing=True)
+    scheduler.add_job(_leader_job(run_livetv_series_rules), "interval", hours=max(1, epg_h), id="mediaos_livetv_series_rules", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_livetv_series_rules), "date", run_date=_utcnow() + timedelta(seconds=200), id="mediaos_livetv_series_rules_startup", replace_existing=True)
     # Hunt engine — missing / failed items
     hunt_min = max(15, int(getattr(settings, "hunt_interval_minutes", 60) or 60))
-    scheduler.add_job(run_hunt_cycle_job, "interval", minutes=hunt_min, id="mediaos_hunt", replace_existing=True, max_instances=1, coalesce=True)
-    scheduler.add_job(run_hunt_cycle_job, "date", run_date=_utcnow() + timedelta(seconds=180), id="mediaos_hunt_startup", replace_existing=True)
+    scheduler.add_job(_leader_job(run_hunt_cycle_job), "interval", minutes=hunt_min, id="mediaos_hunt", replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_leader_job(run_hunt_cycle_job), "date", run_date=_utcnow() + timedelta(seconds=180), id="mediaos_hunt_startup", replace_existing=True)
 
     scheduler.start()
     log.info("Scheduler started (every %s min, podcasts every %s min)", minutes, podcast_minutes)

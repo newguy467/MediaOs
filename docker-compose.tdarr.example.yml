@@ -1,0 +1,41 @@
+# Optional external Tdarr (classic UI/nodes) alongside MediaOS native converter.
+# MediaOS already ships a full Tdarr-class pipeline (presets, queue, watch folders,
+# health checks, retries, HW encode). Use this only if you want the classic Tdarr UI.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tdarr.example.yml --profile tdarr up -d
+#
+# Then set in .env:
+#   TDARR_ENABLED=true
+#   TDARR_URL=http://tdarr:8265
+#   TDARR_API_KEY=
+
+services:
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:2.24.05
+    profiles: ["tdarr"]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-UTC}
+      - serverIP=0.0.0.0
+      - serverPort=8265
+      - webUIPort=8265
+      - internalNode=true
+      - inContainer=true
+      - ffmpegVersion=6
+      - nodeName=MediaOS-Internal
+    volumes:
+      - ${TDARR_SERVER_PATH:-./config/tdarr/server}:/app/server
+      - ${TDARR_CONFIG_PATH:-./config/tdarr/configs}:/app/configs
+      - ${TDARR_LOGS_PATH:-./config/tdarr/logs}:/app/logs
+      - ${TDARR_TEMP_PATH:-./data/tdarr-tmp}:/temp
+      # Same library roots as MediaOS / Jellyfin for consistent paths
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    ports:
+      - "${TDARR_HOST_PORT:-8265}:8265"
+    restart: unless-stopped
+    # GPU optional — uncomment overlays as with mediaos:
+    # devices: [/dev/dri:/dev/dri]

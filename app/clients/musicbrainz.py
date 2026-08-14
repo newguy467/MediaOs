@@ -1,9 +1,24 @@
 """MusicBrainz search (no API key required; identify mediaos in User-Agent)."""
 from __future__ import annotations
 
+import hashlib
+
 import httpx
 
 BASE = "https://musicbrainz.org/ws/2"
+
+
+def _stable_int_id(mbid: str) -> int:
+    """Deterministic string -> int id, stable across process restarts.
+
+    Python's built-in hash() is salted per-process for str objects
+    (PYTHONHASHSEED) unless hash randomization is explicitly disabled, so it
+    must not be used here — using it would make external_id matching for the
+    same MusicBrainz UUID silently fail after every app restart, creating
+    duplicate MediaItem rows instead of recognizing an already-added release.
+    """
+    digest = hashlib.sha256(mbid.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % (10**12)
 
 
 class MusicBrainzClient:
@@ -40,7 +55,7 @@ class MusicBrainzClient:
                     pass
             # MusicBrainz IDs are UUIDs — store hash as int-like? We use string external via external_source
             # For MediaItem.external_id (int), hash the UUID stably.
-            ext = abs(hash(r["id"])) % (10**12)
+            ext = _stable_int_id(r["id"])
             rows.append(
                 {
                     "external_id": ext,
@@ -71,7 +86,7 @@ class MusicBrainzClient:
                 year = int(str(r["first-release-date"])[:4])
             except ValueError:
                 pass
-        ext = abs(hash(r["id"])) % (10**12)
+        ext = _stable_int_id(r["id"])
         return {
             "external_id": ext,
             "external_mbid": r["id"],
@@ -121,7 +136,7 @@ class MusicBrainzClient:
                     year = int(str(r["first-release-date"])[:4])
                 except ValueError:
                     pass
-            ext = abs(hash(r["id"])) % (10**12)
+            ext = _stable_int_id(r["id"])
             rows.append(
                 {
                     "external_id": ext,
@@ -172,7 +187,7 @@ class MusicBrainzClient:
                 )
         return tracks
 
-def lookup_release_tracks(self, release_mbid: str) -> list[dict]:
+    def lookup_release_tracks(self, release_mbid: str) -> list[dict]:
         """Return tracks for a MusicBrainz release (or release-group first release)."""
         # Try release endpoint with recordings
         try:
@@ -213,3 +228,4 @@ def lookup_release_tracks(self, release_mbid: str) -> list[dict]:
 
 
 musicbrainz_client = MusicBrainzClient()
+

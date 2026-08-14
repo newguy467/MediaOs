@@ -2,7 +2,8 @@
 # Torrents exit via VPN; MediaOs can health-check Gluetun and kill-switch grabs.
 #
 #   cp docker-compose.vpn.example.yml docker-compose.vpn.yml
-#   # edit WIREGUARD_* / provider env
+#   # edit WIREGUARD_* / provider env and set POSTGRES_PASSWORD
+#   # Prefer: bash scripts/generate_secrets.sh
 #   docker compose -f docker-compose.vpn.yml up -d
 #
 # MediaOs settings (or env):
@@ -14,26 +15,33 @@
 
 services:
   gluetun:
-    image: qmcgaw/gluetun:latest
+    image: qmcgaw/gluetun:v3.41.3
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun:/dev/net/tun]
     environment:
       - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-mullvad}
       - VPN_TYPE=${VPN_TYPE:-wireguard}
-      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
-      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY:?Set WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:?Set WIREGUARD_ADDRESSES}
       - SERVER_COUNTRIES=${SERVER_COUNTRIES:-Netherlands}
       - HTTP_CONTROL_SERVER_ADDRESS=:8000
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
     ports:
       - "8080:8080"   # qBittorrent WebUI via gluetun network
-      - "8787:8000"   # MediaOs UI (if mediaos uses network_mode service:gluetun)
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:5.0.4
     network_mode: "service:gluetun"
-    depends_on: [gluetun]
+    depends_on:
+      gluetun:
+        condition: service_healthy
     environment:
       - PUID=1000
       - PGID=1000
@@ -44,27 +52,35 @@ services:
     restart: unless-stopped
 
   mediaos-db:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine
     environment:
-      POSTGRES_USER: mediaos
-      POSTGRES_PASSWORD: mediaos
-      POSTGRES_DB: mediaos
+      POSTGRES_USER: ${POSTGRES_USER:-mediaos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD — run scripts/generate_secrets.sh}
+      POSTGRES_DB: ${POSTGRES_DB:-mediaos}
     volumes:
       - mediaos_pg:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mediaos} -d $${POSTGRES_DB:-mediaos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Option A (recommended): MediaOs on normal network, talks to qB via gluetun hostname
+  # MediaOs on normal network; talks to qB via gluetun hostname (shared Docker network).
   # Publish MediaOs on host 8787; qB UI on 8080 through gluetun ports above.
   mediaos:
-    image: ghcr.io/newguy467/mediaos:latest
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-next}
     build: .
     depends_on:
-      - mediaos-db
-      - gluetun
-      - qbittorrent
+      mediaos-db:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_started
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mediaos}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@mediaos-db:5432/${POSTGRES_DB:-mediaos}
       QBIT_URL: http://gluetun:8080
       VPN_ENABLED: "true"
       VPN_PROVIDER: gluetun
@@ -75,11 +91,27 @@ services:
     volumes:
       - ${MOVIES_PATH:-./data/movies}:/movies
       - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${BOOKS_PATH:-./data/books}:/books
+      - ${AUDIOBOOKS_PATH:-./data/audiobooks}:/audiobooks
+      - ${PODCASTS_PATH:-./data/podcasts}:/podcasts
+      - ${COMICS_PATH:-./data/comics}:/comics
+      - ${MANGA_PATH:-./data/manga}:/manga
+      - ${YOUTUBE_PATH:-./data/youtube}:/youtube
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
-      - mediaos_config:/config
+      - ${GAMES_PATH:-./data/games}:/games
+      - ${ADULT_PATH:-./data/adult}:/adult
+      - ${MEDIAOS_DATA_PATH:-./data/mediaos}:/app/data
+      - ${MEDIAOS_CONFIG:-./config/mediaos}:/config
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   qb_config:
   mediaos_pg:
-  mediaos_config:

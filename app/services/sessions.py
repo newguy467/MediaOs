@@ -11,12 +11,68 @@ from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
-ACCESS_TTL = 60 * 60 * 12  # 12h
-REFRESH_TTL = 60 * 60 * 24 * 30  # 30d
+ACCESS_TTL = 60 * 60 * 4  # 4h
+REFRESH_TTL = 60 * 60 * 24 * 7  # 7d
 
 # process-local cache (optional speed; DB is source of truth)
 _sessions: dict[str, dict] = {}
 _refresh: dict[str, str] = {}
+
+_REDIS_SESS = "mediaos:sess:access:"
+_REDIS_REFRESH = "mediaos:sess:refresh:"
+
+
+def _redis():
+    try:
+        from app.services.redis_client import get_redis
+        return get_redis()
+    except Exception:
+        return None
+
+
+def _cache_put_access(token: str, row: dict, ttl: int) -> None:
+    r = _redis()
+    if r is None:
+        return
+    try:
+        import json
+        payload = json.dumps({k: v for k, v in row.items() if k != "refresh_token"})
+        r.setex(_REDIS_SESS + token, max(1, int(ttl)), payload)
+        refresh = row.get("refresh_token")
+        if refresh:
+            r.setex(_REDIS_REFRESH + refresh, max(1, int(row.get("refresh_expires_at", time.time()) - time.time())), token)
+    except Exception as e:
+        log.debug("redis session cache put: %s", e)
+
+
+def _cache_get_access(token: str) -> dict | None:
+    r = _redis()
+    if r is None:
+        return None
+    try:
+        import json
+        raw = r.get(_REDIS_SESS + token)
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if float(data.get("expires_at") or 0) < time.time():
+            r.delete(_REDIS_SESS + token)
+            return None
+        return data
+    except Exception as e:
+        log.debug("redis session cache get: %s", e)
+        return None
+
+
+def _cache_delete_access(token: str) -> None:
+    r = _redis()
+    if r is None:
+        return
+    try:
+        r.delete(_REDIS_SESS + token)
+    except Exception:
+        pass
+
 
 
 def _utcnow() -> datetime:
@@ -67,6 +123,7 @@ def create_session(
     }
     _sessions[access] = row
     _refresh[refresh] = access
+    _cache_put_access(access, row, ACCESS_TTL)
 
     db = _db()
     if db is not None:
@@ -116,6 +173,12 @@ def resolve_access(token: str) -> dict | None:
     if s and s["expires_at"] < time.time():
         _sessions.pop(token, None)
 
+    # shared redis cache (multi-worker)
+    cached = _cache_get_access(token)
+    if cached:
+        _sessions[token] = cached
+        return cached
+
     db = _db()
     if db is None:
         return None
@@ -145,6 +208,8 @@ def resolve_access(token: str) -> dict | None:
         }
         _sessions[token] = data
         _refresh[row.refresh_token] = token
+        ttl = max(1, int(_to_ts(row.expires_at) - time.time()))
+        _cache_put_access(token, data, ttl)
         return data
     except Exception as e:
         log.debug("resolve_access db: %s", e)
@@ -399,3 +464,34 @@ def revoke_others_for_user(username: str, keep_access: str) -> int:
         finally:
             db.close()
     return n
+
+
+def revoke_access(token: str) -> bool:
+    _cache_delete_access(token)
+    """Revoke a single access token (memory + DB)."""
+    if not token:
+        return False
+    row = _sessions.pop(token, None)
+    if row and row.get("refresh_token"):
+        _refresh.pop(row["refresh_token"], None)
+    db = _db()
+    if db is None:
+        return bool(row)
+    try:
+        from app.models import AuthSession
+        n = (
+            db.query(AuthSession)
+            .filter(AuthSession.access_token == token, AuthSession.revoked.is_(False))
+            .update({"revoked": True})
+        )
+        db.commit()
+        return bool(row) or n > 0
+    except Exception as e:
+        log.debug("revoke_access: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return bool(row)
+    finally:
+        db.close()

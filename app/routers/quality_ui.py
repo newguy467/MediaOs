@@ -163,3 +163,42 @@ def trash_status(_perm: list = Depends(require_permission("settings"))):
 def trash_sync(url: str | None = None, _perm: list = Depends(require_permission("settings"))):
     from app.services.trash_guide_fetch import fetch_and_apply
     return fetch_and_apply(url=url, use_builtin_fallback=True)
+
+
+# --- MediaOS v2: retention policy on quality profiles (bobarr multi-quality) ---
+
+class RetentionIn(BaseModel):
+    retention_policy: str = "best_only"  # best_only | keep_all_matching | keep_until_cutoff | keep_n_best
+    keep_n: int = 2
+
+
+@router.get("/profiles/{profile_id}/retention")
+def get_retention(profile_id: int, db: Session = Depends(get_db)):
+    from app.models import QualityProfileRecord
+    row = db.get(QualityProfileRecord, profile_id)
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Profile not found")
+    return {
+        "id": row.id,
+        "name": row.name,
+        "retention_policy": getattr(row, "retention_policy", None) or "best_only",
+        "keep_n": getattr(row, "keep_n", None) or 2,
+        "cutoff": row.cutoff,
+    }
+
+
+@router.put("/profiles/{profile_id}/retention")
+def set_retention(profile_id: int, body: RetentionIn, db: Session = Depends(get_db), _=Depends(require_permission("settings"))):
+    from app.models import QualityProfileRecord
+    from fastapi import HTTPException
+    row = db.get(QualityProfileRecord, profile_id)
+    if not row:
+        raise HTTPException(404, "Profile not found")
+    allowed = {"best_only", "keep_all_matching", "keep_until_cutoff", "keep_n_best"}
+    if body.retention_policy not in allowed:
+        raise HTTPException(400, f"retention_policy must be one of {allowed}")
+    row.retention_policy = body.retention_policy
+    row.keep_n = max(1, min(10, body.keep_n))
+    db.commit()
+    return {"ok": True, "retention_policy": row.retention_policy, "keep_n": row.keep_n}

@@ -66,3 +66,18 @@ def list_incomplete_albums(db: Session, limit: int = 50) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def hunt_priority_incomplete(db: Session, limit: int = 40) -> list[dict]:
+    """Albums with lowest completeness first — feed hunt/wanted."""
+    rows = list_incomplete_albums(db, limit=limit * 2)
+    rows.sort(key=lambda c: (c.get("percent") or 0, -(c.get("tracks_missing") or 0)))
+    return rows[:limit]
+
+
+def missing_track_targets(db: Session, album_id: int) -> list[dict]:
+    """Return missing tracks as hunt targets."""
+    c = album_completeness(db, album_id)
+    if not c.get("ok"):
+        return []
+    return c.get("missing") or []

@@ -66,6 +66,7 @@ def migrate_radarr_sqlite(db: Session, path: str) -> dict:
             db.add(MediaItem(
                 media_type=MediaType.movie,
                 external_id=int(tmdb),
+                external_source="tmdb",
                 title=title,
                 year=year,
                 monitored=mon,
@@ -117,6 +118,8 @@ def migrate_sonarr_sqlite(db: Session, path: str) -> dict:
             item = MediaItem(
                 media_type=MediaType.tv,
                 external_id=int(tvdb),
+                external_source="tvdb",
+                tvdb_id=int(tvdb),
                 title=title,
                 year=year,
                 monitored=mon,

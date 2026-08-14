@@ -1,4 +1,9 @@
 """
+LEGACY: JSON/AppSetting-backed Homelab links.
+
+Prefer /api/homelab/* (HomelabLink model + router) for the UI Homelab page.
+This module remains for /api/system/homelab-links compatibility.
+
 Homelab Apps / Links page (Organizr-lite).
 
 Persists user links in app_settings under key `homelab_links_json`.

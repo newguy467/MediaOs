@@ -90,7 +90,13 @@ def parse_chapters_from_item(item, ns: dict, client: httpx.Client | None = None)
             return chapters
 
     # PSC simple chapters
-    psc = item.find("psc:chapters", ns) or item.find("{%s}chapters" % PSC_NS)
+    # NOTE: must use explicit `is None` checks here, not `or` — ElementTree
+    # Element truthiness is based on child count (len(element)), not
+    # identity, so `el1 or el2` would silently skip a real-but-empty
+    # <psc:chapters> element and fall through to the second find().
+    psc = item.find("psc:chapters", ns)
+    if psc is None:
+        psc = item.find("{%s}chapters" % PSC_NS)
     if psc is not None:
         for ch in list(psc):
             if not ch.tag.endswith("chapter"):
