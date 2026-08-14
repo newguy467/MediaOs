@@ -1,6 +1,6 @@
 # MediaOS Next
 
-**Tag:** `next`
+**Tag:** `1.00beta`
 **Codename:** MediaOS Next
 **Date:** 2026-08-14
 
@@ -44,11 +44,11 @@ MediaOS Next is a complete rebuild of the MediaOS architecture. Instead of stitc
 
 ### Bug fixes
 - **Alembic migration 0007 SQLite bug** — `batch_alter_table` on SQLite triggered `ValueError: Constraint must have a name`. Fixed with raw `ALTER TABLE` SQL for SQLite while keeping `batch_alter_table` for PostgreSQL.
-- **Stale version string** — `dashboard_widgets.py` referenced `2.0.20-dev` while the rest used `2.0.27-dev`. Standardized to `next`.
+- **Stale version string** — `dashboard_widgets.py` referenced `2.0.20-dev` while the rest used `2.0.27-dev`. Standardized to `1.00beta`.
 - **Missing `.gitignore`** — created comprehensive `.gitignore` to prevent committing `.env` secrets, databases, and build artifacts.
 
 ### Version
-Bumped from `2.0.27-dev` → `next` across all files (VERSION, Dockerfile, version.py, main.py, dashboard_widgets.py, plugins.py, example compose files, tests). The health endpoint now reports `version: next`.
+Bumped from `2.0.27-dev` → `1.00beta` across all files (VERSION, Dockerfile, version.py, main.py, dashboard_widgets.py, plugins.py, example compose files, tests). The health endpoint now reports `version: 1.00beta`.
 
 ## Verification results
 
@@ -62,7 +62,7 @@ Bumped from `2.0.27-dev` → `next` across all files (VERSION, Dockerfile, versi
 | Alembic migrations | 7/7 applied (SQLite + Postgres) |
 | UI static assets | 81 files (index, CSS, JS, hls) |
 | .env.example | 293 vars, no hardcoded secrets |
-| Version consistency | `next` everywhere |
+| Version consistency | `1.00beta` everywhere |
 | .gitignore | Present |
 | No old version refs | 0 remaining in code |
 | No committed .env | Confirmed |

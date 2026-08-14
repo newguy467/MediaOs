@@ -29,7 +29,7 @@ def test_version_consistent():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     ver = (root / "VERSION").read_text().strip()
-    assert ver == "next"
+    assert ver == "1.00beta"
     # Dockerfile ARG
     docker = (root / "Dockerfile").read_text()
-    assert "APP_VERSION=next" in docker
+    assert "APP_VERSION=1.00beta" in docker

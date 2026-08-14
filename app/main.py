@@ -78,7 +78,7 @@ log = logging.getLogger("mediaos")
 
 app = FastAPI(
     title="MediaOS",
-    version=os.environ.get("APP_VERSION", "next"),
+    version=os.environ.get("APP_VERSION", "1.00beta"),
     description="All-in-one media & games OS — movies, TV, music, books, audiobooks, comics, adult, Live TV, games, scrobbling, tracking",
 )
 
@@ -491,7 +491,7 @@ def on_startup():
                 log.debug("jackett startup sync: %s", je)
     except Exception as _e:
         log.warning("startup bootstrap: %s", _e)
-    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "next"))
+    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "1.00beta"))
 
 
 @app.get("/api/health")
@@ -513,7 +513,7 @@ def health():
     return {
         "status": "ok" if db_ok else "degraded",
         "database": db_ok,
-        "version": os.environ.get("APP_VERSION", "next"),
+        "version": os.environ.get("APP_VERSION", "1.00beta"),
         "auth_required": _auth_enabled(),
         "flaresolverr": flaresolverr_client.get_status(),
         "vpn": get_vpn_status(),
