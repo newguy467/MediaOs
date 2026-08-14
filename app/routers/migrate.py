@@ -47,24 +47,19 @@ def migrate_sonarr(payload: ArrSource, db: Session = Depends(get_db), _: str = D
 
 @router.post("/trash")
 def import_trash(payload: TrashImportIn, db: Session = Depends(get_db), _: str = Depends(require_admin)):
-    from app.services.trash_import import import_trash_from_url, import_trash_into_profile
+    from app.services.trash_import import import_trash_payload
     try:
         if payload.url:
-            return import_trash_from_url(
-                db,
-                payload.url,
-                profile_name=payload.profile_name,
-                media_type=payload.media_type,
-                replace_formats=payload.replace_formats,
+            # URL-based fetch-and-import was never implemented in
+            # app.services.trash_import (only raw-payload import exists) —
+            # fail clearly instead of the previous hard ImportError/500.
+            raise HTTPException(
+                400,
+                "Trash import by URL is not supported — fetch the JSON yourself "
+                "and POST it as `data` instead.",
             )
         if payload.data is not None:
-            return import_trash_into_profile(
-                db,
-                data=payload.data,
-                profile_name=payload.profile_name,
-                media_type=payload.media_type,
-                replace_formats=payload.replace_formats,
-            )
+            return import_trash_payload(payload.data)
         raise HTTPException(400, "Provide url or data")
     except HTTPException:
         raise
@@ -74,11 +69,13 @@ def import_trash(payload: TrashImportIn, db: Session = Depends(get_db), _: str =
 
 @router.get("/trash/presets")
 def trash_presets():
-    from app.services.trash_import import TRASH_CF_MOVIE_URL, TRASH_CF_TV_URL
+    # No preset guide URLs are defined anywhere in this codebase (this
+    # previously imported two nonexistent constants and 500'd on every
+    # call). Only raw-payload import via POST /migrate/trash is supported.
     return {
-        "movie_hd_bluray_web": TRASH_CF_MOVIE_URL,
-        "tv_hd_bluray_web": TRASH_CF_TV_URL,
-        "notes": "Paste any TRaSH custom format JSON or formatItems export; URLs may move — prefer local paste if fetch fails.",
+        "movie_hd_bluray_web": None,
+        "tv_hd_bluray_web": None,
+        "notes": "No built-in preset URLs — paste a TRaSH custom-format JSON export via POST /migrate/trash instead.",
     }
 
 
@@ -180,3 +177,39 @@ def supported_arrs():
         ],
         "notes": "Import pulls library into mediaos so you can retire the *arr. Compat means Jellyseerr/Overseerr/LunaSea can talk to mediaos as if it were that app.",
     }
+
+
+@router.post("/backfill-provider-ids")
+def backfill_provider_ids(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """One-shot: copy external_id into imdb_id/tvdb_id when external_source is known."""
+    from app.models import MediaItem
+    updated = 0
+    rows = db.query(MediaItem).all()
+    for item in rows:
+        changed = False
+        src = (item.external_source or "").lower()
+        if src in ("tvdb", "tvdb.com") and item.external_id and not item.tvdb_id:
+            item.tvdb_id = int(item.external_id)
+            changed = True
+        if src in ("imdb",) and item.external_id and not item.imdb_id:
+            eid = str(item.external_id)
+            item.imdb_id = eid if eid.startswith("tt") else f"tt{eid}"
+            changed = True
+        # external_ids JSON seed
+        if not item.external_ids and item.external_id:
+            import json
+            blob = {}
+            if src in ("tmdb", "", "none") or src is None:
+                blob["tmdb"] = item.external_id
+            if src == "tvdb" or item.tvdb_id:
+                blob["tvdb"] = item.tvdb_id or item.external_id
+            if item.imdb_id:
+                blob["imdb"] = item.imdb_id
+            if blob:
+                item.external_ids = json.dumps(blob)
+                changed = True
+        if changed:
+            db.add(item)
+            updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated, "scanned": len(rows)}

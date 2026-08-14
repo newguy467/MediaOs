@@ -1,11 +1,6 @@
-"""Pytest path bootstrap + default sqlite URL for unit tests."""
-from __future__ import annotations
+"""Test defaults that keep import/smoke tests independent of a live Postgres service."""
 import os
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:////tmp/mediaos-pytest.db")
+# CI/local smoke tests should not require a running database just to import the
+# application. Production/Docker still supplies DATABASE_URL explicitly.
+os.environ.setdefault("DATABASE_URL", "sqlite:///./data/test-mediaos.db")

@@ -30,6 +30,9 @@ class MediaType(str, enum.Enum):
     comic = "comic"
     manga = "manga"
     adult = "adult"  # Whisparr-style adult movies (passcode gated)
+    game = "game"    # Questarr-inspired video games module (MediaOS v2)
+    board_game = "board_game"  # Yamtrack-style board games
+    podcast = "podcast"
 
 
 class ItemStatus(str, enum.Enum):
@@ -60,6 +63,10 @@ class MediaItem(Base):
     external_source: Mapped[str | None] = mapped_column(
         String, nullable=True, default="tmdb"
     )  # tmdb | tvdb | musicbrainz | openlibrary | audnexus
+    # Provider IDs for strong webhook / library matching (v2.0.4+)
+    imdb_id: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. tt1234567
+    tvdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    external_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON blob of extra IDs
     title: Mapped[str] = mapped_column(String, nullable=False)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     overview: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -145,7 +152,8 @@ class Download(Base):
     __tablename__ = "downloads"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_items.id"))
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
     episode_id: Mapped[int | None] = mapped_column(
         ForeignKey("episodes.id"), nullable=True
     )
@@ -218,6 +226,9 @@ class QualityProfileRecord(Base):
         Text, default='["bluray","webdl","webrip","hdtv"]'
     )
     custom_formats_json: Mapped[str] = mapped_column(Text, default="[]")
+    # bobarr-inspired: best_only | keep_all_matching | keep_until_cutoff | keep_n_best
+    retention_policy: Mapped[str] = mapped_column(String, default="best_only")
+    keep_n: Mapped[int] = mapped_column(Integer, default=2)  # used when retention_policy == keep_n_best
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
@@ -296,7 +307,70 @@ class LiveTvChannel(Base):
     epg_tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Health-cycle bookkeeping (used by run_channel_health_cycle to auto-delete/disable
+    # channels whose stream has been dead for longer than `livetv_offline_hours`).
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+
+class LiveTvVirtualChannel(Base):
+    """A 24/7 'channel' auto-scheduled from the user's own media_items/episodes
+    library (the "your library becomes TV channels" feature) rather than a
+    real IPTV stream. Rendered into the same unified M3U/XMLTV export as
+    LiveTvChannel so Jellyfin sees one lineup.
+    """
+
+    __tablename__ = "livetv_virtual_channels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    group_title: Mapped[str | None] = mapped_column(String, nullable=True, default="Personal Media")
+    logo: Mapped[str | None] = mapped_column(String, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Content source. media_types: JSON list subset of ["movie","tv"].
+    # media_item_ids: JSON list of explicit MediaItem ids to restrict to (empty = whole
+    # library matching media_types/genre/title filters below).
+    media_types: Mapped[str] = mapped_column(String, default='["movie"]')
+    media_item_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list[int] or null
+    genre_filter: Mapped[str | None] = mapped_column(String, nullable=True)  # substring match, comma list = OR
+    title_filter: Mapped[str | None] = mapped_column(String, nullable=True)  # substring match on title
+    year_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    year_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Scheduling rules
+    randomize: Mapped[bool] = mapped_column(Boolean, default=True)
+    repeat_protection_days: Mapped[int] = mapped_column(Integer, default=7)
+    prime_time_movies: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Stream engine bookkeeping
+    schedule_filled_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stream_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stream_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stream_status: Mapped[str] = mapped_column(String, default="stopped")  # stopped | starting | running | error
+    stream_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class LiveTvVirtualScheduleItem(Base):
+    """One entry in a virtual channel's generated continuous schedule."""
+
+    __tablename__ = "livetv_virtual_schedule_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    virtual_channel_id: Mapped[int] = mapped_column(
+        ForeignKey("livetv_virtual_channels.id"), nullable=False, index=True
+    )
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    episode_id: Mapped[int | None] = mapped_column(ForeignKey("episodes.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class SmartList(Base):
@@ -573,6 +647,9 @@ class ConvertJob(Base):
     source_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    health_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    health_message: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -697,3 +774,219 @@ class MediaQualityFile(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+
+
+# ---------------------------------------------------------------------------
+# MediaOS v2 — Scrobbling, Tracking, Games, Homelab (absorbed concepts)
+# ---------------------------------------------------------------------------
+
+class TrackingStatus(str, enum.Enum):
+    planned = "planned"
+    in_progress = "in_progress"
+    completed = "completed"
+    dropped = "dropped"
+    on_hold = "on_hold"
+    repeating = "repeating"
+
+
+class ScrobbleEventType(str, enum.Enum):
+    start = "start"
+    pause = "pause"
+    resume = "resume"
+    stop = "stop"
+    scrobble = "scrobble"
+    progress = "progress"
+
+
+class Platform(Base):
+    """Gaming platform / store (PC, PS5, Switch, Steam, GOG, etc.)."""
+    __tablename__ = "platforms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    icon_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    metadata_provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Game(Base):
+    """
+    Video game entity (Questarr-inspired).
+    Reuses shared pipeline: search → grab → organize → track.
+    """
+    __tablename__ = "games"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    sort_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    poster_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    fanart_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: igdb, steam, ...
+    genres: Mapped[str | None] = mapped_column(String, nullable=True)
+    platform_id: Mapped[int | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    monitored: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String, default="wanted")  # wanted|downloaded|installed|completed
+    path: Mapped[str | None] = mapped_column(String, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    playtime_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    completion_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    last_played_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quality_profile: Mapped[str | None] = mapped_column(String, nullable=True)
+    install_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    launcher: Mapped[str | None] = mapped_column(String, nullable=True)  # steam://, shell path, etc.
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class GameRelease(Base):
+    """Specific release / edition / installer / ROM for a game."""
+    __tablename__ = "game_releases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    edition: Mapped[str | None] = mapped_column(String, nullable=True)
+    platform_id: Mapped[int | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    grabbed: Mapped[bool] = mapped_column(Boolean, default=False)
+    installed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class WatchProgress(Base):
+    """Aggregated watch/play progress (scrob + Yamtrack inspired)."""
+    __tablename__ = "watch_progress"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
+    episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    position_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    play_count: Mapped[int] = mapped_column(Integer, default=0)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_watched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)  # jellyfin|plex|emby|manual|scrob
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ScrobbleEvent(Base):
+    """Individual scrobble / play event."""
+    __tablename__ = "scrobble_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
+    episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)  # start|pause|scrobble|...
+    progress_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    position_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class TrackedItem(Base):
+    """
+    Unified tracking record (Yamtrack-inspired).
+    Status + rating + notes across any media type or game.
+    """
+    __tablename__ = "tracked_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="planned")  # TrackingStatus values
+    progress_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rewatch_count: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class TrackingHistory(Base):
+    """Action timeline for tracked items (Yamtrack-style history)."""
+    __tablename__ = "tracking_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tracked_item_id: Mapped[int | None] = mapped_column(ForeignKey("tracked_items.id"), nullable=True)
+    media_item_id: Mapped[int | None] = mapped_column(ForeignKey("media_items.id"), nullable=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False)  # added|started|completed|rewatch|status_change|rated
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+
+
+class LiveTvSeriesRule(Base):
+    """Series-record rule: auto-schedule matching EPG titles (Cinephage / DVR depth)."""
+    __tablename__ = "livetv_series_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title_match: Mapped[str] = mapped_column(String, nullable=False)  # substring or exact
+    match_mode: Mapped[str] = mapped_column(String, default="contains")  # contains|exact|startswith
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("livetv_channels.id"), nullable=True)  # None = any
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    keep_episodes: Mapped[int] = mapped_column(Integer, default=0)  # 0 = unlimited
+    priority: Mapped[int] = mapped_column(Integer, default=50)
+    only_new: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class LiveTvRecording(Base):
+    """EPG click-to-record / DVR job (Cinephage-style)."""
+    __tablename__ = "livetv_recordings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("livetv_channels.id"), nullable=True)
+    channel_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    subtitle: Mapped[str | None] = mapped_column(String, nullable=True)
+    tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="scheduled")  # scheduled|recording|completed|failed|cancelled
+    file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    stream_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    series_rule_id: Mapped[int | None] = mapped_column(ForeignKey("livetv_series_rules.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class HomelabLink(Base):
+    """Organizr-inspired service / bookmark links for the Homelab page."""
+    __tablename__ = "homelab_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    icon_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    iframe: Mapped[bool] = mapped_column(Boolean, default=False)
+    health_check_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String, nullable=True)  # up|down|unknown
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -1,80 +1,278 @@
-# Production-oriented compose for mediaos
-# Docs: https://github.com/newguy467/mediaos#readme
+# =============================================================================
+# MediaOS Next — Unified Application Stack
+# =============================================================================
+# MediaOS is a single unified application that absorbs all *arr functionality
+# (Sonarr, Radarr, Lidarr, Readarr, Bazarr, Prowlarr) into one FastAPI control
+# plane with one custom web UI. The user never opens separate *arr web UIs.
+#
+# Architecture:
+#   MediaOS (control plane)  →  orchestrates all supporting services
+#     ├── Postgres           →  primary database (always-on)
+#     ├── Redis              →  job queue + leader election (always-on)
+#     ├── Jellyfin           →  streaming / playback backend
+#     ├── Gluetun            →  VPN gateway (kill-switch for qBittorrent)
+#     ├── qBittorrent        →  download engine (routed through Gluetun)
+#     ├── Tdarr              →  optional transcoding (profile: tdarr)
+#     ├── iptv-org-epg       →  optional EPG grabber (profile: full)
+#     ├── FlareSolverr       →  optional CF bypass (profile: full)
+#     └── Ollama             →  optional local LLM (profile: ai)
+#
+# Quick start:
+#   cp .env.example .env
+#   bash scripts/generate_secrets.sh    # generates POSTGRES_PASSWORD + AUTH_API_KEY
+#   # Edit .env: set VPN_* credentials, library paths, TMDB/TVDB keys
+#   docker compose up -d
+#
+# With optional services:
+#   docker compose --profile full --profile ai --profile tdarr up -d
+#
+# Security:
+#   - POSTGRES_PASSWORD is required (no default). Run scripts/generate_secrets.sh
+#   - AUTH_REQUIRE defaults to true
+#   - All containers use no-new-privileges where possible
+#   - No hard-coded secrets in this file
+# =============================================================================
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # Database — primary persistence layer (always-on)
+  # ---------------------------------------------------------------------------
   mediaos-db:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine
     environment:
-      POSTGRES_USER: mediaos
-      POSTGRES_PASSWORD: mediaos
-      POSTGRES_DB: mediaos
+      POSTGRES_USER: ${POSTGRES_USER:-mediaos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD — run scripts/generate_secrets.sh}
+      POSTGRES_DB: ${POSTGRES_DB:-mediaos}
     volumes:
       - mediaos_pg:/var/lib/postgresql/data
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mediaos"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mediaos} -d $${POSTGRES_DB:-mediaos}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-512m}
+    cpus: ${POSTGRES_CPUS:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Node: iptv-org/epg grabber (epg-grabber) — builds local XMLTV for fresher guides
-  # MediaOs consumes http://iptv-org-epg:3000/guide.xml automatically via livetv_epg_sidecar_url
-  iptv-org-epg:
-    image: node:20-bookworm-slim
-    working_dir: /epg
-    environment:
-      EPG_SITE: ${EPG_SITE:-tvtv.us}
-      EPG_DAYS: ${EPG_DAYS:-2}
-      EPG_CRON_HOURS: ${EPG_CRON_HOURS:-6}
+  # ---------------------------------------------------------------------------
+  # Redis — job queue, caching, leader election for multi-worker scheduler
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
-      - iptv_org_epg_data:/epg
-      - ./scripts/epg-sidecar-entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/bin/bash", "/entrypoint.sh"]
-    ports:
-      - "${EPG_HOST_PORT:-3099}:3000"
-    restart: unless-stopped
-    profiles: ["full", "epg"]  # docker compose --profile full up -d
-    # To always start with MediaOs: remove profiles line or use --profile full
+      - mediaos_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: ${REDIS_MEMORY_LIMIT:-384m}
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
 
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
+  # ---------------------------------------------------------------------------
+  # Gluetun — VPN gateway with kill-switch
+  # qBittorrent uses network_mode: service:gluetun so ALL its traffic exits
+  # through the VPN. If the tunnel drops, qBittorrent loses connectivity.
+  # MediaOS health-checks Gluetun's control server and blocks grabs when down.
+  #
+  # Required env (set in .env):
+  #   VPN_SERVICE_PROVIDER  — e.g. mullvad, nordvpn, protonvpn, surfshark, custom
+  #   VPN_TYPE              — wireguard or openvpn
+  #   For WireGuard: VPN_WIREGUARD_PRIVATE_KEY + VPN_WIREGUARD_ADDRESSES
+  #   For OpenVPN:   VPN_USERNAME + VPN_PASSWORD (mapped to OPENVPN_USER/PASS)
+  # ---------------------------------------------------------------------------
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.3
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     environment:
-      LOG_LEVEL: info
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-custom}
+      - VPN_TYPE=${VPN_TYPE:-wireguard}
+      # WireGuard credentials (used when VPN_TYPE=wireguard)
+      - WIREGUARD_PRIVATE_KEY=${VPN_WIREGUARD_PRIVATE_KEY:-}
+      - WIREGUARD_ADDRESSES=${VPN_WIREGUARD_ADDRESSES:-}
+      - WIREGUARD_PUBKEY=${VPN_WIREGUARD_PUBLIC_KEY:-}
+      # OpenVPN credentials (used when VPN_TYPE=openvpn)
+      - OPENVPN_USER=${VPN_USERNAME:-}
+      - OPENVPN_PASSWORD=${VPN_PASSWORD:-}
+      # Server selection
+      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES:-Netherlands}
+      - SERVER_CITIES=${VPN_SERVER_CITIES:-}
+      # Control server — MediaOS queries this for health/IP
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      - HTTP_CONTROL_SERVER_LOG=off
+      # Allow LAN + Docker subnet traffic through firewall
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+      # Port forwarding (for qBittorrent incoming)
+      - VPN_PORT_FORWARDING=${VPN_PORT_FORWARDING:-false}
+      - VPN_PORT_FORWARDING_PROVIDER=${VPN_SERVICE_PROVIDER:-}
     ports:
-      - "${FLARESOLVERR_HOST_PORT:-8191}:8191"
-    restart: unless-stopped
-    profiles: ["full", "flaresolverr"]
-
-  # Optional local LLM for Safe AI Assistant (profile: ai)
-  # docker compose --profile ai up -d
-  # then: docker compose exec ollama ollama pull llama3.2
-  ollama:
-    image: ollama/ollama:latest
+      # qBittorrent WebUI is accessed through Gluetun's network namespace
+      - "${QBIT_HOST_PORT:-8080}:8080"
+      # qBittorrent torrent ports (TCP + UDP)
+      - "${QBIT_TORRENT_PORT:-6881}:6881"
+      - "${QBIT_TORRENT_PORT:-6881}:6881/udp"
     volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_KEEP_ALIVE=24h
+      - gluetun_data:/gluetun
     restart: unless-stopped
-    profiles: ["ai", "full"]
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+  # ---------------------------------------------------------------------------
+  # qBittorrent — download engine (ALL traffic through Gluetun VPN)
+  # network_mode: service:gluetun means qBittorrent shares Gluetun's network
+  # stack. If the VPN tunnel drops, qBittorrent has no connectivity — this is
+  # the kill-switch. MediaOS connects to qBittorrent via http://gluetun:8080.
+  # ---------------------------------------------------------------------------
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.0.4
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - WEBUI_PORT=8080
+    volumes:
+      - qb_config:/config
+      # Same downloads path as MediaOS for consistent hardlink paths
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Jellyfin — streaming / playback backend
+  # MediaOS manages all media via Jellyfin API. The user browses and plays
+  # through the MediaOS UI, which proxies to Jellyfin for playback.
+  # Same library mounts as MediaOS for consistent paths + hardlinks.
+  # ---------------------------------------------------------------------------
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:10.10.3
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - JELLYFIN_PublishedServerUrl=${JELLYFIN_PUBLISHED_URL:-http://localhost:8096}
+    volumes:
+      - jellyfin_config:/config
+      # Library mounts — identical paths inside container as MediaOS
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${BOOKS_PATH:-./data/books}:/books
+      - ${AUDIOBOOKS_PATH:-./data/audiobooks}:/audiobooks
+      - ${PODCASTS_PATH:-./data/podcasts}:/podcasts
+      - ${COMICS_PATH:-./data/comics}:/comics
+      - ${MANGA_PATH:-./data/manga}:/manga
+      - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+    ports:
+      - "${JELLYFIN_HOST_PORT:-8096}:8096"
+      # Auto-discovery (optional, can be removed for headless)
+      - "1900:1900/udp"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${JELLYFIN_MEMORY_LIMIT:-2g}
+    cpus: ${JELLYFIN_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8096/Health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # GPU hardware transcoding — uncomment device lines for your platform:
+    # devices:
+    #   - /dev/dri:/dev/dri  # Intel/AMD
+
+  # ---------------------------------------------------------------------------
+  # MediaOS — the unified application (control plane + UI)
+  # Absorbs Sonarr, Radarr, Lidarr, Readarr, Bazarr, Prowlarr functionality.
+  # One FastAPI backend, one custom React UI. The user manages everything here.
+  # ---------------------------------------------------------------------------
   mediaos:
-    image: ghcr.io/newguy467/mediaos:latest
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-next}
     build: .
     depends_on:
       mediaos-db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_started
+      jellyfin:
+        condition: service_started
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
-      # Auto Live TV + prefer Node sidecar when profile "full"/"epg" is up
+      # Database — injected from secrets, overrides .env if present
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mediaos}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@mediaos-db:5432/${POSTGRES_DB:-mediaos}
+      # Redis — always-on service for job queue + leader election
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # qBittorrent — reached through Gluetun's network namespace
+      QBIT_URL: ${QBIT_URL:-http://gluetun:8080}
+      QBIT_USERNAME: ${QBIT_USERNAME:-admin}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      # Jellyfin — streaming backend
+      JELLYFIN_URL: ${JELLYFIN_URL:-http://jellyfin:8096}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+      # VPN — MediaOS health-checks Gluetun and enforces kill-switch
+      VPN_ENABLED: ${VPN_ENABLED:-true}
+      VPN_PROVIDER: gluetun
+      VPN_GLUETUN_URL: http://gluetun:8000
+      VPN_KILL_SWITCH: ${VPN_KILL_SWITCH:-true}
+      # Optional sidecar services (auto-detected if running)
       LIVETV_SEED_IPTV_ORG: ${LIVETV_SEED_IPTV_ORG:-true}
       LIVETV_AUTO_GRAB: ${LIVETV_AUTO_GRAB:-true}
       LIVETV_EPG_SIDECAR_URL: ${LIVETV_EPG_SIDECAR_URL:-http://iptv-org-epg:3000/guide.xml}
       FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191}
+      TDARR_ENABLED: ${TDARR_ENABLED:-false}
+      TDARR_URL: ${TDARR_URL:-http://tdarr:8265}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_MODEL: llama3.2
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
     ports:
-      - "8787:8000"
+      - "${MEDIAOS_HOST_PORT:-8787}:8000"
     volumes:
+      # Library mounts — identical paths inside container as Jellyfin/qBittorrent
+      # This ensures hardlinks work across services (same inode, no copy)
       - ${MOVIES_PATH:-./data/movies}:/movies
       - ${TV_PATH:-./data/tv}:/tv
       - ${MUSIC_PATH:-./data/music}:/music
@@ -85,12 +283,162 @@ services:
       - ${MANGA_PATH:-./data/manga}:/manga
       - ${YOUTUBE_PATH:-./data/youtube}:/youtube
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+      - ${GAMES_PATH:-./data/games}:/games
+      - ${ADULT_PATH:-./data/adult}:/adult
+      # MediaOS internal data + config
+      - ${MEDIAOS_DATA_PATH:-./data/mediaos}:/app/data
+      - ${MEDIAOS_CONFIG:-./config/mediaos}:/config
+      # Compatibility mounts for existing MediaOS/Jellyfin deployments
+      - ${P_MOVIES_HOST_PATH:-./data/movies}:/data/local-p-movies
+      - ${P_TV_HOST_PATH:-./data/tv}:/data/local-p-tvshows
+      - ${D_MOVIES_HOST_PATH:-./data/movies-d}:/data/local-d-movies
+      - ${D_TV_HOST_PATH:-./data/tv-d}:/data/local-d-tvshows
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    mem_limit: ${MEDIAOS_MEMORY_LIMIT:-2g}
+    cpus: ${MEDIAOS_CPUS:-2.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
+      start_period: 60s
 
+  # ---------------------------------------------------------------------------
+  # Tdarr — optional external transcoding (profile: tdarr)
+  # MediaOS already ships a full Tdarr-class pipeline natively. Use this only
+  # if you want the classic Tdarr UI alongside MediaOS.
+  # ---------------------------------------------------------------------------
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:2.24.05
+    profiles: ["tdarr", "full"]
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - serverIP=0.0.0.0
+      - serverPort=8265
+      - webUIPort=8265
+      - internalNode=true
+      - inContainer=true
+      - ffmpegVersion=6
+      - nodeName=MediaOS-Internal
+    volumes:
+      - tdarr_server:/app/server
+      - tdarr_configs:/app/configs
+      - tdarr_logs:/app/logs
+      - ${TDARR_TEMP_PATH:-./data/tdarr-tmp}:/temp
+      # Same library roots as MediaOS / Jellyfin for consistent paths
+      - ${MOVIES_PATH:-./data/movies}:/movies
+      - ${TV_PATH:-./data/tv}:/tv
+      - ${MUSIC_PATH:-./data/music}:/music
+      - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+    ports:
+      - "${TDARR_HOST_PORT:-8265}:8265"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # iptv-org EPG grabber — optional Live TV EPG (profile: full)
+  # ---------------------------------------------------------------------------
+  iptv-org-epg:
+    build:
+      context: .
+      dockerfile: docker/epg.Dockerfile
+      args:
+        EPG_GIT_REF: ${EPG_GIT_REF:-0e03581}
+    environment:
+      EPG_SITE: ${EPG_SITE:-tvtv.us}
+      EPG_DAYS: ${EPG_DAYS:-2}
+      EPG_CRON_HOURS: ${EPG_CRON_HOURS:-6}
+    volumes:
+      - iptv_org_epg_data:/epg/public
+    ports:
+      - "${EPG_HOST_PORT:-3099}:3000"
+    restart: unless-stopped
+    profiles: ["full", "epg"]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${EPG_MEMORY_LIMIT:-512m}
+    cpus: ${EPG_CPUS:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # FlareSolverr — optional Cloudflare bypass for indexers (profile: full)
+  # ---------------------------------------------------------------------------
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
+    environment:
+      LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
+    ports:
+      - "${FLARESOLVERR_HOST_PORT:-8191}:8191"
+    restart: unless-stopped
+    profiles: ["full", "flaresolverr"]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${FLARESOLVERR_MEMORY_LIMIT:-512m}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Ollama — optional local LLM for AI assistant (profile: ai)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.5.7
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    profiles: ["ai", "full"]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # GPU — uncomment for NVIDIA:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+# =============================================================================
+# Named volumes
+# =============================================================================
 volumes:
   mediaos_pg:
+  mediaos_redis:
+  gluetun_data:
+  qb_config:
+  jellyfin_config:
+  tdarr_server:
+  tdarr_configs:
+  tdarr_logs:
+  iptv_org_epg_data:
+  ollama_data:

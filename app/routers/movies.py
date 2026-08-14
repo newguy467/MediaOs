@@ -91,9 +91,11 @@ def add_movie(payload: MovieCreate, db: Session = Depends(get_db), _: list = Dep
         raise HTTPException(409, "Movie already in library")
 
     details = tmdb_client.get_movie(payload.external_id)
+    import json as _json
     item = MediaItem(
         media_type=MediaType.movie,
         external_id=details["external_id"],
+        external_source="tmdb",
         title=details["title"],
         year=details["year"],
         overview=details["overview"],
@@ -101,6 +103,9 @@ def add_movie(payload: MovieCreate, db: Session = Depends(get_db), _: list = Dep
         monitored=payload.monitored,
         status=ItemStatus.wanted,
         quality_profile=payload.quality_profile,
+        imdb_id=details.get("imdb_id"),
+        tvdb_id=details.get("tvdb_id"),
+        external_ids=_json.dumps(details.get("external_ids") or {}) if details.get("external_ids") else None,
     )
     db.add(item)
     db.commit()

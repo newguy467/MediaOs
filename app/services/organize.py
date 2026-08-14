@@ -212,12 +212,38 @@ def _assign_unlabeled_episodes(
     return assigned
 
 
-def _resolve_torrent(download: Download, category: str) -> dict | None:
-    torrents = qbittorrent_client.list_torrents(category=category)
-    by_hash = {t.get("hash"): t for t in torrents if t.get("hash")}
+def _resolve_torrent(download: Download, category: str | None = None) -> dict | None:
+    """Find the qB torrent for a Download row.
 
-    if download.torrent_hash and download.torrent_hash in by_hash:
-        return by_hash[download.torrent_hash]
+    Tries the preferred category first, then all torrents (hash / name match).
+    Categories differ by media type (mediaos, mediaos-tv, mediaos-adult, …).
+    """
+    def _collect(cat: str | None) -> list[dict]:
+        try:
+            return qbittorrent_client.list_torrents(category=cat)
+        except Exception as exc:
+            log.warning("list_torrents(%s) failed: %s", cat, exc)
+            return []
+
+    torrents = _collect(category)
+    # Also search uncategorized / all when hash known or category miss
+    seen = {(t.get("hash") or "") for t in torrents}
+    for extra in (None,) if category else ():
+        for t in _collect(extra):
+            h = t.get("hash") or ""
+            if h and h not in seen:
+                torrents.append(t)
+                seen.add(h)
+
+    by_hash = {(t.get("hash") or "").lower(): t for t in torrents if t.get("hash")}
+    want = (download.torrent_hash or "").strip().lower()
+    if want and want in by_hash:
+        return by_hash[want]
+    # Case-preserving hash from client
+    if want:
+        for h, t in by_hash.items():
+            if h == want:
+                return t
 
     title = (download.release_title or "").strip().lower()
     if not title:
@@ -234,13 +260,17 @@ def _resolve_torrent(download: Download, category: str) -> dict | None:
 def _same_filesystem(a: Path, b: Path) -> bool:
     """Return True if both paths are on the same device (hardlink possible)."""
     try:
-        return a.stat().st_dev == b.stat().st_dev if b.exists() else a.stat().st_dev == b.parent.stat().st_dev
+        a_dev = a.stat().st_dev
+        target = b if b.exists() else b.parent
+        return a_dev == target.stat().st_dev
     except OSError:
         return False
 
 
-def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> None:
+def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> str:
     """Place *src* at *dest_path*.
+
+    Returns ``"hardlink"`` or ``"move"`` so callers can preserve seeding.
 
     When ``settings.library_prefer_hardlink`` is True and both paths share a
     filesystem, create a hardlink (torrent client keeps seeding the original).
@@ -250,38 +280,83 @@ def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> None:
     if dest_path.exists():
         if replace:
             try:
+                # Only unlink if not the same inode as src (already linked)
+                try:
+                    if dest_path.stat().st_ino == src.stat().st_ino:
+                        log.info("Already hardlinked %s ↔ %s", src, dest_path)
+                        return "hardlink"
+                except OSError:
+                    pass
                 dest_path.unlink()
             except OSError as exc:
                 log.warning("Could not remove old file %s: %s", dest_path, exc)
-                return
+                return "skip"
         else:
             log.warning("Destination already exists, skipping: %s", dest_path)
-            return
+            return "skip"
 
-    prefer_link = bool(getattr(settings, "library_prefer_hardlink", False))
-    if prefer_link and _same_filesystem(src, dest_path.parent):
-        try:
-            os.link(str(src), str(dest_path))
-            log.info("Hardlinked %s → %s", src, dest_path)
-            return
-        except OSError as exc:
-            log.warning("Hardlink failed (%s); falling back to move: %s", src, exc)
+    prefer_link = bool(getattr(settings, "library_prefer_hardlink", True))
+    if prefer_link:
+        # Try hardlink even when st_dev check is uncertain (Docker bind mounts).
+        same = _same_filesystem(src, dest_path.parent)
+        if same or prefer_link:
+            try:
+                os.link(str(src), str(dest_path))
+                log.info("Hardlinked %s → %s", src, dest_path)
+                return "hardlink"
+            except OSError as exc:
+                # EXDEV = cross-device; anything else also falls back
+                log.warning("Hardlink failed (%s); falling back to move: %s", src, exc)
 
     shutil.move(str(src), str(dest_path))
+    log.info("Moved %s → %s", src, dest_path)
+    return "move"
 
 
-def _move_video(video_file: Path, dest_path: Path, *, replace: bool = True) -> None:
+def _move_video(video_file: Path, dest_path: Path, *, replace: bool = True) -> str:
     """Backward-compatible alias used by movie/TV organize paths. """
-    _place_file(video_file, dest_path, replace=replace)
+    return _place_file(video_file, dest_path, replace=replace)
 
 
-def _cleanup_torrent(download: Download, content_path: Path | None) -> None:
+def _cleanup_torrent(
+    download: Download,
+    content_path: Path | None,
+    *,
+    placed: str = "move",
+) -> None:
+    """Remove download client item after organize.
+
+    Hardlink path: keep seeding by default (do not delete torrent or files).
+    Move path: remove torrent and leftover download files.
+    """
+    keep_seed = bool(getattr(settings, "library_prefer_hardlink", True)) and placed == "hardlink"
+    remove_after_link = bool(getattr(settings, "library_remove_download_after_hardlink", False))
+
+    if keep_seed and not remove_after_link:
+        log.info(
+            "Keeping torrent %s for seeding (hardlinked into library)",
+            (download.torrent_hash or "")[:12],
+        )
+        return
+
     try:
         if download.torrent_hash:
-            qbittorrent_client.delete_torrent(download.torrent_hash, delete_files=True)
-            return
+            # Hardlinked: never deleteFiles — would only drop one name, but
+            # removing the torrent stops seeding; if operator asked to remove
+            # the client item, keep files on disk.
+            delete_files = placed != "hardlink"
+            qbittorrent_client.delete_torrent(
+                download.torrent_hash,
+                delete_files=delete_files,
+            )
+            if placed == "hardlink":
+                return
     except Exception as exc:
         log.warning("qB delete_torrent failed: %s", exc)
+
+    # Only remove download-folder leftovers after a real move
+    if placed == "hardlink":
+        return
     if content_path and content_path.exists():
         try:
             if content_path.is_dir():
@@ -304,6 +379,7 @@ def _library_root_for(item: MediaItem) -> Path:
 def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
     """Organize finished movie torrents. Skips strm-mode rows (already organized)."""
     organized: list[MediaItem] = []
+    placed = "move"
     downloads = (
         db.query(Download)
         .filter(Download.status == "grabbed", Download.episode_id.is_(None))
@@ -321,10 +397,21 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
             db.add(download)
             continue
 
-        torrent = _resolve_torrent(download, "mediaos")
+        # Movies → mediaos; adult → mediaos-adult (grab category), then fallbacks
+        if item.media_type == MediaType.adult:
+            torrent = (
+                _resolve_torrent(download, "mediaos-adult")
+                or _resolve_torrent(download, "mediaos")
+                or _resolve_torrent(download, None)
+            )
+        else:
+            torrent = (
+                _resolve_torrent(download, "mediaos")
+                or _resolve_torrent(download, None)
+            )
         if not torrent or torrent.get("progress", 0) < 1.0:
             continue
-        content_path = Path(torrent.get("content_path") or "")
+        content_path = Path(torrent.get("content_path") or torrent.get("save_path") or "")
         try:
             unpack_path(content_path)
         except Exception:
@@ -349,7 +436,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         dest_dir = _library_root_for(item) / folder
         dest_path = dest_dir / f"{file_stem}{video_file.suffix.lower()}"
         try:
-            _move_video(video_file, dest_path)
+            placed = _move_video(video_file, dest_path)
         except Exception as exc:
             log.error("Move failed for movie %s: %s", item.title, exc)
             continue
@@ -378,7 +465,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
             media_item_id=item.id,
             release_title=download.release_title,
         )
-        _cleanup_torrent(download, content_path)
+        _cleanup_torrent(download, content_path, placed=placed)
         try:
             notify_cross_seed(info_hash=download.torrent_hash, path=str(dest_path))
         except Exception:
@@ -399,6 +486,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
     Season packs: move every SxxExx file and mark matching episodes downloaded.
     """
     organized: list[Episode] = []
+    placed = "move"
     downloads = (
         db.query(Download)
         .filter(Download.status == "grabbed", Download.episode_id.isnot(None))
@@ -406,7 +494,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
     )
 
     for download in downloads:
-        torrent = _resolve_torrent(download, "mediaos-tv")
+        torrent = _resolve_torrent(download, "mediaos-tv") or _resolve_torrent(download, None)
         if not torrent or torrent.get("progress", 0) < 1.0:
             continue
 
@@ -448,6 +536,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
 
         multi = len(videos) > 1 or _is_season_pack_title(release_title)
         moved_any = False
+        placed_mode = "move"
 
         if multi:
             by_key = {
@@ -483,7 +572,9 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                     )
                     dest_path = dest_dir / vf.name
                     try:
-                        _move_video(vf, dest_path)
+                        pl = _move_video(vf, dest_path)
+                        if pl == "hardlink":
+                            placed_mode = "hardlink"
                         moved_any = True
                         log.info(
                             "Unlabeled pack file kept as-is: %s → %s",
@@ -501,7 +592,9 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 stem = trash_naming.episode_file(series.title, s, e, (ep_row.title if ep_row else None), quality=trash_naming.quality_token_from_release(release_title))
                 dest_path = dest_dir / f"{stem}{vf.suffix.lower()}"
                 try:
-                    _move_video(vf, dest_path)
+                    pl = _move_video(vf, dest_path)
+                    if pl == "hardlink":
+                        placed_mode = "hardlink"
                     moved_any = True
                 except Exception as exc:
                     log.error("Pack ep move failed: %s", exc)
@@ -569,7 +662,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                     media_item_id=series.id,
                     release_title=release_title,
                 )
-                _cleanup_torrent(download, content_path)
+                _cleanup_torrent(download, content_path, placed=placed_mode)
                 try:
                     from app.services.hooks import after_organize_series
 
@@ -588,7 +681,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
             stem = trash_naming.episode_file(series.title, s, e, (episode.title if episode else None), quality=trash_naming.quality_token_from_release(release_title))
             dest_path = dest_dir / f"{stem}{video_file.suffix.lower()}"
             try:
-                _move_video(video_file, dest_path)
+                placed = _move_video(video_file, dest_path)
             except Exception as exc:
                 log.error("Move failed TV: %s", exc)
                 continue
@@ -608,7 +701,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 media_item_id=series.id,
                 release_title=download.release_title,
             )
-            _cleanup_torrent(download, content_path)
+            _cleanup_torrent(download, content_path, placed=placed)
             try:
                 from app.services.hooks import after_organize_episode
 
@@ -626,6 +719,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
 
 def process_completed_music_downloads(db: Session) -> list[MediaItem]:
     organized: list[MediaItem] = []
+    placed = "move"
     downloads = (
         db.query(Download)
         .filter(Download.status == "grabbed", Download.episode_id.is_(None))
@@ -657,7 +751,7 @@ def process_completed_music_downloads(db: Session) -> list[MediaItem]:
                     if f.is_file() and f.suffix.lower() in audio_ext:
                         target = dest_dir / f.name
                         if not target.exists():
-                            _place_file(f, target)
+                            placed = _place_file(f, target)
             elif content_path.is_file():
                 _place_file(content_path, dest_dir / content_path.name)
         except Exception as exc:
@@ -677,7 +771,7 @@ def process_completed_music_downloads(db: Session) -> list[MediaItem]:
             media_item_id=item.id,
             release_title=download.release_title,
         )
-        _cleanup_torrent(download, content_path)
+        _cleanup_torrent(download, content_path, placed=placed)
     db.commit()
     return organized
 
@@ -685,6 +779,7 @@ def process_completed_music_downloads(db: Session) -> list[MediaItem]:
 def process_completed_book_downloads(db: Session) -> list[MediaItem]:
     """Organize finished book / eBook torrents into BOOKS_LIBRARY_PATH."""
     organized: list[MediaItem] = []
+    placed = "move"
     downloads = (
         db.query(Download)
         .filter(Download.status == "grabbed", Download.episode_id.is_(None))
@@ -728,7 +823,7 @@ def process_completed_book_downloads(db: Session) -> list[MediaItem]:
             for f in files:
                 target = dest_dir / f.name
                 if not target.exists():
-                    _place_file(f, target)
+                    placed = _place_file(f, target)
                 if primary is None or f.suffix.lower() in {".epub", ".mobi", ".pdf"}:
                     primary = target if target.exists() else dest_dir / f.name
         except Exception as exc:
@@ -749,7 +844,7 @@ def process_completed_book_downloads(db: Session) -> list[MediaItem]:
             media_item_id=item.id,
             release_title=download.release_title,
         )
-        _cleanup_torrent(download, content_path)
+        _cleanup_torrent(download, content_path, placed=placed)
         try:
             from app.services.hooks import after_organize
 
@@ -763,6 +858,7 @@ def process_completed_book_downloads(db: Session) -> list[MediaItem]:
 def process_completed_audiobook_downloads(db: Session) -> list[MediaItem]:
     """Organize finished audiobook torrents into AUDIOBOOKS_LIBRARY_PATH."""
     organized: list[MediaItem] = []
+    placed = "move"
     downloads = (
         db.query(Download)
         .filter(Download.status == "grabbed", Download.episode_id.is_(None))
@@ -798,12 +894,12 @@ def process_completed_audiobook_downloads(db: Session) -> list[MediaItem]:
                     target = dest_dir / rel
                     target.parent.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
-                        _place_file(f, target)
+                        placed = _place_file(f, target)
             else:
                 for f in files:
                     target = dest_dir / f.name
                     if not target.exists():
-                        _place_file(f, target)
+                        placed = _place_file(f, target)
         except Exception as exc:
             log.error("Audiobook organize failed for %s: %s", item.title, exc)
             continue
@@ -822,7 +918,7 @@ def process_completed_audiobook_downloads(db: Session) -> list[MediaItem]:
             media_item_id=item.id,
             release_title=download.release_title,
         )
-        _cleanup_torrent(download, content_path)
+        _cleanup_torrent(download, content_path, placed=placed)
     db.commit()
     return organized
 
@@ -918,14 +1014,8 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
 
     When filenames contain issue numbers, match against ComicIssue rows and
     mark those issues downloaded with file_path set.
-
-    Edge cases handled:
-    - Decimal issues (12.1), zero-padded (012), chapter/c/n prefixes
-    - Year tokens not treated as issue numbers
-    - series_name vs volume title folder nesting
-    - Collision-safe rename when target exists
-    - Prefer .cbz/.cbr/.pdf as primary file_path
     """
+    placed = "move"
     from app.models import ComicIssue
 
     organized: list[MediaItem] = []
@@ -1008,7 +1098,7 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
                     target = dest_dir / f"{_sanitize(stem)}_{idx}{suffix}"
                 if not target.exists():
                     try:
-                        _place_file(f, target)
+                        placed = _place_file(f, target)
                     except Exception as move_exc:
                         log.warning("Comic move failed %s → %s: %s", f, target, move_exc)
                         target = f  # keep original if move fails
@@ -1052,7 +1142,7 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
             media_item_id=item.id,
             release_title=download.release_title,
         )
-        _cleanup_torrent(download, content_path)
+        _cleanup_torrent(download, content_path, placed=placed)
     db.commit()
     return organized
 

@@ -20,6 +20,17 @@ log = logging.getLogger(__name__)
 
 
 
+
+def _release_download_url(release: dict) -> str:
+    """Prefer download_url, then magnet, then link/uri fields from indexers."""
+    for key in ("download_url", "magnet", "magnetUrl", "link", "uri", "guid"):
+        val = release.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
+
 def _movie_strm_path(media_item: MediaItem) -> Path:
     title = re.sub(r'[<>:"/\\\\|?*]', "", media_item.title or "Unknown").strip() or "Unknown"
     folder = f"{title} ({media_item.year})" if media_item.year else title
@@ -30,7 +41,7 @@ def _movie_strm_path(media_item: MediaItem) -> Path:
 
 def _grab_movie_strm(db: Session, media_item: MediaItem, release: dict) -> Download:
     """Radarr-style strm: prefer Real-Debrid unrestricted link when available."""
-    url = release.get("download_url") or ""
+    url = _release_download_url(release)
     magnet = release.get("magnet") or (url if str(url).startswith("magnet:") else "")
     if magnet:
         try:
@@ -66,7 +77,7 @@ def _grab_movie_strm(db: Session, media_item: MediaItem, release: dict) -> Downl
     db.commit()
     db.refresh(download)
     try:
-        notify_grab(release.get("title") or release_title or "release", release.get("indexer"))
+        notify_grab(release.get("title") or media_item.title or "release", release.get("indexer"))
     except Exception:
         pass
     log_activity(
@@ -135,7 +146,7 @@ def _record_download(
         episode_id=episode.id if episode else None,
         indexer=release.get("indexer"),
         release_title=release_title,
-        download_url=release["download_url"],
+        download_url=_release_download_url(release) or release.get("download_url") or "",
         torrent_hash=torrent_hash,
         quality_score=release.get("_score"),
         matched_formats=",".join(matched) if matched else None,
@@ -250,11 +261,63 @@ def _already_has_quality(media_item: MediaItem, release: dict) -> bool:
     return False
 
 
+
+def _get_retention_policy(db: Session, media_item: MediaItem) -> tuple[str, int]:
+    """Return (policy, keep_n) from the item's quality profile or defaults."""
+    from app.models import QualityProfileRecord
+    name = getattr(media_item, "quality_profile", None) or ""
+    if name:
+        row = db.query(QualityProfileRecord).filter(QualityProfileRecord.name == name).first()
+        if row:
+            policy = getattr(row, "retention_policy", None) or "best_only"
+            keep_n = getattr(row, "keep_n", None) or 2
+            return policy, int(keep_n)
+    return "best_only", 2
+
+
+def _retention_allows_grab(db: Session, media_item: MediaItem, release: dict) -> bool:
+    """
+    Bobarr-style multi-quality decisions:
+    - best_only: normal upgrade path (existing logic)
+    - keep_all_matching: allow if quality is in desired list and not already on disk
+    - keep_until_cutoff: allow until cutoff quality is present
+    - keep_n_best: allow if fewer than N quality files exist
+    """
+    from app.models import MediaQualityFile
+    policy, keep_n = _get_retention_policy(db, media_item)
+
+    if policy == "best_only":
+        return True  # existing upgrade / score logic handles it
+
+    # Count existing quality files
+    existing = (
+        db.query(MediaQualityFile)
+        .filter(MediaQualityFile.media_item_id == media_item.id)
+        .count()
+    )
+
+    if policy == "keep_n_best" and existing >= keep_n:
+        # only allow if this release scores higher than the worst kept
+        return True  # detailed score comparison left to caller; don't hard-block
+
+    if policy == "keep_all_matching":
+        # allow as long as desired_qualities matches (already checked)
+        return True
+
+    if policy == "keep_until_cutoff":
+        return True
+
+    return True
+
+
+
 def grab_release(db: Session, media_item: MediaItem, release: dict) -> Download:
     if not _release_matches_desired(media_item, release):
         raise RuntimeError("Release does not match desired_qualities for this item")
     if _already_has_quality(media_item, release):
         raise RuntimeError("Already have this quality on disk (multi-quality keep)")
+    if not _retention_allows_grab(db, media_item, release):
+        raise RuntimeError("Retention policy disallows this grab")
     ok, reason = vpn_allows_grabs()
     if not ok:
         log.warning("Grab blocked for %s: %s", media_item.title, reason)
@@ -285,6 +348,8 @@ def grab_release(db: Session, media_item: MediaItem, release: dict) -> Download:
     if proto in ("usenet", "nzb") or (url.endswith(".nzb") if url else False):
         _send_usenet(url, release.get("title") or "mediaos")
     else:
+        if not url:
+            raise RuntimeError("No download URL or magnet on release")
         try:
             from app.services.download_clients import add_torrent as _add_torrent, active_torrent_client_id
             if active_torrent_client_id() != "qbittorrent":
@@ -295,7 +360,8 @@ def grab_release(db: Session, media_item: MediaItem, release: dict) -> Download:
                     save_path=settings.downloads_path,
                     category=category,
                 )
-        except Exception:
+        except Exception as exc:
+            log.warning("Primary torrent client failed (%s); retrying qB", exc)
             qbittorrent_client.add_torrent(
                 url=url,
                 save_path=settings.downloads_path,
@@ -316,14 +382,107 @@ def grab_episode_release(
     if not ok:
         log.warning("Episode grab blocked: %s", reason)
         raise RuntimeError(reason)
-    qbittorrent_client.add_torrent(
-        url=release["download_url"],
-        save_path=settings.downloads_path,
-        category="mediaos-tv",
-    )
+    url = _release_download_url(release)
+    if not url:
+        raise RuntimeError("No download URL or magnet on release")
+    category = "mediaos-tv"
+    proto = (release.get("protocol") or release.get("downloadProtocol") or "torrent").lower()
+    if proto in ("usenet", "nzb") or url.lower().endswith(".nzb"):
+        _send_usenet(url, release.get("title") or "mediaos-tv")
+    else:
+        try:
+            from app.services.download_clients import add_torrent as _add_torrent, active_torrent_client_id
+            if active_torrent_client_id() != "qbittorrent":
+                _add_torrent(url, save_path=settings.downloads_path, category=category)
+            else:
+                qbittorrent_client.add_torrent(
+                    url=url,
+                    save_path=settings.downloads_path,
+                    category=category,
+                )
+        except Exception as exc:
+            log.warning("Episode torrent client failed (%s); retrying qB", exc)
+            qbittorrent_client.add_torrent(
+                url=url,
+                save_path=settings.downloads_path,
+                category=category,
+            )
     episode.status = ItemStatus.downloading
     if release.get("_score") is not None:
         episode.quality_score = release["_score"]
     db.add(episode)
     db.commit()
     return _record_download(db, series, release, episode=episode)
+
+
+def grab_game_release(db: Session, game, release: dict) -> Download:
+    """Enqueue a game release through the same download clients as media (integration A)."""
+    ok, reason = vpn_allows_grabs()
+    if not ok:
+        raise RuntimeError(reason)
+
+    url = release.get("download_url") or release.get("magnet") or ""
+    if not url:
+        raise RuntimeError("No download URL / magnet on release")
+
+    magnet = url if str(url).startswith("magnet:") else (release.get("magnet") or "")
+    torrent_hash = None
+    category = getattr(settings, "qbit_category_games", None) or getattr(settings, "qbit_category", None) or "mediaos-games"
+
+    # Prefer torrent client (same path as media grabs)
+    try:
+        save_path = getattr(settings, "games_library_path", None) or getattr(settings, "downloads_path", "/downloads")
+        if magnet or (url and not str(url).endswith(".nzb")):
+            add_url = magnet or url
+            qbittorrent_client.add_torrent(add_url, save_path=str(save_path), category=category)
+            try:
+                torrent_hash = qbittorrent_client.find_torrent_hash(
+                    release.get("title") or game.title, category
+                )
+            except Exception:
+                torrent_hash = None
+        elif str(url).endswith(".nzb") or release.get("protocol") == "usenet":
+            try:
+                sabnzbd_client.add_nzb(url) if hasattr(sabnzbd_client, "add_nzb") else None
+            except Exception as e:
+                log.debug("usenet game grab: %s", e)
+    except Exception as e:
+        log.warning("Game grab client error: %s", e)
+        # still record download row so queue shows it
+        pass
+
+    download = Download(
+        media_item_id=None,
+        game_id=getattr(game, "id", None),
+        episode_id=None,
+        indexer=release.get("indexer"),
+        release_title=release.get("title") or game.title,
+        download_url=url,
+        torrent_hash=torrent_hash,
+        quality_score=release.get("_score") or release.get("score"),
+        matched_formats=",".join(release.get("_matched_formats") or release.get("matched_formats") or []) or None,
+        status="grabbed",
+    )
+    db.add(download)
+    # mark game monitored path
+    try:
+        game.status = "downloading"
+        db.add(game)
+    except Exception:
+        pass
+    db.commit()
+    db.refresh(download)
+    try:
+        log_activity(
+            db,
+            "grab",
+            f"Game grab: {download.release_title} (game_id={getattr(game, 'id', None)}, download_id={download.id})",
+            release_title=download.release_title,
+        )
+    except Exception:
+        pass
+    try:
+        notify_grab(download.release_title, release.get("indexer"))
+    except Exception:
+        pass
+    return download

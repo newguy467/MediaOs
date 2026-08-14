@@ -1,3 +1,4 @@
+# Python >=3.12,<3.13 recommended (nntplib removed in 3.13)
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 SQLAlchemy==2.0.35
@@ -15,3 +16,5 @@ curl_cffi==0.7.3
 PyYAML==6.0.2
 beautifulsoup4==4.12.3
 lxml==5.3.0
+alembic>=1.13.0
+redis>=5.0.0  # optional multi-worker; set REDIS_URL

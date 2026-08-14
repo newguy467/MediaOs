@@ -3,251 +3,441 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MediaOs — All-in-one media OS</title>
-  <meta name="description" content="MediaOs: one app replacing Sonarr, Radarr, Lidarr, Readarr, Whisparr, NeutArr, Cleanuparr, Prowlarr and more. Self-hosted Docker." />
+  <title>MediaOS Next — The Unified Media &amp; Games Operating System</title>
+  <meta name="description" content="MediaOS Next: one FastAPI control plane with a custom React UI that absorbs Sonarr, Radarr, Lidarr, Readarr, Bazarr, and Prowlarr natively. Self-hosted Docker stack with VPN kill-switch." />
   <meta name="theme-color" content="#8b5cf6" />
-  <link rel="icon" href="screenshots/15-splash.png" />
+  <link rel="icon" href="../app/static/favicon.png" />
+  <link rel="apple-touch-icon" href="../app/static/icon-192.png" />
   <style>
     :root {
       --bg: #0b0914;
+      --bg2: #0f0c1c;
       --panel: #16122a;
       --card: #1c1733;
+      --card2: #221b3d;
       --line: #2a2448;
       --text: #f3f0ff;
       --muted: #9b93c0;
+      --muted2: #6f6896;
       --accent: #8b5cf6;
       --accent2: #a78bfa;
+      --neon: #c4b5fd;
       --ok: #34d399;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --code-bg: #120e22;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
-      margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-      background: var(--bg); color: var(--text); line-height: 1.55;
+      margin: 0;
+      font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
     }
-    a { color: var(--accent2); }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { color: var(--neon); text-decoration: underline; }
+    code, pre { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    /* ---------- Header ---------- */
     header {
-      position: sticky; top: 0; z-index: 20;
+      position: sticky; top: 0; z-index: 50;
       display: flex; align-items: center; justify-content: space-between;
-      padding: .85rem 5vw; background: rgba(11,9,20,.92); backdrop-filter: blur(10px);
+      padding: .7rem 5vw;
+      background: rgba(11,9,20,.85);
+      backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--line);
     }
-    .brand { font-weight: 700; font-size: 1.25rem; color: var(--accent); text-decoration: none; }
-    .brand span { color: var(--muted); font-weight: 500; font-size: .85rem; margin-left: .4rem; }
-    nav a { margin-left: 1rem; color: var(--muted); text-decoration: none; font-size: .92rem; }
-    nav a:hover { color: var(--text); }
-    main { max-width: 1100px; margin: 0 auto; padding: 2rem 5vw 4rem; }
-    h1 { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.15; margin: 0 0 .75rem; }
-    h2 { margin-top: 2.75rem; border-bottom: 1px solid var(--line); padding-bottom: .45rem; font-size: 1.35rem; }
-    h3 { margin: 0 0 .4rem; font-size: 1.05rem; }
-    .lead { color: var(--muted); font-size: 1.12rem; max-width: 42rem; }
+    .brand { display: flex; align-items: center; gap: .6rem; font-weight: 700; font-size: 1.15rem; color: var(--accent); text-decoration: none; }
+    .brand img { height: 26px; width: 26px; }
+    .brand span { color: var(--muted); font-weight: 500; font-size: .8rem; }
+    nav { display: flex; align-items: center; gap: 1.2rem; }
+    nav a { color: var(--muted); font-size: .9rem; }
+    nav a:hover { color: var(--text); text-decoration: none; }
+    .nav-cta {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; padding: .45rem .9rem; border-radius: 8px; font-weight: 600; font-size: .85rem;
+    }
+    .nav-cta:hover { filter: brightness(1.12); text-decoration: none; color: #fff; }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      position: relative; overflow: hidden;
+      padding: 5rem 5vw 4rem;
+      background:
+        radial-gradient(1100px 500px at 70% -10%, rgba(139,92,246,.22), transparent 60%),
+        radial-gradient(800px 400px at 10% 10%, rgba(167,139,250,.12), transparent 60%),
+        var(--bg);
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr .9fr; gap: 3rem; align-items: center; }
     .badge {
-      display: inline-block; padding: .2rem .55rem; border-radius: 999px;
-      background: #2a1f4d; color: var(--accent2); font-size: .78rem; font-weight: 600;
-      border: 1px solid var(--line); margin-right: .35rem;
+      display: inline-flex; align-items: center; gap: .4rem;
+      background: rgba(139,92,246,.12); border: 1px solid rgba(139,92,246,.4);
+      color: var(--neon); padding: .3rem .8rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+      margin-bottom: 1.2rem;
     }
-    .cta { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.25rem; }
+    .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    h1 { font-size: clamp(2rem, 4.5vw, 3.2rem); line-height: 1.08; margin: 0 0 1rem; letter-spacing: -.02em; }
+    h1 .grad { background: linear-gradient(120deg, var(--accent2), var(--neon), var(--accent2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lede { font-size: 1.12rem; color: var(--muted); margin: 0 0 1.6rem; max-width: 38ch; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: .8rem; }
     .btn {
-      display: inline-block; padding: .7rem 1.15rem; border-radius: .55rem;
-      background: var(--accent); color: #fff; text-decoration: none; font-weight: 600;
+      display: inline-flex; align-items: center; gap: .5rem;
+      padding: .8rem 1.4rem; border-radius: 10px; font-weight: 600; font-size: .95rem;
+      border: 1px solid var(--line); color: var(--text); background: var(--card);
+      transition: transform .12s ease, border-color .12s ease;
     }
-    .btn.secondary { background: var(--panel); border: 1px solid var(--line); color: var(--text); }
-    pre, code { background: var(--panel); border-radius: .4rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: .88rem; }
-    pre { padding: 1rem; overflow-x: auto; border: 1px solid var(--line); }
-    code { padding: .12rem .35rem; }
-    pre code { padding: 0; background: transparent; }
-    .grid {
-      display: grid; gap: 1rem;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    .btn:hover { transform: translateY(-1px); text-decoration: none; }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #fff; }
+    .btn-primary:hover { filter: brightness(1.1); color: #fff; }
+
+    /* hero panel (architecture mini) */
+    .hero-panel {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+      padding: 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,.4);
     }
-    .card {
-      background: var(--card); border: 1px solid var(--line); border-radius: .65rem; padding: 1.05rem;
+    .hero-panel .ptitle { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted2); margin-bottom: .9rem; }
+    .node { display: flex; align-items: center; gap: .7rem; padding: .55rem .8rem; background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: .55rem; }
+    .node .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: .95rem; background: rgba(139,92,246,.15); }
+    .node .nm { font-weight: 600; font-size: .9rem; }
+    .node .rl { color: var(--muted); font-size: .78rem; margin-left: auto; }
+    .node.core { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(139,92,246,.3) inset; }
+    .arrow { text-align: center; color: var(--muted2); font-size: .7rem; margin: .1rem 0; }
+
+    /* ---------- Sections ---------- */
+    main { max-width: 1100px; margin: 0 auto; padding: 3.5rem 5vw 5rem; }
+    section { margin-bottom: 3.5rem; scroll-margin-top: 80px; }
+    h2 { font-size: 1.7rem; margin: 0 0 .3rem; letter-spacing: -.01em; }
+    h2 .sub { display: block; color: var(--muted); font-size: .95rem; font-weight: 400; margin-top: .2rem; }
+    .hr { height: 1px; background: linear-gradient(90deg, var(--accent), transparent); margin: .9rem 0 1.6rem; border: none; }
+    p { margin: .6rem 0; }
+
+    /* stat row */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1.5rem 0; }
+    .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; text-align: center; }
+    .stat .num { font-size: 1.8rem; font-weight: 800; color: var(--accent2); }
+    .stat .lbl { color: var(--muted); font-size: .8rem; margin-top: .2rem; }
+
+    /* replaces grid */
+    .replaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+    .replace-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.2rem; }
+    .replace-card .old { font-weight: 700; color: var(--danger); text-decoration: line-through; opacity: .8; font-size: .95rem; }
+    .replace-card .arr { color: var(--muted2); margin: .3rem 0; font-size: .85rem; }
+    .replace-card .new { color: var(--ok); font-size: .85rem; }
+
+    /* feature grid */
+    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .feature { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.3rem; }
+    .feature .ft { font-weight: 700; font-size: 1rem; margin-bottom: .3rem; display: flex; align-items: center; gap: .5rem; }
+    .feature .ft .emoji { font-size: 1.15rem; }
+    .feature p { color: var(--muted); font-size: .9rem; margin: 0; }
+
+    /* code block */
+    pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.3rem; overflow-x: auto; font-size: .85rem; line-height: 1.7; }
+    pre .c { color: var(--muted2); }
+    pre .k { color: var(--accent2); }
+    pre .s { color: var(--ok); }
+    code:not(pre code) { background: var(--code-bg); border: 1px solid var(--line); padding: .12rem .4rem; border-radius: 5px; font-size: .85em; color: var(--neon); }
+
+    /* topology diagram */
+    .topo {
+      background: var(--code-bg); border: 1px solid var(--line); border-radius: 12px;
+      padding: 1.2rem; overflow-x: auto; font-size: .78rem; line-height: 1.5; color: var(--neon);
+      white-space: pre;
     }
-    .card p { margin: 0; color: var(--muted); font-size: .92rem; }
-    .shots {
-      display: grid; gap: .75rem;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+
+    /* table */
+    .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
+    th { background: var(--card2); color: var(--muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+    tr:last-child td { border-bottom: none; }
+    td code { font-size: .82em; }
+
+    /* callout */
+    .callout { background: rgba(139,92,246,.08); border: 1px solid rgba(139,92,246,.3); border-radius: 12px; padding: 1rem 1.3rem; margin: 1.4rem 0; }
+    .callout.warn { background: rgba(251,191,36,.07); border-color: rgba(251,191,36,.3); }
+    .callout.ok { background: rgba(52,211,153,.07); border-color: rgba(52,211,153,.3); }
+    .callout strong { color: var(--neon); }
+    .callout.warn strong { color: var(--warn); }
+    .callout.ok strong { color: var(--ok); }
+
+    /* steps */
+    .steps { counter-reset: step; }
+    .step { display: flex; gap: 1rem; margin-bottom: 1.4rem; }
+    .step .num { counter-increment: step; flex: 0 0 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: .9rem; }
+    .step .body h4 { margin: .1rem 0 .3rem; font-size: 1.02rem; }
+    .step .body p { margin: 0; color: var(--muted); font-size: .9rem; }
+
+    /* footer */
+    footer { border-top: 1px solid var(--line); padding: 2.5rem 5vw; text-align: center; color: var(--muted); font-size: .88rem; }
+    footer .flinks { display: flex; gap: 1.2rem; justify-content: center; margin-bottom: .8rem; flex-wrap: wrap; }
+
+    @media (max-width: 820px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 2rem; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      nav .nav-link { display: none; }
     }
-    .shots figure {
-      margin: 0; background: var(--panel); border-radius: .5rem; overflow: hidden;
-      border: 1px solid var(--line);
-    }
-    .shots img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
-    .shots figcaption { padding: .5rem .75rem; font-size: .82rem; color: var(--muted); }
-    table { width: 100%; border-collapse: collapse; font-size: .92rem; }
-    th, td { border: 1px solid var(--line); padding: .5rem .65rem; text-align: left; }
-    th { background: var(--panel); }
-    .check { color: var(--ok); }
-    footer {
-      border-top: 1px solid var(--line); padding: 2rem 5vw; color: var(--muted); font-size: .9rem;
-      max-width: 1100px; margin: 0 auto;
-    }
-    .hero-meta { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
-    .alert {
-      display: flex; gap: .75rem; align-items: flex-start;
-      background: #241a3f; border: 1px solid #4c3a8a; border-radius: .6rem;
-      padding: .9rem 1.05rem; margin: 1.25rem 0; font-size: .92rem;
-    }
-    .alert.ok { border-color: #1f6d4e; background: #10241c; }
-    .alert .icon { font-size: 1.1rem; line-height: 1.4; }
-    .alert p { margin: 0; color: var(--text); }
-    .alert p + p { margin-top: .4rem; color: var(--muted); }
-    .badges-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 1.25rem; }
-    .badges-row img { height: 20px; display: block; }
-    code.inline-cmd { display: inline-block; }
-    .sev { display: inline-block; font-weight: 700; font-size: .72rem; letter-spacing: .04em;
-      padding: .12rem .45rem; border-radius: .3rem; margin-right: .4rem; }
-    .sev-p0 { background: #4a1420; color: #ff8fa3; }
-    .sev-p1 { background: #4a3512; color: #ffc36b; }
-    .sev-p2 { background: #123a4a; color: #7fd4ff; }
-    .sev-p3 { background: #263a12; color: #b7e07f; }
   </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
 </head>
 <body>
+
   <header>
-    <a class="brand" href="./">MediaOs <span id="ver">v4.13.3</span></a>
+    <a class="brand" href="#"><img src="../app/static/logo-icon-64.png" alt="MediaOS" /> MediaOS <span>Next</span></a>
     <nav>
-      <a href="#features">Features</a>
-      <a href="#modules">Modules</a>
-      <a href="#quickstart">Quick start</a>
-      <a href="changelog.html">Changelog</a>
-      <a href="https://github.com/newguy467/MediaOs">GitHub</a>
+      <a class="nav-link" href="#replaces">Replaces</a>
+      <a class="nav-link" href="#architecture">Architecture</a>
+      <a class="nav-link" href="#features">Features</a>
+      <a class="nav-link" href="#quickstart">Quick Start</a>
+      <a class="nav-link" href="#docs">Docs</a>
+      <a class="nav-cta" href="https://github.com/newguy467/MediaOs">GitHub</a>
     </nav>
   </header>
 
-  <main>
-    <section class="hero">
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="hero-grid">
       <div>
-        <p><span class="badge">v4.13.3</span><span class="badge">Self-hosted</span><span class="badge">Docker</span></p>
-        <h1>One app for your whole library</h1>
-        <p class="lead">
-          MediaOs replaces the classic *arr stack in a single container:
-          Sonarr, Radarr, Lidarr, Readarr, Whisparr, NeutArr/Huntarr, Cleanuparr,
-          Prowlarr, Recyclarr, Maintainerr — plus Live TV, comics, YouTube, and a converter.
-        </p>
-        <div class="cta">
-          <a class="btn" href="#quickstart">Quick start</a>
-          <a class="btn secondary" href="https://github.com/newguy467/MediaOs">Source on GitHub</a>
-          <a class="btn secondary" href="changelog.html">Changelog</a>
+        <span class="badge"><span class="dot"></span> Version <code>next</code> · 57 tests passing</span>
+        <h1>The <span class="grad">Unified Media &amp; Games</span> Operating System</h1>
+        <p class="lede">One FastAPI control plane. One custom React UI. It <strong>absorbs</strong> Sonarr, Radarr, Lidarr, Readarr, Bazarr &amp; Prowlarr natively — you never open a separate *arr web UI again.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#quickstart">⚡ Quick Start</a>
+          <a class="btn" href="https://github.com/newguy467/MediaOs">View on GitHub</a>
+          <a class="btn" href="../README.md">README</a>
         </div>
-        <p class="hero-meta">Keep qBittorrent + Jellyfin/Plex. Everything else is built in.</p>
-        <div class="badges-row">
-          <img src="https://img.shields.io/github/v/tag/newguy467/MediaOs?label=version&color=8b5cf6" alt="version" />
-          <img src="https://img.shields.io/github/actions/workflow/status/newguy467/MediaOs/ci.yml?label=CI" alt="CI status" />
-          <img src="https://img.shields.io/github/actions/workflow/status/newguy467/MediaOs/ghcr.yml?label=GHCR%20build" alt="GHCR build status" />
-          <img src="https://img.shields.io/github/license/newguy467/MediaOs" alt="license" />
-        </div>
+      </div>
+      <div class="hero-panel">
+        <div class="ptitle">Container Topology</div>
+        <div class="node core"><div class="ic">🧠</div><div class="nm">MediaOS</div><div class="rl">control plane + UI :8787</div></div>
+        <div class="arrow">▼ orchestrates</div>
+        <div class="node"><div class="ic">🐘</div><div class="nm">Postgres 16</div><div class="rl">primary DB</div></div>
+        <div class="node"><div class="ic">⚡</div><div class="nm">Redis 7</div><div class="rl">queues · leader</div></div>
+        <div class="node"><div class="ic">🎬</div><div class="nm">Jellyfin</div><div class="rl">streaming</div></div>
+        <div class="node"><div class="ic">📥</div><div class="nm">qBittorrent</div><div class="rl">via Gluetun ↓</div></div>
+        <div class="node"><div class="ic">🛡️</div><div class="nm">Gluetun</div><div class="rl">VPN kill-switch</div></div>
+      </div>
+    </div>
+  </section>
+
+  <main>
+
+    <!-- ============ STATS ============ -->
+    <div class="stats">
+      <div class="stat"><div class="num">592</div><div class="lbl">API routes</div></div>
+      <div class="stat"><div class="num">45</div><div class="lbl">routers · 75 services</div></div>
+      <div class="stat"><div class="num">9</div><div class="lbl">*arr apps absorbed</div></div>
+      <div class="stat"><div class="num">10</div><div class="lbl">containers in one stack</div></div>
+    </div>
+
+    <!-- ============ REPLACES ============ -->
+    <section id="replaces">
+      <h2>What MediaOS Next replaces <span class="sub">One application does the work of nine</span></h2>
+      <hr class="hr" />
+      <div class="replaces">
+        <div class="replace-card"><div class="old">Sonarr</div><div class="arr">→ absorbed natively</div><div class="new">TV: series, seasons, episodes, season packs, monitoring</div></div>
+        <div class="replace-card"><div class="old">Radarr</div><div class="arr">→ absorbed natively</div><div class="new">Movies: quality profiles, upgrades, collections</div></div>
+        <div class="replace-card"><div class="old">Lidarr</div><div class="arr">→ absorbed natively</div><div class="new">Music: artist → album → track, MusicBrainz, completeness</div></div>
+        <div class="replace-card"><div class="old">Readarr</div><div class="arr">→ absorbed natively</div><div class="new">Books &amp; audiobooks management</div></div>
+        <div class="replace-card"><div class="old">Bazarr</div><div class="arr">→ absorbed natively</div><div class="new">Subtitles: multi-language search &amp; upgrade</div></div>
+        <div class="replace-card"><div class="old">Prowlarr</div><div class="arr">→ absorbed natively</div><div class="new">Indexers: Torznab, Cardigann YAML, built-ins</div></div>
+        <div class="replace-card"><div class="old">Jellyseerr / Overseerr</div><div class="arr">→ absorbed natively</div><div class="new">Request system + discover trending</div></div>
+        <div class="replace-card"><div class="old">Maintainerr</div><div class="arr">→ absorbed natively</div><div class="new">Cleanup / maintenance rule engine</div></div>
+        <div class="replace-card"><div class="old">Recyclarr</div><div class="arr">→ absorbed natively</div><div class="new">Live TRaSH sync, custom formats, scores</div></div>
+        <div class="replace-card"><div class="old">Homepage / Organizr</div><div class="arr">→ not needed</div><div class="new">MediaOS <strong>is</strong> the UI</div></div>
+      </div>
+      <div class="callout">
+        <strong>One user experience ≠ one process.</strong> MediaOS is the brain. Jellyfin streams, qBittorrent downloads, Gluetun tunnels, Tdarr transcodes, Redis &amp; Postgres persist — each in its own container, glued by Docker Compose, orchestrated by MediaOS.
       </div>
     </section>
 
-    <div class="alert ok">
-      <div class="icon">✅</div>
-      <div>
-        <p><strong>v4.13.3 is current — critical patch, upgrade strongly recommended.</strong></p>
-        <p>
-          The prior release shipped with two Python syntax errors that broke the app on
-          boot (setup router) and broke Live TV entirely (import order in
-          <code>services/livetv.py</code>). This release fixes both, closes two auth
-          hardening gaps (constant-time API key check, login/adult-unlock rate
-          limiting), and adds the GHCR + UI CI workflows. See the full
-          <a href="changelog.html">changelog</a> for details.
-        </p>
+    <!-- ============ ARCHITECTURE ============ -->
+    <section id="architecture">
+      <h2>Architecture <span class="sub">A single FastAPI control plane over modular containers</span></h2>
+      <hr class="hr" />
+      <p>MediaOS Next is a single FastAPI application (592 routes, 45 routers, 75 services) that implements — natively, in its own codebase — what each *arr app does as a separate binary. Supporting infrastructure stays in dedicated containers, glued together by Docker Compose and orchestrated by MediaOS.</p>
+      <div class="topo">┌─────────────────────────────────────────────────────────┐
+│  Browser → MediaOS UI (React + Vite + Tailwind + DaisyUI) │
+│  Dark purple/neon theme · left sidebar · global search ⌘K │
+└───────────────────────────┬─────────────────────────────┘
+                            │ REST + SSE  (UI never touches
+                            │   external services directly)
+┌───────────────────────────▼─────────────────────────────┐
+│  MediaOS FastAPI Control Plane (one app, 592 routes)     │
+│  • Movies / TV / Music / Books / Audiobooks / Comics / Games
+│  • Indexers · Quality profiles · Release search · Grab   │
+│  • Wanted / Hunt · Queue · History · Failed downloads    │
+│  • Naming · Metadata · Subtitles · Live TV / DVR / EPG   │
+│  • VPN status & kill-switch · Activity · Calendar        │
+└────┬─────────┬──────────┬───────────┬──────────┬────────┘
+     │         │          │           │          │
+  ┌──▼──┐  ┌──▼──┐   ┌───▼────┐  ┌──▼──────┐  ┌─▼───────┐
+  │ PG  │  │Redis│   │Jellyfin│  │qBittorrt│  │ Gluetun │
+  │ DB  │  │queue│   │ stream │  │ download│  │ VPN gw  │
+  └─────┘  └─────┘   └────────┘  └────┬────┘  └────▲────┘
+                                      │            │
+                            network_mode: service:gluetun
+                              (kill-switch: no VPN = no downloads)</div>
+      <p style="margin-top:1.2rem">See <a href="../ARCHITECTURE.md">ARCHITECTURE.md</a> for the full breakdown, and <a href="VPN-SETUP.md">VPN-SETUP.md</a> for the kill-switch configuration.</p>
+
+      <h3 style="margin-top:2rem">Always-on core (6 containers)</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Service</th><th>Image</th><th>Role</th><th>Port</th></tr></thead>
+          <tbody>
+            <tr><td><code>mediaos</code></td><td><code>ghcr.io/newguy467/mediaos:next</code></td><td>Control plane + UI (the app)</td><td>8787</td></tr>
+            <tr><td><code>mediaos-db</code></td><td><code>postgres:16.14-alpine</code></td><td>Primary database</td><td>5432</td></tr>
+            <tr><td><code>redis</code></td><td><code>redis:7.4-alpine</code></td><td>Queues, rate-limit, leader election</td><td>6379</td></tr>
+            <tr><td><code>jellyfin</code></td><td><code>lscr.io/linuxserver/jellyfin:10.10.3</code></td><td>Streaming &amp; playback backend</td><td>8096</td></tr>
+            <tr><td><code>qbittorrent</code></td><td><code>lscr.io/linuxserver/qbittorrent:5.0.4</code></td><td>Download engine (routed through VPN)</td><td>8080, 6881</td></tr>
+            <tr><td><code>gluetun</code></td><td><code>qmcgaw/gluetun:v3.41.3</code></td><td>VPN gateway + kill-switch</td><td>8000</td></tr>
+          </tbody>
+        </table>
       </div>
-    </div>
 
-    <h2 id="features">Why MediaOs</h2>
-    <div class="grid">
-      <div class="card"><h3>Shared pipeline</h3><p>One search, grab, quality, and organize path for every media type.</p></div>
-      <div class="card"><h3>Built-in Hunt</h3><p>NeutArr/Huntarr-class aggressive missing + optional upgrades. No extra container.</p></div>
-      <div class="card"><h3>Built-in Cleanup</h3><p>Stalled strikes, seed goals, orphans — Cleanuparr/Swaparr-class, native.</p></div>
-      <div class="card"><h3>Adult (Whisparr)</h3><p>Passcode-gated adult library, XXX indexers, native organize + hunt.</p></div>
-      <div class="card"><h3>Hardlink organize</h3><p>Hardlink into the library when on the same filesystem; seed without doubling disk.</p></div>
-      <div class="card"><h3>Live TRaSH Guides</h3><p>Quality profiles and custom formats with live guide sync scaffolding.</p></div>
-      <div class="card"><h3>Basic + Advanced</h3><p>Friendly default UI; unlock indexers, quality matrix, Live TV, converter when you need them.</p></div>
-      <div class="card"><h3>Arr-compat API</h3><p><code>/api/v3</code> surface for clients that expect Radarr/Sonarr-style endpoints.</p></div>
-    </div>
+      <h3 style="margin-top:2rem">Optional (Docker Compose profiles)</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Service</th><th>Profile</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>tdarr</code></td><td><code>tdarr</code> / <code>full</code></td><td>Hardware transcoding farm</td></tr>
+            <tr><td><code>iptv-org-epg</code></td><td><code>epg</code> / <code>full</code></td><td>Live TV EPG grabber (iptv-org)</td></tr>
+            <tr><td><code>flaresolverr</code></td><td><code>flaresolverr</code> / <code>full</code></td><td>Cloudflare bypass for indexers</td></tr>
+            <tr><td><code>ollama</code></td><td><code>ai</code> / <code>full</code></td><td>Local LLM for AI-assisted features</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:1rem">Launch optional services with <code>docker compose --profile tdarr up -d</code> (or <code>--profile full</code> for everything).</p>
+    </section>
 
-    <h2 id="modules">Modules</h2>
-    <table>
-      <thead><tr><th>Module</th><th>Replaces</th><th>Notes</th></tr></thead>
-      <tbody>
-        <tr><td>Movies</td><td>Radarr</td><td>Core — always on</td></tr>
-        <tr><td>TV</td><td>Sonarr</td><td>Core — always on</td></tr>
-        <tr><td>Music</td><td>Lidarr</td><td>Artist → album hierarchy</td></tr>
-        <tr><td>Books / Audiobooks</td><td>Readarr</td><td>Optional modules</td></tr>
-        <tr><td>Adult</td><td>Whisparr</td><td>Passcode gate · XXX cat 6000</td></tr>
-        <tr><td>Comics / Manga</td><td>Mylar-style</td><td>Pull list + story arcs</td></tr>
-        <tr><td>Hunt</td><td>NeutArr / Huntarr</td><td>Settings → Hunt</td></tr>
-        <tr><td>Cleanup</td><td>Cleanuparr / Swaparr</td><td>Settings → Cleanup</td></tr>
-        <tr><td>Indexers</td><td>Prowlarr / Jackett</td><td>Torznab + Cardigann + builtins</td></tr>
-        <tr><td>Live TV / YouTube / Converter</td><td>—</td><td>Optional advanced modules</td></tr>
-      </tbody>
-    </table>
+    <!-- ============ FEATURES ============ -->
+    <section id="features">
+      <h2>Feature tour <span class="sub">Everything the *arr stack does, in one place</span></h2>
+      <hr class="hr" />
+      <div class="features">
+        <div class="feature"><div class="ft"><span class="emoji">🔍</span> Search &amp; Interactive Search</div><p>Release parsing, score ranking across all configured indexers, with an interactive manual-search UI for each media item.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🎯</span> Quality Engine</div><p>Live TRaSH Guides sync, custom formats, quality definitions and scores — Recyclarr's job, built in.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">📥</span> Grab &amp; Download</div><p>Sends to qBittorrent (or SABnzbd / NZBGet / Transmission / Deluge / aria2 / rTorrent / Real-Debrid).</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🔎</span> Wanted / Hunt engine</div><p>Aggressive missing-item, cutoff and upgrade search on a schedule — Huntarr's job, native.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🏷️</span> Naming templates</div><p>Per-media-type naming templates keep your library clean and Jellyfin-happy.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">💬</span> Subtitles</div><p>Multi-language subtitle search &amp; upgrade — Bazarr's job, native.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🧹</span> Maintenance rules</div><p>Rule engine (age, size, quality, tags → action) for automated cleanup — Maintainerr, native.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">📡</span> Live TV / DVR / EPG</div><p>IPTV M3U, virtual channels, DVR recording, EPG grabber (iptv-org), hls.js playback.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🎮</span> Games &amp; scrobbling</div><p>IGDB-backed games library with scrobble tracking and unified tracking across media types.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">📚</span> Comics &amp; manga depth</div><p>Pull-list sync, story-arc grouping, ComicVine + MangaDex metadata.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🔔</span> Activity &amp; notifications</div><p>Apprise + Discord webhooks, full audit log, calendar view.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🛡️</span> VPN kill-switch monitoring</div><p>Gluetun status, public-IP / country verification, kill-switch health surfaced in the UI.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🤖</span> AI-assisted (optional)</div><p>Local Ollama LLM for assisted tagging, summaries and chat — see <a href="SAFE_AI.md">SAFE_AI.md</a>.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🔌</span> Plugin system</div><p>Plugin catalog with spec, examples and a store — extend MediaOS without forking. See <a href="PLUGIN_STORE.md">PLUGIN_STORE.md</a>.</p></div>
+        <div class="feature"><div class="ft"><span class="emoji">🔗</span> Hardlink imports</div><p>Same paths across MediaOS ↔ Jellyfin ↔ qBittorrent enable instant zero-copy imports. See <a href="HARDLINKS.md">HARDLINKS.md</a>.</p></div>
+      </div>
+    </section>
 
-    <h2 id="quickstart">Quick start</h2>
-    <pre><code>git clone https://github.com/newguy467/MediaOs.git
-cd MediaOs
+    <!-- ============ VPN KILL-SWITCH ============ -->
+    <section id="vpn">
+      <h2>VPN kill-switch <span class="sub">No VPN = no downloads. Nothing leaks your real IP.</span></h2>
+      <hr class="hr" />
+      <div class="topo">┌──────────┐     ┌──────────┐     ┌────────────┐     ┌──────────┐
+│ Indexer  │────▶│ MediaOS  │────▶│ qBittorrent│────▶│ Gluetun  │──VPN──▶ Internet
+│  search  │     │  (grab)  │     │ network_   │     │ (tunnel) │
+└──────────┘     └──────────┘     │ mode:      │     └──────────┘
+                                  │ service:   │
+                                  │  gluetun   │
+                                  └────────────┘</div>
+      <div class="callout warn">
+        <strong>How it works:</strong> qBittorrent uses <code>network_mode: "service:gluetun"</code>, sharing Gluetun's network namespace. It has <em>no network interface of its own</em>. If the tunnel drops, qBittorrent loses all connectivity — downloads stall, nothing leaks. No iptables rules, no race conditions, just namespace isolation. MediaOS monitors Gluetun's control server and reports VPN status + expected country in the UI.
+      </div>
+    </section>
+
+    <!-- ============ QUICK START ============ -->
+    <section id="quickstart">
+      <h2>Quick start <span class="sub">Three commands to a running stack</span></h2>
+      <hr class="hr" />
+      <div class="steps">
+        <div class="step"><div class="num">1</div><div class="body"><h4>Clone &amp; configure</h4><p>Copy the environment template and generate required secrets (Postgres password + auth API key).</p></div></div>
+        <div class="step"><div class="num">2</div><div class="body"><h4>Edit <code>.env</code></h4><p>Set library host paths, VPN credentials, qBittorrent login, TMDB API key and timezone.</p></div></div>
+        <div class="step"><div class="num">3</div><div class="body"><h4>Launch</h4><p><code>docker compose up -d</code> then open <code>http://localhost:8787</code> — the first-run wizard does the rest.</p></div></div>
+      </div>
+      <pre><span class="c"># 1. Clone &amp; configure</span>
+git clone https://github.com/newguy467/MediaOs.git mediaos-next
+<span class="k">cd</span> mediaos-next
 cp .env.example .env
-# edit paths / API keys
+bash scripts/generate_secrets.sh   <span class="c"># POSTGRES_PASSWORD + AUTH_API_KEY</span>
 
-docker compose -f docker-compose.standalone.yml up -d --build
-# UI → http://localhost:8787</code></pre>
-    <p>Health check: <code>GET /api/health</code> (reports version <strong>4.13.3</strong>).</p>
+<span class="c"># 2. Edit .env: set library paths, VPN creds, TMDB_API_KEY, TZ</span>
 
-    <h2 id="screenshots">Screenshots</h2>
-    <div class="shots">
-      <figure><img src="screenshots/01-movies.png" alt="Movies" loading="lazy" /><figcaption>Movies</figcaption></figure>
-      <figure><img src="screenshots/02-tv.png" alt="TV" loading="lazy" /><figcaption>TV</figcaption></figure>
-      <figure><img src="screenshots/03-music.png" alt="Music" loading="lazy" /><figcaption>Music</figcaption></figure>
-      <figure><img src="screenshots/08-settings.png" alt="Settings" loading="lazy" /><figcaption>Settings</figcaption></figure>
-      <figure><img src="screenshots/09-setup-wizard.png" alt="Setup" loading="lazy" /><figcaption>Setup wizard</figcaption></figure>
-      <figure><img src="screenshots/10-queue.png" alt="Queue" loading="lazy" /><figcaption>Queue</figcaption></figure>
-    </div>
+<span class="c"># 3. Launch the stack</span>
+docker compose up -d               <span class="c"># core stack</span>
+<span class="c"># docker compose --profile tdarr up -d   # + transcoding farm</span>
+<span class="c"># docker compose --profile full up -d    # + EPG + FlareSolverr + Ollama</span>
 
-    <h2 id="docs">More docs</h2>
-    <ul>
-      <li><a href="changelog.html">Changelog</a></li>
-      <li><a href="QUICKSTART.md">QUICKSTART.md</a></li>
-      <li><a href="TRASH.md">TRaSH Guides</a></li>
-      <li><a href="GPU.md">GPU / converter</a></li>
-      <li><a href="YOUTUBE.md">YouTube</a></li>
-      <li><a href="https://github.com/newguy467/MediaOs/blob/main/VISION.md">VISION.md</a></li>
-      <li><a href="https://github.com/newguy467/MediaOs/blob/main/ARCHITECTURE.md">ARCHITECTURE.md</a></li>
-    </ul>
+<span class="c"># Open http://localhost:8787 → first-run wizard</span></pre>
+      <div class="callout">
+        <strong>Then:</strong> Discover → add media → MediaOS searches indexers → grabs via qBittorrent (through VPN) → imports to library → Jellyfin streams it.
+      </div>
+    </section>
 
-    <h2 id="ghcr">Container image</h2>
-    <pre><code>docker pull ghcr.io/newguy467/mediaos:latest
-docker pull ghcr.io/newguy467/mediaos:4.13.3</code></pre>
-    <p>Images are multi-arch (<code>linux/amd64</code>, <code>linux/arm64</code>), built and pushed by
-      <code>.github/workflows/ghcr.yml</code> on every push to <code>main</code> and on every
-      <code>v*</code> tag. A separate <code>ui.yml</code> workflow builds and verifies the Vite/React UI
-      on any change under <code>ui/**</code>, independent of the full Docker build, for faster PR feedback.</p>
+    <!-- ============ VERIFICATION ============ -->
+    <section id="verification">
+      <h2>Verification results <span class="sub">This release is tested and consistent</span></h2>
+      <hr class="hr" />
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Check</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>App imports</td><td>592 routes register</td></tr>
+            <tr><td>Test suite</td><td>57 / 57 pass</td></tr>
+            <tr><td>Docker Compose</td><td>10 services, 10 volumes, valid</td></tr>
+            <tr><td>VPN kill-switch</td><td><code>network_mode: service:gluetun</code></td></tr>
+            <tr><td>Core healthchecks</td><td>All 6 present</td></tr>
+            <tr><td>Alembic migrations</td><td>7 / 7 applied (SQLite + Postgres)</td></tr>
+            <tr><td>UI static assets</td><td>81 files (index, CSS, JS, hls)</td></tr>
+            <tr><td>.env.example</td><td>293 vars, no hardcoded secrets</td></tr>
+            <tr><td>Version consistency</td><td><code>next</code> everywhere</td></tr>
+            <tr><td>No committed <code>.env</code></td><td>Confirmed</td></tr>
+            <tr><td>Python syntax</td><td>All files compile</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-    <h2 id="security">Security model</h2>
-    <p>MediaOs ships in <strong>open mode</strong> by default for easy local/LAN first-run — no
-      username, API key, or DB user configured means no auth is enforced. Set one of
-      <code>AUTH_USERNAME</code>/<code>AUTH_PASSWORD</code>, <code>AUTH_API_KEY</code>, or create a DB user
-      before exposing the container beyond your local network.</p>
-    <table>
-      <thead><tr><th>Layer</th><th>Mechanism</th><th>Notes</th></tr></thead>
-      <tbody>
-        <tr><td>Passwords</td><td>PBKDF2-HMAC-SHA256, 120k iterations, per-user salt</td><td><code>app/auth.py</code></td></tr>
-        <tr><td>Tokens / API keys</td><td>Constant-time comparison (<code>hmac.compare_digest</code> / <code>secrets.compare_digest</code>)</td><td>Covers bearer tokens, <code>X-API-Key</code>, and the <code>*arr</code>-compat <code>X-Api-Key</code></td></tr>
-        <tr><td>Login throttling</td><td>Escalating backoff per client IP + username</td><td><code>/api/auth/login</code></td></tr>
-        <tr><td>Adult module</td><td>Separate passcode gate + short-lived unlock token, rate-limited</td><td><code>/api/adult/unlock</code></td></tr>
-        <tr><td>Library file access</td><td>Every resolved path is checked against configured library roots (symlinks included)</td><td><code>app/services/media_player.py::_assert_under_library</code></td></tr>
-        <tr><td>Permissions</td><td>Per-user permission list, admin role bypasses with <code>*</code></td><td><code>require_permission()</code> dependency on nearly every router</td></tr>
-      </tbody>
-    </table>
-    <p>Found a security issue? Please open a private security advisory on GitHub rather than a public issue.</p>
+    <!-- ============ DOCS ============ -->
+    <section id="docs">
+      <h2>Documentation <span class="sub">Everything you need to run and extend MediaOS Next</span></h2>
+      <hr class="hr" />
+      <div class="features">
+        <div class="feature"><div class="ft">📘 <a href="../README.md">README.md</a></div><p>Full project overview, quick start, feature list and project structure.</p></div>
+        <div class="feature"><div class="ft">🏗️ <a href="../ARCHITECTURE.md">ARCHITECTURE.md</a></div><p>Container topology, control-plane breakdown, VPN diagram, path consistency, hardening.</p></div>
+        <div class="feature"><div class="ft">📝 <a href="../RELEASE_NOTES_NEXT.md">RELEASE_NOTES_NEXT.md</a></div><p>What changed from v2.0.27-dev, bug fixes, version bump, verification.</p></div>
+        <div class="feature"><div class="ft">🛡️ <a href="VPN-SETUP.md">VPN-SETUP.md</a></div><p>Gluetun kill-switch config, WireGuard / OpenVPN setup, verification, troubleshooting.</p></div>
+        <div class="feature"><div class="ft">⚡ <a href="QUICKSTART.md">QUICKSTART.md</a></div><p>Condensed quick-start reference.</p></div>
+        <div class="feature"><div class="ft">🔑 <a href="REQUIRED_KEYS.md">REQUIRED_KEYS.md</a></div><p>Which API keys / credentials you need and where to get them.</p></div>
+        <div class="feature"><div class="ft">🔗 <a href="HARDLINKS.md">HARDLINKS.md</a></div><p>Zero-copy hardlink imports — same paths across all containers.</p></div>
+        <div class="feature"><div class="ft">📡 <a href="LIVETV.md">LIVETV.md</a></div><p>Live TV, IPTV M3U, virtual channels, DVR &amp; EPG.</p></div>
+        <div class="feature"><div class="ft">🎮 <a href="INDEXERS.md">INDEXERS.md</a></div><p>Cardigann definitions, Torznab, private trackers, indexer health.</p></div>
+        <div class="feature"><div class="ft">🤖 <a href="SAFE_AI.md">SAFE_AI.md</a></div><p>Safe, local AI features via Ollama.</p></div>
+        <div class="feature"><div class="ft">🔌 <a href="PLUGIN_STORE.md">PLUGIN_STORE.md</a></div><p>Plugin catalog, spec and examples.</p></div>
+        <div class="feature"><div class="ft">🐘 <a href="POSTGRES_MIGRATE.md">POSTGRES_MIGRATE.md</a></div><p>Migrating from SQLite to PostgreSQL.</p></div>
+      </div>
+    </section>
+
   </main>
 
   <footer>
-    <p>MediaOs — self-hosted media OS. MIT licensed. Not affiliated with Sonarr, Radarr, Whisparr, or Jellyfin.</p>
-    <p>
-      <a href="https://github.com/newguy467/MediaOs">GitHub</a> ·
-      <a href="changelog.html">Changelog</a> ·
-      <a href="https://ghcr.io/newguy467/mediaos">GHCR</a>
-    </p>
+    <div class="flinks">
+      <a href="https://github.com/newguy467/MediaOs">GitHub</a>
+      <a href="https://ghcr.io/newguy467/mediaos">GHCR Image</a>
+      <a href="../README.md">README</a>
+      <a href="../ARCHITECTURE.md">Architecture</a>
+      <a href="../RELEASE_NOTES_NEXT.md">Release Notes</a>
+    </div>
+    <p>MediaOS Next — self-hosted unified media &amp; games operating system. MIT licensed.</p>
+    <p style="color:var(--muted2);font-size:.8rem;margin-top:.4rem">Not affiliated with Sonarr, Radarr, Lidarr, Readarr, Bazarr, Prowlarr, Jellyfin, or Gluetun.</p>
   </footer>
+
 </body>
 </html>

@@ -13,7 +13,10 @@ without re-uploading the NZB on every jump.
 from __future__ import annotations
 
 import logging
-import nntplib
+try:
+    import nntplib  # removed from stdlib in Python 3.13+
+except ModuleNotFoundError:  # pragma: no cover
+    nntplib = None  # type: ignore
 import re
 import threading
 import time
@@ -108,7 +111,7 @@ def yenc_decode(article: bytes) -> bytes:
             b = line[i]
             if b == 0x3D and i + 1 < len(line):  # '='
                 i += 1
-                b = (line[i] - 64) & 0xFF
+                b = (line[i] - 42 - 64) & 0xFF
             else:
                 b = (b - 42) & 0xFF
             out.append(b)
@@ -174,6 +177,8 @@ def _nntp_connect():
     password = getattr(settings, "nntp_pass", "") or ""
     ssl = bool(getattr(settings, "nntp_ssl", True))
     if ssl:
+        if nntplib is None:
+            raise RuntimeError("nntplib is unavailable (Python >=3.13). Use SABnzbd/NZBGet or run on Python 3.12.")
         return nntplib.NNTP_SSL(host, port, user=user or None, password=password or None, timeout=90)
     return nntplib.NNTP(host, port, user=user or None, password=password or None, timeout=90)
 

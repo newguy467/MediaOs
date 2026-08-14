@@ -156,7 +156,7 @@ def sync_definitions(
     with httpx.Client(timeout=30.0, headers=headers, follow_redirects=True) as client:
         # modest parallelism
         workers = int(getattr(__import__('app.config', fromlist=['settings']).settings, 'cardigann_sync_workers', 8) or 8)
-    with ThreadPoolExecutor(max_workers=max(2, min(workers, 16))) as pool:
+        with ThreadPoolExecutor(max_workers=max(2, min(workers, 16))) as pool:
             futs = {pool.submit(_download_one, n, dest, client): n for n in names}
             for fut in as_completed(futs):
                 result = fut.result()
@@ -210,3 +210,18 @@ def ensure_seed_definitions() -> dict[str, Any]:
     result = sync_definitions(priority_only=True, force=True)
     result["seeded"] = True
     return result
+
+
+def definitions_health() -> dict:
+    """Polish: report seeded definition count + path for dashboard/settings."""
+    from pathlib import Path as _P
+    from app.config import settings
+    path = _P(getattr(settings, "cardigann_definitions_path", None) or "definitions")
+    yamls = list(path.glob("*.yml")) + list(path.glob("*.yaml")) if path.exists() else []
+    return {
+        "path": str(path),
+        "count": len(yamls),
+        "enabled": bool(getattr(settings, "cardigann_enabled", True)),
+        "auto_sync": bool(getattr(settings, "cardigann_auto_sync", False)),
+        "samples": sorted(y.name for y in yamls)[:12],
+    }

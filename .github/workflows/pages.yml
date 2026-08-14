@@ -2,10 +2,12 @@ name: GitHub Pages
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, next]
     paths:
       - "docs/**"
-      - "CHANGELOG.md"
+      - "README.md"
+      - "ARCHITECTURE.md"
+      - "RELEASE_NOTES_NEXT.md"
       - "VERSION"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -27,9 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Sync changelog into docs
-        run: |
-          python3 scripts/build_docs.py || true
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

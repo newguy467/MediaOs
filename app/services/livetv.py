@@ -336,9 +336,17 @@ def check_channel_stream(url: str, timeout: float = 8.0) -> tuple[bool, str | No
 def run_channel_health_cycle(db: Session) -> dict:
     """Probe channels; mark failures; delete/disable if offline > 12 hours.
 
+    Runs automatically server-side on a schedule (see app/scheduler.py,
+    `mediaos_livetv_health` job) — no user action needed. Once a channel is
+    deleted here it also disappears from the M3U/XMLTV export MediaOS serves
+    to Jellyfin (only enabled channels are included), so Jellyfin's Live TV
+    tuner drops it on its next guide/channel refresh automatically.
+
     Policy (settings):
       livetv_offline_hours (default 12)
       livetv_offline_action: delete | disable (default delete)
+      livetv_health_batch (default 40 channels probed per cycle)
+      livetv_health_interval_minutes (default 30, how often this cycle runs)
     """
     from app.config import settings
     from app.models import LiveTvChannel
@@ -371,17 +379,21 @@ def run_channel_health_cycle(db: Session) -> dict:
             ch.last_error = err
             fail += 1
             last_ok = ch.last_ok_at
-            # Never successfully seen: if fail_count high and first checks span offline window
-            stale = False
-            if last_ok is None:
-                # use first failure streak: if checked enough times over period
-                if ch.fail_count >= 3 and ch.last_check_at:
-                    # treat as offline if we never had ok and failed repeatedly
-                    stale = ch.fail_count >= 6
-            else:
-                if last_ok.tzinfo is None:
-                    last_ok = last_ok.replace(tzinfo=timezone.utc)
-                stale = last_ok < cutoff
+            # A channel is "dead" once it's been more than `offline_h` hours since we
+            # last confirmed it was reachable. If it has never once succeeded, fall
+            # back to when it was added (created_at) so brand-new-but-broken channels
+            # still get cleaned up on the same 12h clock instead of lingering forever.
+            reference = last_ok or ch.created_at
+            if reference is None:
+                # Legacy row from before created_at existed, never checked OK.
+                # Anchor the clock to right now and persist it so this channel
+                # still gets a full offline window before being swept, instead
+                # of either being deleted immediately or never aging out.
+                ch.created_at = now
+                reference = now
+            if reference.tzinfo is None:
+                reference = reference.replace(tzinfo=timezone.utc)
+            stale = reference < cutoff
             if stale:
                 if action == "disable":
                     ch.enabled = False
@@ -573,13 +585,19 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
 
 def build_xmltv_export(db: Session, base_url: str = "") -> str:
     """Build a minimal XMLTV document from channels + in-memory EPG cache if present."""
-    from xml.sax.saxutils import escape
-    from app.models import LiveTvChannel
+    from xml.sax.saxutils import escape, quoteattr
+    from app.models import LiveTvChannel, LiveTvVirtualChannel, LiveTvVirtualScheduleItem
 
     channels = (
         db.query(LiveTvChannel)
         .filter(LiveTvChannel.enabled.is_(True))
         .order_by(LiveTvChannel.name)
+        .all()
+    )
+    vchannels = (
+        db.query(LiveTvVirtualChannel)
+        .filter(LiveTvVirtualChannel.enabled.is_(True))
+        .order_by(LiveTvVirtualChannel.number)
         .all()
     )
     # optional EPG cache from epg module
@@ -598,10 +616,17 @@ def build_xmltv_export(db: Session, base_url: str = "") -> str:
     ]
     for ch in channels:
         tvg = ch.tvg_id or str(ch.id)
-        parts.append(f'  <channel id="{escape(tvg)}">')
+        parts.append(f'  <channel id={quoteattr(tvg)}>')
         parts.append(f'    <display-name>{escape(ch.name or tvg)}</display-name>')
         if ch.logo:
-            parts.append(f'    <icon src="{escape(ch.logo)}" />')
+            parts.append(f'    <icon src={quoteattr(ch.logo)} />')
+        parts.append("  </channel>")
+    for vc in vchannels:
+        tvg = f"virtual-{vc.id}"
+        parts.append(f'  <channel id={quoteattr(tvg)}>')
+        parts.append(f'    <display-name>{escape(f"{vc.number} {vc.name}")}</display-name>')
+        if vc.logo:
+            parts.append(f'    <icon src={quoteattr(vc.logo)} />')
         parts.append("  </channel>")
 
     for ch in channels:
@@ -613,9 +638,80 @@ def build_xmltv_export(db: Session, base_url: str = "") -> str:
             title = row.get("title") or "Programme"
             if not start:
                 continue
-            parts.append(f'  <programme start="{escape(str(start))}" stop="{escape(str(stop))}" channel="{escape(tvg)}">')
+            parts.append(f'  <programme start={quoteattr(str(start))} stop={quoteattr(str(stop))} channel={quoteattr(tvg)}>')
             parts.append(f'    <title>{escape(str(title))}</title>')
+            parts.append("  </programme>")
+
+    for vc in vchannels:
+        tvg = f"virtual-{vc.id}"
+        items = (
+            db.query(LiveTvVirtualScheduleItem)
+            .filter(LiveTvVirtualScheduleItem.virtual_channel_id == vc.id)
+            .order_by(LiveTvVirtualScheduleItem.start_time.asc())
+            .limit(100)
+            .all()
+        )
+        for item in items:
+            start = item.start_time
+            stop = start + timedelta(seconds=item.duration_seconds)
+            xstart = start.strftime("%Y%m%d%H%M%S +0000")
+            xstop = stop.strftime("%Y%m%d%H%M%S +0000")
+            parts.append(f'  <programme start={quoteattr(xstart)} stop={quoteattr(xstop)} channel={quoteattr(tvg)}>')
+            parts.append(f'    <title>{escape(item.title)}</title>')
             parts.append("  </programme>")
 
     parts.append("</tv>")
     return '\n'.join(parts) + '\n'
+
+
+def epg_programmes_for_rules(db: Session, hours: int = 48) -> list[dict]:
+    """Flatten EPG grid + cache into series-rule input rows (production-safe)."""
+    items: list[dict] = []
+    try:
+        grid = epg_grid(db, hours=hours)
+        for ch in grid.get("channels") or []:
+            ch_id = ch.get("id") or ch.get("channel_id")
+            stream = ch.get("stream_url")
+            tvg = ch.get("tvg_id") or ch.get("epg_tvg_id")
+            for prog in ch.get("programmes") or ch.get("programs") or []:
+                items.append({
+                    "title": prog.get("title") or prog.get("name"),
+                    "channel_id": ch_id,
+                    "starts_at": prog.get("start") or prog.get("starts_at"),
+                    "ends_at": prog.get("stop") or prog.get("ends_at"),
+                    "subtitle": prog.get("desc") or prog.get("subtitle"),
+                    "tvg_id": tvg,
+                    "stream_url": stream,
+                })
+    except Exception:
+        pass
+    # Fallback: indexed cache by tvg
+    try:
+        from app.models import LiveTvChannel
+        cache = globals().get("_epg_cache") or {}
+        by_tvg = cache.get("by_tvg") or {}
+        channels = { (c.epg_tvg_id or c.tvg_id): c for c in db.query(LiveTvChannel).all() if (getattr(c, "epg_tvg_id", None) or getattr(c, "tvg_id", None)) }
+        for tvg, rows in by_tvg.items():
+            ch = channels.get(tvg)
+            for prog in rows or []:
+                items.append({
+                    "title": prog.get("title") or prog.get("name"),
+                    "channel_id": ch.id if ch else None,
+                    "starts_at": prog.get("start") or prog.get("starts_at"),
+                    "ends_at": prog.get("stop") or prog.get("ends_at"),
+                    "subtitle": prog.get("desc"),
+                    "tvg_id": tvg,
+                    "stream_url": ch.stream_url if ch else None,
+                })
+    except Exception:
+        pass
+    # Dedupe by title+start+channel
+    seen = set()
+    out = []
+    for it in items:
+        key = (it.get("title"), str(it.get("starts_at")), it.get("channel_id"))
+        if key in seen or not it.get("title"):
+            continue
+        seen.add(key)
+        out.append(it)
+    return out

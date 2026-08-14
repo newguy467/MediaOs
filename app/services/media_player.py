@@ -79,6 +79,7 @@ def resolve_library_file(
 
 
 def _library_roots() -> list[Path]:
+    """Only media library mounts — never /config (credentials, tokens, backups)."""
     roots = []
     for attr in (
         "movies_library_path",
@@ -90,14 +91,14 @@ def _library_roots() -> list[Path]:
         "comics_library_path",
         "manga_library_path",
         "youtube_library_path",
+        "adult_library_path",
+        "games_library_path",
         "downloads_path",
     ):
         v = getattr(settings, attr, None)
         if v:
             roots.append(Path(v).resolve())
-    # also allow /config and relative data
-    roots.append(Path("/config").resolve())
-    roots.append(Path("data").resolve())
+    # relative data dir for logos/cache is NOT playable media
     return roots
 
 
@@ -110,7 +111,7 @@ def _assert_under_library(path: Path) -> None:
         except ValueError:
             continue
     # last resort: if path exists and is under /movies etc common mounts
-    for prefix in ("/movies", "/tv", "/music", "/books", "/audiobooks", "/podcasts", "/comics", "/manga", "/youtube", "/downloads"):
+    for prefix in ("/movies", "/tv", "/music", "/books", "/audiobooks", "/podcasts", "/comics", "/manga", "/youtube", "/downloads", "/games", "/adult"):
         if str(resolved).startswith(prefix + "/") or str(resolved) == prefix:
             return
     raise PermissionError(f"Path outside library roots: {resolved}")

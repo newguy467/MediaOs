@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from app.auth import require_admin
+from app.auth import require_admin, require_permission
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -273,3 +273,102 @@ def now_playing():
     """Plex/Tautulli now-playing for the dashboard widget."""
     from app.services.now_playing import get_now_playing
     return get_now_playing()
+
+
+# ── MediaOS v2: backup, health trends, plugins, anime ───────────────────────
+
+@router.get("/diagnostics")
+def diagnostics(db: Session = Depends(get_db)):
+    """Self-check for operators: keys, modules, schema, definitions, ffmpeg."""
+    import os, shutil
+    from app.config import settings
+    from app.clients.tmdb import tmdb_client
+    from app.clients.tvdb import tvdb_client
+    try:
+        from app.services.definition_sync import definitions_health
+        defs = definitions_health()
+    except Exception as e:
+        defs = {"error": str(e)}
+    try:
+        from app.services.schema_migrate import MIGRATIONS
+        mig_versions = [m[0] for m in MIGRATIONS]
+    except Exception:
+        mig_versions = []
+    try:
+        from app.services.plugins import list_plugins
+        plugins = list_plugins()
+    except Exception:
+        plugins = []
+    return {
+        "version": __import__("app.version", fromlist=["get_version"]).get_version(),
+        "tmdb_configured": bool(getattr(tmdb_client, "enabled", lambda: False)()),
+        "tvdb_configured": bool(getattr(tvdb_client, "enabled", lambda: False)()),
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+        "definitions": defs,
+        "schema_migrations_known": mig_versions,
+        "plugins": plugins,
+        "livetv_max_concurrent": getattr(settings, "livetv_max_concurrent", None),
+        "games_library_path": getattr(settings, "games_library_path", None),
+        "database_url_scheme": (getattr(settings, "database_url", "") or "").split(":")[0],
+    }
+
+
+@router.post("/backup/restore")
+def restore_backup_endpoint(body: dict, _: list = Depends(require_admin)):
+    from fastapi import HTTPException
+    from app.services.backup import restore_backup
+    path = body.get("path") or body.get("zip_path")
+    if not path:
+        raise HTTPException(400, "path required")
+    try:
+        return restore_backup(path, dest_db=body.get("dest_db"))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/backup")
+def create_backup_ep(_: str = Depends(require_admin)):
+    from app.services.backup import create_backup
+    return create_backup()
+
+
+@router.get("/backup")
+def list_backups_ep(_: str = Depends(require_admin)):
+    from app.services.backup import list_backups
+    return {"items": list_backups()}
+
+
+@router.get("/health-trends")
+def health_trends_ep(db: Session = Depends(get_db)):
+    from app.services.health_trends import load_persisted, snapshot
+    try:
+        return load_persisted(db)
+    except Exception:
+        return snapshot()
+
+
+@router.post("/health-trends/persist")
+def health_trends_persist(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    from app.services.health_trends import persist
+    persist(db)
+    return {"ok": True}
+
+
+@router.get("/anime")
+def anime_series(limit: int = 100, db: Session = Depends(get_db)):
+    from app.services.anime import list_anime_series
+    return {"items": list_anime_series(db, limit=limit)}
+
+
+@router.get("/anime/{series_id}/absolute")
+def anime_absolute(series_id: int, db: Session = Depends(get_db)):
+    from app.services.anime import absolute_episode_map
+    return {"items": absolute_episode_map(db, series_id)}
+
+
+@router.get("/dashboard/dense")
+def dashboard_dense(db: Session = Depends(get_db), _=Depends(require_permission("library.view", "system.view"))):
+    from app.services.dashboard_widgets import dashboard_bundle
+    return dashboard_bundle(db)

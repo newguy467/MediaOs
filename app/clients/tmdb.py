@@ -6,6 +6,10 @@ BASE_URL = "https://api.themoviedb.org/3"
 
 
 class TMDbClient:
+    def enabled(self) -> bool:
+        key = (getattr(settings, "tmdb_api_key", None) or "").strip()
+        return bool(key)
+
     def __init__(self):
         self.client = httpx.Client(
             base_url=BASE_URL,
@@ -28,9 +32,46 @@ class TMDbClient:
         return [self._movie_row(r) for r in resp.json().get("results", [])]
 
     def get_movie(self, tmdb_id: int) -> dict:
-        resp = self.client.get(f"/movie/{tmdb_id}")
+        if not self.enabled():
+            raise RuntimeError("TMDb API key not configured — set tmdb_api_key in settings")
+        resp = self.client.get(f"/movie/{tmdb_id}", params={"append_to_response": "external_ids"})
         resp.raise_for_status()
-        return self._movie_row(resp.json())
+        data = resp.json()
+        row = self._movie_row(data)
+        ext = data.get("external_ids") or {}
+        row["imdb_id"] = ext.get("imdb_id") or data.get("imdb_id")
+        row["tvdb_id"] = ext.get("tvdb_id")
+        row["external_ids"] = {
+            k: v for k, v in {
+                "imdb": row.get("imdb_id"),
+                "tvdb": row.get("tvdb_id"),
+                "tmdb": data.get("id"),
+                "facebook_id": ext.get("facebook_id"),
+                "instagram_id": ext.get("instagram_id"),
+                "twitter_id": ext.get("twitter_id"),
+            }.items() if v
+        }
+        return row
+
+    def get_tv(self, tmdb_id: int) -> dict:
+        if not self.enabled():
+            raise RuntimeError("TMDb API key not configured — set tmdb_api_key in settings")
+        resp = self.client.get(f"/tv/{tmdb_id}", params={"append_to_response": "external_ids"})
+        resp.raise_for_status()
+        data = resp.json()
+        row = self._tv_row(data)
+        ext = data.get("external_ids") or {}
+        row["imdb_id"] = ext.get("imdb_id")
+        row["tvdb_id"] = ext.get("tvdb_id")
+        row["external_source"] = "tmdb"
+        row["external_ids"] = {
+            k: v for k, v in {
+                "imdb": row.get("imdb_id"),
+                "tvdb": row.get("tvdb_id"),
+                "tmdb": data.get("id"),
+            }.items() if v
+        }
+        return row
 
     def search_tv(self, query: str) -> list[dict]:
         resp = self.client.get("/search/tv", params={"query": query})

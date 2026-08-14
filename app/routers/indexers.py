@@ -51,7 +51,6 @@ class CredentialsIn(BaseModel):
     extra: dict | None = None
 
 
-
 def _out(row: Indexer) -> IndexerOut:
     return IndexerOut(
         id=row.id,
@@ -390,6 +389,12 @@ def sync_cardigann_definitions(priority_only: bool = False, force: bool = True):
     return sync_definitions(force=force)
 
 
+@router.get("/definitions/health")
+def definitions_health_endpoint():
+    from app.services.definition_sync import definitions_health
+    return definitions_health()
+
+
 @router.get("/cardigann/sync/status")
 def cardigann_sync_status():
     from pathlib import Path as P
@@ -505,11 +510,6 @@ def jackett_sync(
     """Pull Jackett configured indexers into mediaos Indexer (Torznab) rows."""
     from app.services.jackett_sync import sync_jackett_indexers
     return sync_jackett_indexers(db, enable_new=enable_new)
-
-
-
-
-
 
 
 @router.get("/prowlarr/status")

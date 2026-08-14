@@ -160,7 +160,7 @@ export default function AiChatPanel() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send()}
             />
-            <button
+            <button type="button"
               className="btn btn-sm btn-primary"
               disabled={busy || !input.trim()}
               onClick={send}

@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import ConvertJob, ConvertPreset
+from app.models import ConvertJob, ConvertPreset, ConvertWatchFolder
 from app.services.media_player import probe, _library_roots
 
 log = logging.getLogger(__name__)
@@ -162,6 +162,28 @@ def seed_default_presets(db: Session) -> None:
         db.commit()
 
 
+def path_within_library_roots(path: Path) -> bool:
+    """True if *path* resolves inside one of the configured library roots.
+
+    Used to reject arbitrary filesystem paths coming from request bodies
+    (converter enqueue/scan) — without this, a caller could point the
+    converter (which moves/overwrites files) at anything the app process
+    can read, well outside the media libraries it's meant to operate on.
+    """
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in _library_roots():
+        try:
+            root_resolved = Path(root).resolve()
+        except OSError:
+            continue
+        if resolved == root_resolved or root_resolved in resolved.parents:
+            return True
+    return False
+
+
 def scan_libraries(
     db: Session,
     *,
@@ -178,7 +200,10 @@ def scan_libraries(
     if not preset:
         preset = db.query(ConvertPreset).filter(ConvertPreset.enabled.is_(True)).first()
 
-    search_roots = [Path(r) for r in (roots or [])] or _library_roots()
+    if roots:
+        search_roots = [Path(r) for r in roots if path_within_library_roots(Path(r))]
+    else:
+        search_roots = _library_roots()
     queued = 0
     scanned = 0
     skipped = 0
@@ -494,6 +519,107 @@ def watch_folder_scan(db: Session) -> dict:
     }
 
 
+
+def verify_output_health(source: Path, output: Path, source_duration: float | None = None) -> tuple[bool, str]:
+    """Tdarr-style post-encode health check: file exists, probeable, duration/size sane."""
+    if not output.exists():
+        return False, "output missing"
+    try:
+        out_size = output.stat().st_size
+    except OSError as e:
+        return False, f"stat failed: {e}"
+    min_ratio = float(getattr(settings, "converter_health_min_size_ratio", 0.05) or 0.05)
+    try:
+        src_size = source.stat().st_size if source.exists() else 0
+    except OSError:
+        src_size = 0
+    if src_size > 0 and out_size < max(1024, int(src_size * min_ratio)):
+        return False, f"output too small ({out_size} < {min_ratio:.0%} of source)"
+    if out_size < 2048:
+        return False, f"output tiny ({out_size} bytes)"
+    try:
+        info = probe(output)
+    except Exception as e:
+        return False, f"probe failed: {e}"
+    # duration check when we know source duration
+    dur_ratio = float(getattr(settings, "converter_health_min_duration_ratio", 0.95) or 0.95)
+    out_dur = None
+    if isinstance(info, dict):
+        out_dur = info.get("duration") or info.get("format", {}).get("duration")
+        try:
+            out_dur = float(out_dur) if out_dur is not None else None
+        except (TypeError, ValueError):
+            out_dur = None
+    if source_duration and source_duration > 1 and out_dur is not None:
+        if out_dur < source_duration * dur_ratio:
+            return False, f"duration short ({out_dur:.1f}s < {dur_ratio:.0%} of {source_duration:.1f}s)"
+    return True, "ok"
+
+
+def _fail_or_retry(db: Session, job: ConvertJob, message: str) -> dict:
+    """Mark failed or re-queue when under converter_max_attempts (Tdarr retry)."""
+    max_a = max(1, int(getattr(settings, "converter_max_attempts", 3) or 3))
+    attempts = int(getattr(job, "attempts", 0) or 0) + 1
+    job.attempts = attempts
+    job.health_ok = False
+    job.health_message = (message or "")[:240]
+    if attempts < max_a:
+        job.status = "queued"
+        job.progress = 0
+        job.message = f"retry {attempts}/{max_a}: {message}"[:500]
+        job.started_at = None
+        job.finished_at = None
+        db.add(job)
+        db.commit()
+        return {"job_id": job.id, "status": "queued", "message": job.message, "attempts": attempts}
+    job.status = "failed"
+    job.message = (message or "")[:500]
+    job.finished_at = _utcnow()
+    db.add(job)
+    db.commit()
+    return {"job_id": job.id, "status": "failed", "message": job.message, "attempts": attempts}
+
+
+def seed_library_watch_folders(db: Session) -> dict:
+    """Register standard library roots as converter watch folders (idempotent)."""
+    if not getattr(settings, "converter_auto_seed_libraries", True):
+        return {"seeded": 0, "skipped": True}
+    roots = []
+    for attr in (
+        "movies_library_path", "tv_library_path", "music_library_path",
+        "books_library_path", "audiobooks_library_path", "podcasts_library_path",
+        "comics_library_path", "manga_library_path", "youtube_library_path",
+        "adult_library_path", "games_library_path",
+    ):
+        path = (getattr(settings, attr, None) or "").strip()
+        if path:
+            roots.append(path)
+    # default preset
+    preset = db.query(ConvertPreset).filter(ConvertPreset.is_default.is_(True)).first()
+    if not preset:
+        preset = db.query(ConvertPreset).filter(ConvertPreset.enabled.is_(True)).first()
+    seeded = 0
+    for path in roots:
+        existing = db.query(ConvertWatchFolder).filter(ConvertWatchFolder.path == path).first()
+        if existing:
+            continue
+        if not Path(path).exists():
+            # still register so it activates when volume mounts appear
+            pass
+        row = ConvertWatchFolder(
+            path=path,
+            preset_id=preset.id if preset else None,
+            enabled=True,
+            recursive=True,
+            notes="auto-seeded library root",
+        )
+        db.add(row)
+        seeded += 1
+    if seeded:
+        db.commit()
+    return {"seeded": seeded, "roots": roots, "preset_id": preset.id if preset else None}
+
+
 def process_next_job(db: Session) -> dict | None:
     """Run one queued job (blocking). Returns summary or None if idle."""
     global _active_jobs
@@ -579,41 +705,41 @@ def process_next_job(db: Session) -> dict | None:
                 proc.kill()
             except Exception:
                 pass
-            job.status = "failed"
-            job.message = str(exc)[:500]
-            job.finished_at = _utcnow()
-            db.add(job)
-            db.commit()
             _active_jobs.pop(job.id, None)
-            return {"job_id": job.id, "status": "failed", "message": job.message}
+            return _fail_or_retry(db, job, str(exc)[:500])
 
         _active_jobs.pop(job.id, None)
         rc = proc.returncode
         if rc != 0:
             err = (proc.stderr.read() if proc.stderr else "")[:500]
-            job.status = "failed"
-            job.message = err or f"ffmpeg exit {rc}"
-            job.finished_at = _utcnow()
-            db.add(job)
-            db.commit()
-            return {"job_id": job.id, "status": "failed", "message": job.message}
+            return _fail_or_retry(db, job, err or f"ffmpeg exit {rc}")
 
         # Apply output mode: new_file | replace | rename_old
         try:
             final_path = _finalize_output(job, preset, Path(out))
             job.output_path = final_path
         except Exception as exc:
-            job.status = "failed"
-            job.message = f"finalize failed: {exc}"
-            job.finished_at = _utcnow()
-            db.add(job)
-            db.commit()
-            return {"job_id": job.id, "status": "failed", "message": job.message}
+            return _fail_or_retry(db, job, f"finalize failed: {exc}")
+
+        # Tdarr-class health check before marking done
+        if getattr(settings, "converter_health_check", True):
+            ok, hmsg = verify_output_health(Path(job.source_path), Path(job.output_path), duration)
+            job.health_ok = ok
+            job.health_message = hmsg[:240]
+            if not ok:
+                # remove bad output when replace modes staged
+                try:
+                    if Path(out).exists() and str(out) != job.source_path:
+                        Path(out).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return _fail_or_retry(db, job, f"health check failed: {hmsg}")
 
         job.status = "done"
         job.progress = 100.0
         job.message = "complete"
         job.finished_at = _utcnow()
+        job.health_ok = True if getattr(settings, "converter_health_check", True) else job.health_ok
         try:
             job.output_size = Path(job.output_path).stat().st_size if job.output_path else None
         except Exception:
