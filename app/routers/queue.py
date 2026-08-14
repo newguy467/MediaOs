@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.clients.qbittorrent import qbittorrent_client
 from app.database import get_db
-from app.models import Activity, Download, Episode, ItemStatus, MediaItem
+from app.models import Activity, Download, Episode, ItemStatus, MediaItem, Game
 from app.services.sse import publish as sse_publish
 
 router = APIRouter(prefix="/queue", tags=["queue"],
@@ -20,7 +20,8 @@ router = APIRouter(prefix="/queue", tags=["queue"],
 
 class QueueItem(BaseModel):
     download_id: int
-    media_item_id: int | None
+    media_item_id: int | None = None
+    game_id: int | None = None
     title: str
     media_type: str | None
     status: str
@@ -69,7 +70,7 @@ def get_queue(db: Session = Depends(get_db)):
             torrents[h] = {**t, "progress": prog, "state": state, "hash": h}
     except Exception:
         try:
-            for cat in (None, "mediaos", "mediaos-tv", "mediaos-music", "mediaos-books", "mediaos-audiobooks"):
+            for cat in (None, "mediaos", "mediaos-tv", "mediaos-music", "mediaos-books", "mediaos-audiobooks", "mediaos-games"):
                 for tt in qbittorrent_client.list_torrents(category=cat):
                     h = (tt.get("hash") or "").lower()
                     if h:
@@ -81,7 +82,10 @@ def get_queue(db: Session = Depends(get_db)):
     for d in rows:
         item = d.media_item
         ep = d.episode
-        title = item.title if item else (d.release_title or "?")
+        game = None
+        if getattr(d, "game_id", None) and not item:
+            game = db.get(Game, d.game_id)
+        title = item.title if item else (game.title if game else (d.release_title or "?"))
         ep_label = None
         if ep:
             ep_label = f"S{ep.season_number:02d}E{ep.episode_number:02d}"
@@ -100,8 +104,9 @@ def get_queue(db: Session = Depends(get_db)):
             QueueItem(
                 download_id=d.id,
                 media_item_id=d.media_item_id,
+                game_id=getattr(d, "game_id", None),
                 title=title,
-                media_type=item.media_type.value if item else None,
+                media_type=(item.media_type.value if item else ("game" if getattr(d, "game_id", None) else None)),
                 status=d.status,
                 release_title=d.release_title,
                 quality_score=d.quality_score,

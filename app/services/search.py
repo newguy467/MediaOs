@@ -13,6 +13,7 @@ from app.config import settings
 from app.models import Blocklist, Episode, MediaItem
 from app.services.quality import rank_releases
 from app.services.quality.store import get_default_profile, get_profile_by_name
+from app.services.release_enrichment import enrich_many
 import logging
 log = logging.getLogger("mediaos.search")
 
@@ -503,16 +504,15 @@ def search_adult_releases(media_item, db=None, limit: int = 40) -> list[dict]:
         title = (r.get("title") or "").lower()
         if any(b in title for b in blocked):
             continue
+        if not r.get("download_url"):
+            continue
         filtered.append(r)
     # score/rank similar to movies
-    try:
-        from app.services.quality.matrix import score_release
-        for r in filtered:
-            try:
-                r["score"] = score_release(r, profile) if profile else r.get("score") or 0
-            except Exception:
-                r.setdefault("score", 0)
-        filtered.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
-    except Exception:
-        pass
-    return filtered[:limit]
+    ranked = rank_releases(filtered, profile=profile)
+    out = []
+    for best, result in ranked[:limit]:
+        row = dict(best)
+        row["_score"] = result.score
+        row["_matched_formats"] = result.matched_formats
+        out.append(row)
+    return out

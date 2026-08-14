@@ -36,33 +36,6 @@ class MangaDexClient:
             })
         return out
 
-def _pick_title(mapping):
-    if not mapping: return None
-    for lang in ("en", "ja-ro", "ja"):
-        if mapping.get(lang): return mapping[lang]
-    return next(iter(mapping.values()), None)
-
-def _cover_url(row):
-    mid = row.get("id")
-    for rel in row.get("relationships") or []:
-        if rel.get("type") == "cover_art":
-            fn = ((rel.get("attributes") or {}).get("fileName"))
-            if mid and fn:
-                return f"https://uploads.mangadex.org/covers/{mid}/{fn}.256.jpg"
-    return None
-
-def _rel_names(row, rel_type):
-    names = []
-    for rel in row.get("relationships") or []:
-        if rel.get("type") == rel_type:
-            n = (rel.get("attributes") or {}).get("name")
-            if n: names.append(n)
-    return names
-
-def _stable_int_id(uuid_str):
-    return int(hashlib.sha1(uuid_str.encode()).hexdigest()[:15], 16)
-
-
     def list_chapters(self, manga_uuid: str, limit: int = 100, translated_lang: str = "en") -> list[dict[str, Any]]:
         """List chapters for a MangaDex manga UUID."""
         resp = self.client.get("/chapter", params={
@@ -98,6 +71,33 @@ def _stable_int_id(uuid_str):
             if f.get("external_id") == stable_id:
                 return f.get("mangadex_uuid")
         return found[0].get("mangadex_uuid") if found else None
+
+
+def _pick_title(mapping):
+    if not mapping: return None
+    for lang in ("en", "ja-ro", "ja"):
+        if mapping.get(lang): return mapping[lang]
+    return next(iter(mapping.values()), None)
+
+def _cover_url(row):
+    mid = row.get("id")
+    for rel in row.get("relationships") or []:
+        if rel.get("type") == "cover_art":
+            fn = ((rel.get("attributes") or {}).get("fileName"))
+            if mid and fn:
+                return f"https://uploads.mangadex.org/covers/{mid}/{fn}.256.jpg"
+    return None
+
+def _rel_names(row, rel_type):
+    names = []
+    for rel in row.get("relationships") or []:
+        if rel.get("type") == rel_type:
+            n = (rel.get("attributes") or {}).get("name")
+            if n: names.append(n)
+    return names
+
+def _stable_int_id(uuid_str):
+    return int(hashlib.sha1(uuid_str.encode()).hexdigest()[:15], 16)
 
 
 mangadex_client = MangaDexClient()

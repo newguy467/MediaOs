@@ -21,14 +21,25 @@ PERMISSION_CATALOG = [
     {"id": "calendar.view", "label": "View calendar", "group": "Library"},
     {"id": "library.view", "label": "View library", "group": "Library"},
     {"id": "library.manage", "label": "Add / edit / delete library items", "group": "Library"},
+    # library.edit and bare "library" are additional aliases some routers
+    # check for (games, trakt/mal/anilist/steam import, scrobbling,
+    # tracking, quality-file overrides) — granted alongside library.manage
+    # so those features are actually reachable by non-admin users.
+    {"id": "library.edit", "label": "Edit extended library metadata (games, tracking, imports)", "group": "Library"},
+    {"id": "library", "label": "Extended library features (games, tracking, imports)", "group": "Library"},
     {"id": "download", "label": "Search & grab releases", "group": "Downloads"},
     {"id": "queue", "label": "Manage download queue", "group": "Downloads"},
+    {"id": "queue.view", "label": "View download queue", "group": "Downloads"},
+    {"id": "queue.manage", "label": "Manage download queue (extended)", "group": "Downloads"},
     {"id": "requests", "label": "Submit media requests", "group": "Requests"},
     {"id": "requests.approve", "label": "Approve requests", "group": "Requests"},
     {"id": "converter", "label": "File converter", "group": "Tools"},
+    {"id": "converter.view", "label": "View file converter", "group": "Tools"},
+    {"id": "converter.manage", "label": "Manage file converter", "group": "Tools"},
     {"id": "settings", "label": "Change settings", "group": "Admin"},
     {"id": "users", "label": "Manage users", "group": "Admin"},
     {"id": "indexers", "label": "Manage indexers", "group": "Admin"},
+    {"id": "system.view", "label": "View system dashboard", "group": "Admin"},
 ]
 
 ROLE_DEFAULTS = {

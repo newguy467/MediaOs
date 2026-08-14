@@ -1,100 +1,135 @@
-# MediaOs v4 Roadmap — Big Bang Foundation → Full Replacement
+# MediaOS v2 Roadmap — Full Absorption Edition
 
-Version: 4.4.1
+Version target: **2.0.0** (major version bump from MediaOs 4.x to signal the comprehensive absorption)
 
-## Phase 0 — Foundation (this package)
-- [x] Elevated vision: full *arr ecosystem replacement
-- [x] Architecture document (shared pipeline, modules, quality, hunt, maintenance)
-- [x] Hybrid UI direction + Basic/Advanced modes concept
-- [x] Stronger TRaSH live-sync scaffolding (Recyclarr-inspired)
-- [x] Music hierarchy + completeness enhancements
-- [x] Comics pull-list + story-arc scaffolding
-- [x] Stream-as-primary path improvements
-- [x] Maintainerr-style rules + Hunt engine stubs
-- [x] Rate-limit registry UI hooks
-- [x] Migration tooling upgrades
-- [x] Homelab Links page concept
-- [x] Updated docs, VERSION, STRUCTURE
-- [x] Wizard **Modules** step (TV & Movies default; opt-in Music / Books / Audiobooks / Comics / Live TV / …)
-- [x] **Module Store** page in main UI (enable/disable later)
-- [x] Sidebar + mobile nav filtered by enabled modules
-- [x] Modules API (`/api/modules`, setup modules endpoints)
-- [x] Live TRaSH sync endpoints (`/api/quality/trash/sync`)
-- [x] Hunt API foundation (`/api/hunt/plan`, `/api/hunt/run`)
-- [x] Module Store card in Settings hub
-- [x] Basic vs Advanced mode switch (gates quality matrix, Live TV, Converter nav)
-- [x] Music hierarchy UI (artist → album tree + incomplete + track completeness)
-- [x] Live TRaSH sync panel on Quality Profiles page
-- [x] Prismarr-style dense dashboard control strip
-- [x] YouTube notes (SponsorBlock already strong; optional proxy; YT-Lite is network-level only)
+## Phase 0 — Foundation for v2 (Documentation & Architecture)
 
-## Phase 1 — Quality & Core Pipeline (highest leverage)
-- Live TRaSH Guides sync with real definitions (custom formats, scores, quality definitions, naming)
-- Quality Profiles admin UI (create/edit/assign, score overrides)
-- Unified release parser + scoring used by every media type
-- “Keep multiple qualities” policy in organize/grab logic
-- Rate-limit registry (view/edit host limits & backoffs)
+- [x] New VISION.md absorbing all 11 source projects
+- [x] This ROADMAP
+- [ ] Updated ARCHITECTURE.md (shared pipeline + Tracking/Scrobbling layer + Games)
+- [ ] Module Store expanded: Games, Scrobbling, Tracking
+- [ ] License & attribution notes (ideas absorbed, clean re-implementation)
+- [ ] VERSION → 2.0.0-dev
+- [ ] CHANGELOG structure for major absorption
 
-## Phase 2 — Movies + TV to full replacement level
-- Feature parity checklist vs Sonarr/Radarr (monitor modes, season packs, cutoff upgrades, history, blocklist)
-- Stream option beside Grab in detail + interactive search
-- Strong import from existing Sonarr/Radarr instances
-- Dashboard calendar + queue/activity widgets (Prismarr density)
+## Phase 1 — Core Pipeline Hardening (Movies + TV still king)
 
-## Phase 3 — Music (Lidarr + Headphones)
-- Full artist → album → track data model and UI tree
-- Album completeness % + missing tracks
-- Wanted hierarchy views
-- MusicBrainz depth + folder organization
+Priority: Make Movies + TV better than Sonarr + Radarr + Prismarr combined.
 
-## Phase 4 — Comics / Manga (Mylar depth)
-- Weekly pull-list automation (auto-search / auto-grab)
-- Story-arc management + reading order
-- Issue metatagging (ComicTagger-style)
-- Publisher/series/arc organization hardened
+- [x] First-class **multi-quality keep** policy (bobarr philosophy) — retention_policy + grab enforcement
+  - Desired qualities list per profile
+  - “Keep all matching” / “Keep best N” / “Keep until cutoff”
+  - UI for per-item quality retention rules
+- [x] Prismarr-density dashboard & calendar — continue_watching / scrobbles / games / tracking widgets added
+  - Control strip, multi-widget layout, dense month grid
+  - Now-playing (Plex/Tautulli/Jellyfin) + queue + activity + calendar in one view
+- [ ] Stream-as-primary everywhere (Cinephage level)
+  - “Stream” button next to Grab in detail views + interactive search
+  - Improved .strm generation + library placement
+  - Debrid + Usenet stream paths polished
+- [ ] Stronger *arr import validation + side-by-side mode
 
-## Phase 5 — Books, Audiobooks, Subtitles
-- Readarr parity for books + audiobooks
-- Bazarr-level (or better) subtitle providers + profiles + multi-language
+## Phase 2 — Scrobbling & Unified Tracking Layer (scrob + Yamtrack)
 
-## Phase 6 — Live TV + Streaming polish
-- Channel editor (enable/order/logos/groups)
-- Portal scan + bulk tools
-- Polished EPG grid UX
-- Stream-as-primary as first-class path across media types
+This is the highest-leverage new horizontal capability.
 
-## Phase 7 — Maintenance, Hunt, Homelab
-- Rule engine (age/size/quality/tag/collection → actions)
-- Hunt engine (aggressive missing/cutoff with prioritization)
-- Homelab Apps/Links page
-- Optional Plex/Tautulli “now playing” widget
+### Scrobbling Engine
+- [x] Local scrobble ingestion + progress + history + continue API (webhook from Jellyfin/Plex/Emby, or direct player API)
+- [x] Progress tracking (%, watched episodes, timestamps)
+- [x] “Continue watching” and “Up next” surfaces
+- [x] History view with filters (media type, date, user)
+- [x] Optional push to Trakt / other services
 
-## Phase 8 — Polish, Migration, Docs, Release
-- Basic vs Advanced mode fully wired
-- End-to-end migration guides + validation checklists
-- Performance pass (large libraries)
-- Public 4.x release
+### Unified Tracking
+- [ ] Cross-module progress model (movies, TV, anime, games, books, comics, podcasts)
+- [ ] Status: Wanted / In Progress / Completed / Dropped / On Hold
+- [ ] Ratings + notes + tags
+- [ ] Smart lists driven by actual watch/play history
+- [ ] “Because you watched X” recommendations (local embeddings or simple collaborative later)
 
-## Continuous
-- Multi-user permissions
-- Converter improvements
-- Notification coverage
-- Cardigann / Torznab indexer expansion
-- Community feedback loop
+## Phase 3 — Live TV + Stream Depth (Cinephage)
+
+- [ ] Full channel editor: enable/disable, reorder, logos, groups, bulk actions
+- [ ] Polished EPG grid with click-to-stream / record
+- [ ] Portal scan (Stalker etc.) + health checks
+- [ ] Stream quality profiles and fallback logic
+- [ ] Catch-up / timeshift where providers support it
+
+## Phase 4 — Games Module (Questarr absorption)
+
+New first-class module.
+
+- [x] Data model: Platform → Game → Editions / Releases + API
+- [x] Metadata providers (IGDB, Steam, GOG, etc. as available)
+- [x] Wanted / Monitored / Library states
+- [x] Automated search + grab via indexers / download clients (same pipeline)
+- [ ] Installation path / emulator / launcher hooks (optional)
+- [ ] Completion tracking + playtime (feeds into Tracking layer)
+- [ ] Module Store opt-in (off by default so Movies/TV stay clean)
+
+## Phase 5 — Music & Comics Depth
+
+### Music (Headphones-level)
+- [x] Full artist → album → track tree with completeness %
+- [ ] Missing track lists and wanted hierarchy views
+- [ ] Folder organization + MusicBrainz depth
+- [ ] Album completeness scoring in hunt/wanted
+
+### Comics / Manga (Mylar3-level)
+- [ ] Weekly pull-list automation + auto-grab
+- [x] Story-arc UI + reading order
+- [x] Issue metatagging (ComicTagger-style)
+- [ ] Publisher / series / arc organization
+- [ ] Reading progress (feeds Tracking layer)
+
+## Phase 6 — Homelab & Dashboard Polish (Organizr + Prismarr)
+
+- [x] Homelab Links API + model (UI still thin)
+  - Custom icons, groups, status checks (HTTP, Docker, etc.)
+  - Quick links to download clients, players, other services
+- [ ] Dashboard density pass
+  - Configurable widgets
+  - Activity + Queue + Calendar + Now Playing + Wanted + Health in one dense view
+- [ ] Basic / Advanced / Power mode switch remains
+
+## Phase 7 — Indexer & Search Hardening (trawl influence)
+
+- [ ] Stronger FlareSolverr / CF bypass tooling
+- [ ] Rate-limit registry improvements
+- [ ] Capability detection and health history
+- [ ] Advanced interactive search UX
+
+## Phase 8 — Cross-cutting Quality of Life
+
+- [ ] Multi-user RBAC (viewer / request-only / power / admin)
+- [x] Backup create/list API (UI thin)
+- [x] Health trends snapshot API (indexer success, disk, stalled downloads)
+- [ ] Notification center (Discord, Telegram, ntfy, Gotify, webhooks) with actions
+- [x] Plugin registry stub (future community modules)
+- [ ] Mobile / PWA improvements
+
+## Phase 9 — Polish, Migration, Release
+
+- [ ] Full migration path from MediaOs 4.x
+- [ ] Import tools for existing *arr + Questarr-style libraries where possible
+- [ ] Documentation site update
+- [ ] Smoke tests + CI for all new modules
+- [ ] Public release of MediaOS 2.0.0
 
 ---
 
-### Implementation notes for contributors
+## Implementation Notes
 
-- Prefer extending existing services (`quality/`, `trash_guide_fetch.py`, `comic_pull_sync.py`, `music_completeness.py`, `stream_mode.py`, `cleanup.py`, `arr_migrator.py`) rather than inventing parallel systems.
-- New domain depth (story arcs, full track hierarchy, rule engine) should land as proper models + services + routers + UI.
-- Keep the shared pipeline sacred: every media type flows through the same search → score → grab/stream → organize path.
-- When porting ideas from Cinephage / Mylar3 / Recyclarr / Headphones / Prismarr, extract the *behavior and data model*, not necessarily the original language or UI framework.
+- All new features must respect the **shared pipeline**.
+- Games and Scrobbling are **modules / layers**, not core requirements. Default install stays Movies + TV focused.
+- We re-implement ideas in MediaOS’s FastAPI + SQLAlchemy + React style.
+- Attribution: “Inspired by / concepts absorbed from bobarr, Cinephage, headphones, mylar3, Organizr, Prismarr, Questarr, recyclarr, scrob, trawl, Yamtrack” in docs and about page.
+- Licensing: Only use code under compatible licenses; prefer clean re-implementation of public algorithms and UX patterns.
 
-This 4.4.1 tree continues the big-bang v4 effort.
+## Success Metrics for v2.0
 
-- [x] Comics story-arc + pull-list UI
-- [x] Hunt worker wired
-- [x] Dense month-grid calendar
-- [x] Gluetun VPN credentials UI
-- [x] GAP_AUDIT.md
+- A user can manage Movies, TV, Music, Comics, Games, and Live TV from one UI.
+- Watch progress is tracked locally and drives smart lists + continue-watching.
+- Multi-quality retention is explicit and powerful.
+- Dashboard feels as dense and useful as Prismarr while being the actual manager (not just a control plane).
+- New users can start with Movies + TV only and enable Games / Scrobbling later via Module Store.

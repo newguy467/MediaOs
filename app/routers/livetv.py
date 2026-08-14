@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 from app.auth import require_permission
 from fastapi import APIRouter, Request, Depends, HTTPException
@@ -9,6 +10,7 @@ from app.database import get_db
 from app.models import LiveTvChannel, LiveTvSource
 from app.services.livetv import sync_source
 
+log = logging.getLogger("mediaos.livetv")
 router = APIRouter(prefix="/livetv", tags=["livetv"])
 
 
@@ -358,6 +360,7 @@ def export_m3u_playlist(
     Set Jellyfin → Live TV → M3U Tuner → this playlist URL.
     """
     from fastapi.responses import PlainTextResponse
+    from app.models import LiveTvVirtualChannel as VC
 
     base = str(request.base_url).rstrip("/")
     q = db.query(LiveTvChannel).filter(LiveTvChannel.enabled.is_(True))
@@ -375,6 +378,20 @@ def export_m3u_playlist(
             f'tvg-logo="{logo}" group-title="{group}",{name}'
         )
         lines.append(f"{base}/api/livetv/stream/{ch.id}")
+
+    if source_id is None:
+        vchannels = db.query(VC).filter(VC.enabled.is_(True)).order_by(VC.number).all()
+        for vc in vchannels:
+            group = vc.group_title or "Personal Media"
+            logo = vc.logo or ""
+            tvg = f"virtual-{vc.id}"
+            name = (vc.name or f"Channel {vc.number}").replace("\n", " ")
+            lines.append(
+                f'#EXTINF:-1 tvg-id="{tvg}" tvg-name="{name}" tvg-chno="{vc.number}" '
+                f'tvg-logo="{logo}" group-title="{group}",{name}'
+            )
+            lines.append(f"{base}/api/livetv/virtual/stream/{vc.id}/stream.m3u8")
+
     body = '\n'.join(lines) + '\n'
     return PlainTextResponse(
         body,
@@ -450,7 +467,9 @@ def jellyfin_livetv_setup(request: Request):
             f"Guide URL: {base}/api/livetv/export/guide.xml",
             "Refresh guide data in Jellyfin after MediaOs EPG sync",
         ],
-        "note": "Channel streams are proxied through MediaOs so one auth/network path serves both apps.",
+        "note": "Channel streams are proxied through MediaOs so one auth/network path serves both apps. "
+                "Personal-media virtual channels (Settings > Live TV > Virtual Channels) are automatically "
+                "included in this same playlist/guide — Jellyfin sees one unified lineup.",
     }
 
 
@@ -561,6 +580,273 @@ def health_status(db: Session = Depends(get_db)):
     return {"total": total, "enabled": enabled, "with_failures": with_err}
 
 
+# ── Virtual channels (personal media → 24/7 channels) ───────────────────────
+
+class VirtualChannelCreate(BaseModel):
+    number: int
+    name: str
+    group_title: str | None = "Personal Media"
+    logo: str | None = None
+    enabled: bool = True
+    media_types: list[str] = ["movie"]
+    media_item_ids: list[int] | None = None
+    genre_filter: str | None = None
+    title_filter: str | None = None
+    year_min: int | None = None
+    year_max: int | None = None
+    randomize: bool = True
+    repeat_protection_days: int = 7
+    prime_time_movies: bool = False
+
+
+class VirtualChannelUpdate(BaseModel):
+    number: int | None = None
+    name: str | None = None
+    group_title: str | None = None
+    logo: str | None = None
+    enabled: bool | None = None
+    media_types: list[str] | None = None
+    media_item_ids: list[int] | None = None
+    genre_filter: str | None = None
+    title_filter: str | None = None
+    year_min: int | None = None
+    year_max: int | None = None
+    randomize: bool | None = None
+    repeat_protection_days: int | None = None
+    prime_time_movies: bool | None = None
+
+
+def _vc_out(ch) -> dict:
+    import json as _json
+    return {
+        "id": ch.id,
+        "number": ch.number,
+        "name": ch.name,
+        "group_title": ch.group_title,
+        "logo": ch.logo,
+        "enabled": ch.enabled,
+        "media_types": _json.loads(ch.media_types or "[]"),
+        "media_item_ids": _json.loads(ch.media_item_ids) if ch.media_item_ids else None,
+        "genre_filter": ch.genre_filter,
+        "title_filter": ch.title_filter,
+        "year_min": ch.year_min,
+        "year_max": ch.year_max,
+        "randomize": ch.randomize,
+        "repeat_protection_days": ch.repeat_protection_days,
+        "prime_time_movies": ch.prime_time_movies,
+        "schedule_filled_until": ch.schedule_filled_until,
+        "stream_status": ch.stream_status,
+        "stream_error": ch.stream_error,
+        "stream_started_at": ch.stream_started_at,
+    }
+
+
+@router.get("/virtual/channels")
+def list_virtual_channels(db: Session = Depends(get_db)):
+    from app.models import LiveTvVirtualChannel as VC
+    rows = db.query(VC).order_by(VC.number).all()
+    return [_vc_out(r) for r in rows]
+
+
+@router.post("/virtual/channels")
+def create_virtual_channel(
+    payload: VirtualChannelCreate,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    import json as _json
+    from app.models import LiveTvVirtualChannel as VC
+
+    if db.query(VC).filter(VC.number == payload.number).first():
+        raise HTTPException(400, f"Channel number {payload.number} already in use")
+    if not payload.media_types:
+        raise HTTPException(400, "media_types must include at least one of: movie, tv")
+
+    ch = VC(
+        number=payload.number,
+        name=payload.name,
+        group_title=payload.group_title,
+        logo=payload.logo,
+        enabled=payload.enabled,
+        media_types=_json.dumps(payload.media_types),
+        media_item_ids=_json.dumps(payload.media_item_ids) if payload.media_item_ids else None,
+        genre_filter=payload.genre_filter,
+        title_filter=payload.title_filter,
+        year_min=payload.year_min,
+        year_max=payload.year_max,
+        randomize=payload.randomize,
+        repeat_protection_days=payload.repeat_protection_days,
+        prime_time_movies=payload.prime_time_movies,
+    )
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+
+    from app.services.virtual_channels import ensure_channel_ready
+    try:
+        ensure_channel_ready(db, ch)
+    except Exception as exc:
+        log.warning("initial schedule build failed for new virtual channel %s: %s", ch.id, exc)
+
+    return _vc_out(ch)
+
+
+@router.patch("/virtual/channels/{channel_id}")
+def update_virtual_channel(
+    channel_id: int,
+    payload: VirtualChannelUpdate,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    import json as _json
+    from app.models import LiveTvVirtualChannel as VC
+
+    ch = db.get(VC, channel_id)
+    if not ch:
+        raise HTTPException(404, "Virtual channel not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "number" in data and data["number"] != ch.number:
+        if db.query(VC).filter(VC.number == data["number"], VC.id != channel_id).first():
+            raise HTTPException(400, f"Channel number {data['number']} already in use")
+    if "media_types" in data:
+        data["media_types"] = _json.dumps(data["media_types"] or ["movie"])
+    if "media_item_ids" in data:
+        data["media_item_ids"] = _json.dumps(data["media_item_ids"]) if data["media_item_ids"] else None
+
+    for k, v in data.items():
+        setattr(ch, k, v)
+    db.add(ch)
+    db.commit()
+    db.refresh(ch)
+
+    # Content/filter changes invalidate the existing schedule's premise — the
+    # simplest correct fix is to drop unplayed future rows and rebuild.
+    filter_keys = {"media_types", "media_item_ids", "genre_filter", "title_filter", "year_min", "year_max"}
+    if filter_keys & set(data.keys()):
+        from app.models import LiveTvVirtualScheduleItem as SI
+        from datetime import datetime, timezone
+        db.query(SI).filter(SI.virtual_channel_id == ch.id, SI.start_time > datetime.now(timezone.utc)).delete(synchronize_session=False)
+        ch.schedule_filled_until = None
+        db.add(ch)
+        db.commit()
+        from app.services.virtual_channels import ensure_channel_ready
+        ensure_channel_ready(db, ch)
+
+    return _vc_out(ch)
+
+
+@router.delete("/virtual/channels/{channel_id}")
+def delete_virtual_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    from app.models import LiveTvVirtualChannel as VC, LiveTvVirtualScheduleItem as SI
+    from app.services import virtual_stream_engine as engine
+
+    ch = db.get(VC, channel_id)
+    if not ch:
+        raise HTTPException(404, "Virtual channel not found")
+    engine.stop(channel_id)
+    db.query(SI).filter(SI.virtual_channel_id == channel_id).delete(synchronize_session=False)
+    db.delete(ch)
+    db.commit()
+
+    import shutil as _shutil
+    from app.services.virtual_channels import channel_data_dir
+    _shutil.rmtree(channel_data_dir(channel_id), ignore_errors=True)
+    return {"ok": True}
+
+
+@router.get("/virtual/channels/{channel_id}/schedule")
+def virtual_channel_schedule(
+    channel_id: int,
+    hours: int = 12,
+    db: Session = Depends(get_db),
+):
+    from app.models import LiveTvVirtualScheduleItem as SI
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(SI)
+        .filter(SI.virtual_channel_id == channel_id, SI.start_time >= now - timedelta(hours=1))
+        .filter(SI.start_time <= now + timedelta(hours=max(1, hours)))
+        .order_by(SI.start_time.asc())
+        .all()
+    )
+    return [
+        {
+            "title": r.title,
+            "start_time": r.start_time,
+            "duration_seconds": r.duration_seconds,
+            "media_item_id": r.media_item_id,
+            "episode_id": r.episode_id,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/virtual/channels/{channel_id}/now-next")
+def virtual_channel_now_next(channel_id: int, db: Session = Depends(get_db)):
+    from app.services.virtual_channels import get_now_and_next
+    return get_now_and_next(db, channel_id)
+
+
+@router.post("/virtual/channels/{channel_id}/rebuild")
+def rebuild_virtual_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """Force a schedule top-up + stream (re)start right now, instead of waiting
+    for the next scheduler tick."""
+    from app.models import LiveTvVirtualChannel as VC
+    from app.services.virtual_channels import ensure_channel_ready
+    from app.services import virtual_stream_engine as engine
+
+    ch = db.get(VC, channel_id)
+    if not ch:
+        raise HTTPException(404, "Virtual channel not found")
+    sched = ensure_channel_ready(db, ch)
+    stream = engine.ensure_running(db, ch) if ch.enabled else {"ok": False, "status": "disabled"}
+    return {"schedule": sched, "stream": stream}
+
+
+@router.get("/virtual/stream/{channel_id}/stream.m3u8")
+def virtual_channel_hls_playlist(channel_id: int, db: Session = Depends(get_db)):
+    """HLS master/media playlist Jellyfin (or any HLS client) polls for a
+    virtual channel. Starts the ffmpeg feed on first request if it isn't
+    already running, same as tuning in to a real live channel."""
+    from fastapi.responses import FileResponse
+    from app.models import LiveTvVirtualChannel as VC
+    from app.services import virtual_stream_engine as engine
+
+    ch = db.get(VC, channel_id)
+    if not ch or not ch.enabled:
+        raise HTTPException(404, "Virtual channel not found")
+    if not engine.is_running(channel_id):
+        engine.ensure_running(db, ch)
+    path = engine.hls_playlist_path(channel_id)
+    if not path.exists():
+        raise HTTPException(503, "Stream is starting — retry in a few seconds")
+    return FileResponse(path, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/virtual/stream/{channel_id}/{segment_name}")
+def virtual_channel_hls_segment(channel_id: int, segment_name: str):
+    from fastapi.responses import FileResponse
+    from app.services import virtual_stream_engine as engine
+
+    try:
+        path = engine.hls_segment_path(channel_id, segment_name)
+    except ValueError:
+        raise HTTPException(400, "Invalid segment name")
+    if not path.exists():
+        raise HTTPException(404, "Segment not found")
+    return FileResponse(path, media_type="video/mp2t", headers={"Cache-Control": "no-cache"})
+
+
 # ── Channel editor (enable / order / logos / groups) ────────────────────────
 
 class ChannelReorderBody(BaseModel):
@@ -637,3 +923,142 @@ def bulk_channels(
         n += 1
     db.commit()
     return {"ok": True, "updated": n}
+
+
+# ── DVR / click-to-record (Cinephage EPG parity) ─────────────────────────────
+
+class RecordIn(BaseModel):
+    channel_id: int | None = None
+    title: str
+    subtitle: str | None = None
+    tvg_id: str | None = None
+    starts_at: str | None = None  # ISO
+    ends_at: str | None = None
+    stream_url: str | None = None
+
+
+@router.post("/recordings")
+def create_recording(body: RecordIn, db: Session = Depends(get_db), _perm: list = Depends(require_permission("download", "library.manage"))):
+    from datetime import datetime
+    from app.services.livetv_dvr import schedule_recording
+
+    def _parse(s: str | None):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    rec = schedule_recording(
+        db,
+        channel_id=body.channel_id,
+        title=body.title,
+        subtitle=body.subtitle,
+        tvg_id=body.tvg_id,
+        starts_at=_parse(body.starts_at),
+        ends_at=_parse(body.ends_at),
+        stream_url=body.stream_url,
+    )
+    return {
+        "ok": True,
+        "id": rec.id,
+        "status": rec.status,
+        "title": rec.title,
+        "starts_at": rec.starts_at.isoformat() if rec.starts_at else None,
+        "ends_at": rec.ends_at.isoformat() if rec.ends_at else None,
+    }
+
+
+@router.get("/recordings")
+def get_recordings(limit: int = 50, db: Session = Depends(get_db)):
+    from app.services.livetv_dvr import list_recordings
+    return {"items": list_recordings(db, limit=limit)}
+
+
+@router.delete("/recordings/{rec_id}")
+def delete_recording(rec_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage"))):
+    from app.services.livetv_dvr import cancel_recording
+    from app.models import LiveTvRecording
+    if cancel_recording(db, rec_id):
+        return {"ok": True, "cancelled": True}
+    rec = db.get(LiveTvRecording, rec_id)
+    if not rec:
+        raise HTTPException(404, "Not found")
+    db.delete(rec)
+    db.commit()
+    return {"ok": True, "deleted": True}
+
+
+@router.post("/epg/record")
+def epg_click_record(body: dict, db: Session = Depends(get_db), _perm: list = Depends(require_permission("download", "library.manage"))):
+    """One-shot from EPG grid cell: channel_id + programme title/times."""
+    from datetime import datetime
+    from app.services.livetv_dvr import schedule_recording
+
+    def _parse(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    try:
+        rec = schedule_recording(
+            db,
+            channel_id=body.get("channel_id"),
+            title=body.get("title") or body.get("programme") or "EPG Recording",
+            subtitle=body.get("subtitle") or body.get("desc"),
+            tvg_id=body.get("tvg_id"),
+            starts_at=_parse(body.get("starts_at") or body.get("start")),
+            ends_at=_parse(body.get("ends_at") or body.get("stop")),
+            stream_url=body.get("stream_url"),
+            allow_conflict=bool(body.get("allow_conflict")),
+        )
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    return {"ok": True, "id": rec.id, "status": rec.status, "title": rec.title}
+
+
+# ── Series-record rules ──────────────────────────────────────────────────────
+
+@router.get("/series-rules")
+def get_series_rules(db: Session = Depends(get_db)):
+    from app.services.livetv_dvr import list_series_rules
+    return {"items": list_series_rules(db)}
+
+
+@router.post("/series-rules")
+def post_series_rule(body: dict, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage"))):
+    from app.services.livetv_dvr import create_series_rule
+    title = (body.get("title_match") or body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title_match required")
+    return create_series_rule(
+        db,
+        title_match=title,
+        match_mode=body.get("match_mode") or "contains",
+        channel_id=body.get("channel_id"),
+        keep_episodes=int(body.get("keep_episodes") or 0),
+        priority=int(body.get("priority") or 50),
+        only_new=bool(body.get("only_new", True)),
+        enabled=bool(body.get("enabled", True)),
+    )
+
+
+@router.delete("/series-rules/{rule_id}")
+def remove_series_rule(rule_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage"))):
+    from app.services.livetv_dvr import delete_series_rule
+    if not delete_series_rule(db, rule_id):
+        raise HTTPException(404, "Rule not found")
+    return {"ok": True}
+
+
+@router.post("/series-rules/apply")
+def apply_series_rules(body: dict, db: Session = Depends(get_db), _perm: list = Depends(require_permission("download", "library.manage"))):
+    """Apply enabled series rules to a batch of EPG programme dicts."""
+    from app.services.livetv_dvr import apply_series_rules_to_epg
+    items = body.get("items") or body.get("programmes") or []
+    scheduled = apply_series_rules_to_epg(db, items)
+    return {"ok": True, "scheduled": scheduled, "count": len(scheduled)}

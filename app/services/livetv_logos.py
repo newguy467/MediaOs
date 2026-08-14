@@ -66,16 +66,34 @@ def import_logo_pack(source: Path | str) -> dict:
     imported = 0
     if src.is_file() and src.suffix.lower() == ".zip":
         with zipfile.ZipFile(src, "r") as zf:
+            # Archive safety limits
+            max_files, max_total, max_one = 5000, 200 * 1024 * 1024, 8 * 1024 * 1024
+            total = 0
             for info in zf.infolist():
                 if info.is_dir():
                     continue
-                name = Path(info.filename).name
-                if Path(name).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif"}:
+                if imported >= max_files:
+                    break
+                # reject absolute / traversal
+                raw = info.filename.replace("\\", "/")
+                if raw.startswith("/") or ".." in Path(raw).parts:
                     continue
-                # preserve one parent folder if present (country)
-                parts = Path(info.filename).parts
+                name = Path(raw).name
+                if not name or Path(name).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif"}:
+                    continue
+                size = int(getattr(info, "file_size", 0) or 0)
+                if size > max_one:
+                    continue
+                total += size
+                if total > max_total:
+                    break
+                parts = [p for p in Path(raw).parts if p not in (".", "")]
                 rel = Path(parts[-2]) / name if len(parts) >= 2 else Path(name)
-                dest = root / rel
+                dest = (root / rel).resolve()
+                try:
+                    dest.relative_to(root.resolve())
+                except ValueError:
+                    continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(info) as src_f, open(dest, "wb") as out_f:
                     shutil.copyfileobj(src_f, out_f)

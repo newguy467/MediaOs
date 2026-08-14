@@ -79,6 +79,10 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "downloads_path": (str, "Downloads Path", False),
         "movie_naming_folder": (str, "Movie folder naming template", False),
         "episode_naming": (str, "Episode file naming template", False),
+        # Prefer hardlink when organizing (same filesystem required; falls back to move)
+        "library_prefer_hardlink": (bool, "Prefer hardlink when organizing into library", False),
+        "jdupes_enabled": (bool, "Enable jdupes duplicate scan", False),
+        "jdupes_hardlink": (bool, "jdupes hardlink mode (-L) instead of delete", False),
     },
     "metadata": {
         "tmdb_api_key": (str, "TMDb API Key", True),
@@ -97,6 +101,8 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "cardigann_definitions_path": (str, "Cardigann definitions path", False),
         "cardigann_auto_sync": (bool, "Auto-sync Jackett YAML definitions", False),
         "cardigann_auto_sync_on_startup": (bool, "Seed definitions on startup", False),
+        "cardigann_sync_interval_hours": (int, "Cardigann definition sync interval (hours)", False),
+        "cardigann_fail_open": (bool, "Continue grabs if a definition fails to parse", False),
         "min_seeders": (int, "Minimum seeders", False),
         "jackett_sync_on_startup": (bool, "Sync Jackett indexers on startup", False),
         "flaresolverr_url": (str, "FlareSolverr URL", False),
@@ -188,7 +194,6 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "vpn_check_timeout_seconds": (float, "Check timeout (seconds)", False),
         "vpn_username": (str, "VPN username", False),
         "vpn_password": (str, "VPN password", True),
-        "vpn_interface": (str, "Interface (tun0)", False),
     },
     "auth": {
         "auth_username": (str, "Admin username", False),
@@ -203,6 +208,7 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "livetv_offline_action": (str, "Live TV offline action (delete|disable)", False),
         "livetv_epg_extra_urls": (str, "Extra XMLTV EPG URLs (comma-separated)", False),
         "livetv_health_interval_minutes": (int, "Live TV health check interval (min)", False),
+        "livetv_max_concurrent": (int, "Live TV max concurrent recordings (multi-tuner)", False),
         "search_interval_minutes": (int, "Auto-search interval (minutes)", False),
         "min_seeders": (int, "Minimum seeders", False),
         "download_timeout_hours": (int, "Download timeout (hours)", False),
@@ -242,6 +248,10 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "converter_hwaccel_default": (str, "Converter hwaccel default", False),
         "converter_watch_interval_minutes": (int, "Converter watch interval", False),
         "converter_watch_limit": (int, "Converter watch limit", False),
+        "plugin_registry_url": (str, "Plugin catalog URL (GitHub raw JSON)", False),
+        "plugin_trusted_owners": (str, "Trusted GitHub owners for plugins (comma-separated)", False),
+        "plugins_path": (str, "Plugins install directory", False),
+        "plugins": (str, "Extra plugin Python modules (comma-separated)", False),
     },
 }
 

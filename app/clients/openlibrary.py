@@ -1,4 +1,19 @@
+import hashlib
+
 import httpx
+
+
+def _stable_int_id(key: str) -> int:
+    """Deterministic string -> int id, stable across process restarts.
+
+    Python's built-in hash() is salted per-process for str objects
+    (PYTHONHASHSEED) unless hash randomization is explicitly disabled, so it
+    must not be used here — using it would make external_id matching for the
+    same Open Library key silently fail after every app restart, creating
+    duplicate MediaItem rows instead of recognizing an already-added book.
+    """
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:12], 16) % (10**12)
 
 
 class OpenLibraryClient:
@@ -19,7 +34,7 @@ class OpenLibraryClient:
         for r in resp.json().get("docs", []):
             key = r.get("key") or ""
             # /works/OL...W → hash to int
-            ext = abs(hash(key)) % (10**12)
+            ext = _stable_int_id(key)
             authors = r.get("author_name") or []
             cover = r.get("cover_i")
             # series may be list of strings
@@ -71,7 +86,7 @@ class OpenLibraryClient:
         rows = []
         for e in resp.json().get("entries", []):
             wkey = e.get("key") or ""
-            ext = abs(hash(wkey)) % (10**12)
+            ext = _stable_int_id(wkey)
             rows.append(
                 {
                     "external_id": ext,

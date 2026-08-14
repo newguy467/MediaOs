@@ -659,8 +659,9 @@ def search_all_cardigann(
     out: list[dict[str, Any]] = []
     for meta in list_definitions():
         if public_only and meta.get("type") not in ("public", None, "semi-private"):
-            # still allow semi-private without login if no login block required
-            pass
+            # semi-private without login is allowed through above; anything
+            # else (private) is excluded when public_only is requested
+            continue
         def_id = meta["id"]
         try:
             cfg = (configs or {}).get(def_id) or load_def_config(def_id)

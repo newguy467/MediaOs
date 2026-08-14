@@ -1,6 +1,7 @@
 # Overlay: Intel QSV via /dev/dri
 #   docker compose -f docker-compose.yml -f docker-compose.intel.yml up -d
 # Fix group IDs: getent group render && getent group video
+# healthcheck / restart inherit from base compose when merged
 services:
   mediaos:
     devices:

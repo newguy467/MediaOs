@@ -260,7 +260,7 @@ def _apply_strike(db: Session, download: Download, reason: str) -> dict:
         add_to_blocklist(
             db,
             release_title=download.release_title or f"download-{download.id}",
-            indexer=download.indexer,
+            torrent_hash=download.torrent_hash,
             reason=f"cleanup:{reason}",
             media_item_id=download.media_item_id,
         )

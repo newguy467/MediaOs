@@ -58,12 +58,6 @@ class ComicVineClient:
             })
         return results
 
-def _year(val):
-    if val is None: return None
-    try: return int(str(val)[:4])
-    except Exception: return None
-
-
     def volume_issues(self, volume_id: int, limit: int = 500) -> list[dict[str, Any]]:
         """List issues for a ComicVine volume id with pagination.
 
@@ -111,6 +105,12 @@ def _year(val):
             if offset >= total or len(rows) < page_size:
                 break
         return out[:limit]
+
+
+def _year(val):
+    if val is None: return None
+    try: return int(str(val)[:4])
+    except Exception: return None
 
 
 comicvine_client = ComicVineClient()

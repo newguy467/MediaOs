@@ -1,0 +1,27 @@
+NOTICE — Third-party components
+================================
+
+Cardigann / Jackett indexer definitions
+---------------------------------------
+Files under definitions/ are derived from or compatible with the Jackett
+indexer definition format (https://github.com/Jackett/Jackett).
+
+Jackett is licensed under the GNU General Public License v2.0 (GPL-2.0).
+Those definition files retain their upstream license. MediaOS (MIT) vendors
+them for Cardigann-compatible parsing only; it does not claim ownership of
+the definition content.
+
+If you distribute this project, retain this NOTICE and the definitions/
+directory attribution. Prefer connecting Prowlarr/Jackett Torznab for
+private trackers instead of relying solely on vendored YAML.
+
+Built-in public indexers (app/services/builtin_indexers.py)
+-----------------------------------------------------------
+Scrapers for public sites (YTS, EZTV, 1337x, ThePirateBay, LimeTorrents,
+etc.) are optional and can be disabled in settings/code. LimeTorrents is
+disabled by default as of 2.0.24-dev.
+
+Optional Redis (redis-py)
+-------------------------
+When REDIS_URL is set, MediaOS uses Redis for shared rate limits, session cache,
+and scheduler leader election. redis-py is licensed under MIT.

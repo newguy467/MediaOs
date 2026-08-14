@@ -649,7 +649,7 @@ def interactive_book_search(item: MediaItem, db: Session | None = None, *, limit
 
 def interactive_audiobook_search(item: MediaItem, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
     return interactive_generic_search(
-        item, category=AUDIOBOOK_CATEGORY, media_type="audiobook", profile_media="movie",
+        item, category=AUDIOBOOK_CATEGORY, media_type="audiobook", profile_media="audiobook",
         db=db, limit=limit,
     )
 
@@ -665,4 +665,50 @@ def interactive_manga_search(item: MediaItem, db: Session | None = None, *, limi
     return interactive_generic_search(
         item, category=_MANGA_CATEGORY, media_type="manga", profile_media="manga",
         db=db, limit=limit,
+    )
+
+
+
+def interactive_game_search(title: str, db: Session | None = None, *, limit: int = 50) -> dict[str, Any]:
+    """Shared indexer search for games (integration B)."""
+    import time as _time
+    t0 = _time.perf_counter()
+    q = (title or "").strip()
+    if not q:
+        return _envelope(
+            media_type="game",
+            queries=[],
+            accepted=[],
+            rejected=[],
+            indexer_stats=[],
+            total_raw=0,
+            t0=t0,
+            breakdown={},
+            limit=limit,
+        )
+    queries = [q]
+    # Reuse movie category gather — indexers still return scene releases by title
+    try:
+        cat = MOVIE_CATEGORY
+    except NameError:
+        cat = 2000
+    raw, stats = _gather_releases(queries, cat, "game", db)
+    raw = _parse_enrich(raw)
+    # No quality profile — rank by seeders then existing score
+    def _key(r: dict):
+        return (int(r.get("seeders") or 0), int(r.get("_score") or r.get("score") or 0))
+    accepted = sorted(raw, key=_key, reverse=True)
+    for r in accepted:
+        r.setdefault("score", r.get("_score") or 0)
+        r.setdefault("matched_formats", r.get("_matched_formats") or [])
+    return _envelope(
+        media_type="game",
+        queries=queries,
+        accepted=accepted,
+        rejected=[],
+        indexer_stats=stats if isinstance(stats, list) else list((stats or {}).values()) if isinstance(stats, dict) else [],
+        total_raw=len(raw),
+        t0=t0,
+        breakdown={},
+        limit=limit,
     )

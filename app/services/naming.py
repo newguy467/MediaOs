@@ -20,15 +20,15 @@ def apply_template(template: str, tokens: dict[str, Any]) -> str:
 
     def repl(m: re.Match) -> str:
         key = m.group(1)
-        width = m.group(2)
+        zeros = m.group(2)
         val = tokens.get(key)
         if val is None:
             return ""
-        if width and isinstance(val, int):
-            return f"{val:0{int(width)}d}"
+        if zeros and isinstance(val, int):
+            return f"{val:0{len(zeros)}d}"
         return str(val)
 
-    out = re.sub(r"\{([a-zA-Z0-9_]+)(?::0*(\d+))?\}", repl, out)
+    out = re.sub(r"\{([a-zA-Z0-9_]+)(?::(0+))?\}", repl, out)
     out = re.sub(r"\{\s*\}", "", out)
     out = re.sub(r"\s{2,}", " ", out).strip(" .")
     return sanitize(out) if out else "Unknown"

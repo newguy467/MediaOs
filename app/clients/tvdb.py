@@ -13,11 +13,17 @@ class TVDbClient:
     qBittorrent's session cookie.
     """
 
+    def enabled(self) -> bool:
+        key = (getattr(settings, "tvdb_api_key", None) or "").strip()
+        return bool(key)
+
     def __init__(self):
         self.client = httpx.Client(base_url=BASE_URL, timeout=15.0)
         self._token: str | None = None
 
     def _login(self):
+        if not self.enabled():
+            raise RuntimeError("TVDb API key not configured — set tvdb_api_key in settings")
         payload = {"apikey": settings.tvdb_api_key}
         if settings.tvdb_pin:
             payload["pin"] = settings.tvdb_pin
@@ -82,6 +88,28 @@ class TVDbClient:
             series_status = "canceled"
         elif st_name:
             series_status = st_name.replace(" ", "_")[:32]
+        # Provider IDs (IMDb / others) from remoteIds on extended payload
+        imdb_id = None
+        external_ids = {"tvdb": r.get("id")}
+        for rid in (r.get("remoteIds") or r.get("remote_ids") or []):
+            if not isinstance(rid, dict):
+                continue
+            src = (rid.get("sourceName") or rid.get("type") or rid.get("source") or "").lower()
+            val = rid.get("id") or rid.get("identifier")
+            if not val:
+                continue
+            if "imdb" in src:
+                imdb_id = str(val)
+                if not imdb_id.startswith("tt") and str(val).isdigit():
+                    imdb_id = f"tt{val}"
+                external_ids["imdb"] = imdb_id
+            elif "tmdb" in src or "themoviedb" in src:
+                try:
+                    external_ids["tmdb"] = int(val)
+                except Exception:
+                    external_ids["tmdb"] = val
+            else:
+                external_ids[src or "other"] = val
         return {
             "external_id": r["id"],
             "title": r.get("name"),
@@ -89,6 +117,9 @@ class TVDbClient:
             "overview": r.get("overview"),
             "poster_path": r.get("image"),
             "series_status": series_status,
+            "imdb_id": imdb_id,
+            "tvdb_id": r.get("id"),
+            "external_ids": external_ids,
         }
 
     def get_episodes(self, tvdb_id: int) -> list[dict]:

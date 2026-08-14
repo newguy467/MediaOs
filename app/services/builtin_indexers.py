@@ -30,7 +30,7 @@ INDEXERS = [
     {"id": "bitsearch", "name": "BitSearch", "media": ["movie", "tv"], "enabled": True},
     {"id": "1337x", "name": "1337x", "media": ["movie", "tv"], "enabled": True},
     {"id": "tpb", "name": "ThePirateBay", "media": ["movie", "tv"], "enabled": True},
-    {"id": "limetorrents", "name": "LimeTorrents", "media": ["movie", "tv", "music"], "enabled": True},
+    {"id": "limetorrents", "name": "LimeTorrents", "media": ["movie", "tv", "music"], "enabled": False},  # opt-in: reliability/legal surface,
     {"id": "torrentscsv", "name": "Torrents.csv", "media": ["movie", "tv", "music"], "enabled": True},
     {"id": "nyaa", "name": "Nyaa", "media": ["movie", "tv"], "enabled": True},
     {"id": "knaben", "name": "Knaben", "media": ["movie", "tv", "music"], "enabled": True},

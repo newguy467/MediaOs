@@ -88,8 +88,18 @@ class EnqueueIn(BaseModel):
 
 @router.on_event("startup")
 def _seed():
-    # also seeded from main lifespan; keep safe
-    pass
+    """Seed presets + library watch folders (Tdarr-class pipeline)."""
+    try:
+        from app.database import SessionLocal
+        from app.services.converter import seed_default_presets, seed_library_watch_folders
+        db = SessionLocal()
+        try:
+            seed_default_presets(db)
+            seed_library_watch_folders(db)
+        finally:
+            db.close()
+    except Exception:
+        pass
 
 
 @router.get("/stats")
@@ -157,7 +167,11 @@ def list_jobs(status: str | None = None, limit: int = 100, db: Session = Depends
 def enqueue(body: EnqueueIn, db: Session = Depends(get_db)):
     from pathlib import Path
     from app.services.media_player import probe
-    if not Path(body.path).is_file():
+    from app.services.converter import path_within_library_roots
+    target = Path(body.path)
+    if not path_within_library_roots(target):
+        raise HTTPException(400, "path must be inside a configured library folder")
+    if not target.is_file():
         raise HTTPException(404, "File not found")
     preset = db.get(ConvertPreset, body.preset_id) if body.preset_id else (
         db.query(ConvertPreset).filter(ConvertPreset.is_default.is_(True)).first()
@@ -378,3 +392,42 @@ def delete_watch_folder(folder_id: int, db: Session = Depends(get_db)):
 def savings(db: Session = Depends(get_db)):
     """Disk savings across completed conversions (HandBrake/Tdarr style)."""
     return savings_report(db)
+
+
+@router.post("/seed-libraries")
+def seed_libraries(db: Session = Depends(get_db), _perm: list = Depends(require_permission("settings", "library.manage"))):
+    """Register MediaOS library roots as Tdarr-class watch folders."""
+    from app.services.converter import seed_library_watch_folders
+    return seed_library_watch_folders(db)
+
+
+@router.get("/tdarr/status")
+def tdarr_external_status(_perm: list = Depends(require_permission("settings", "library.manage"))):
+    """Status of optional external Tdarr server (when TDARR_URL is configured)."""
+    from app.clients.tdarr import tdarr_client
+    return tdarr_client.status()
+
+
+@router.get("/pipeline")
+def converter_pipeline(db: Session = Depends(get_db)):
+    """Tdarr-class pipeline summary: presets, watch folders, queue, health settings."""
+    from app.config import settings
+    from app.models import ConvertPreset, ConvertWatchFolder, ConvertJob
+    from app.services.converter import queue_stats, detect_hw_encoders
+    return {
+        "mode": "native-tdarr-class",
+        "health_check": bool(getattr(settings, "converter_health_check", True)),
+        "max_attempts": int(getattr(settings, "converter_max_attempts", 3) or 3),
+        "max_workers": int(getattr(settings, "converter_max_workers", 2) or 2),
+        "auto_seed_libraries": bool(getattr(settings, "converter_auto_seed_libraries", True)),
+        "external_tdarr": {
+            "enabled": bool(getattr(settings, "tdarr_enabled", False)),
+            "url": (getattr(settings, "tdarr_url", None) or "") or None,
+        },
+        "presets": db.query(ConvertPreset).count(),
+        "watch_folders": db.query(ConvertWatchFolder).count(),
+        "queue": queue_stats(db),
+        "hw": detect_hw_encoders(),
+        "failed_health": db.query(ConvertJob).filter(ConvertJob.health_ok.is_(False)).count(),
+    }
+

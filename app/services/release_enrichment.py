@@ -23,15 +23,13 @@ def parse_size_bytes(val: Any) -> int | None:
     if not m:
         return None
     num = float(m.group(1))
-    unit = m.group(2).upper().replace("I", "")
-    mult = {"KB": 1000, "MB": 1000**2, "GB": 1000**3, "TB": 1000**4}.get(unit[:2] + ("B" if not unit.endswith("B") else ""), 1)
-    if unit in ("KB", "MB", "GB", "TB", "KIB", "MIB", "GIB", "TIB"):
-        # prefer binary for iB
-        if "I" in m.group(2).upper():
-            mult = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}[unit.replace("I", "") if False else unit[:2] + "B"]
-            mult = {"KIB": 1024, "MIB": 1024**2, "GIB": 1024**3, "TIB": 1024**4}.get(m.group(2).upper(), mult)
-        else:
-            mult = {"KB": 1000, "MB": 1_000_000, "GB": 1_000_000_000, "TB": 1_000_000_000_000}.get(unit, 1)
+    raw_unit = m.group(2).upper()
+    is_binary = "I" in raw_unit
+    base = raw_unit.replace("I", "")  # KB / MB / GB / TB
+    if is_binary:
+        mult = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}.get(base, 1)
+    else:
+        mult = {"KB": 1000, "MB": 1000**2, "GB": 1000**3, "TB": 1000**4}.get(base, 1)
     return int(num * mult)
 
 

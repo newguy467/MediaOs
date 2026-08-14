@@ -124,6 +124,12 @@ def fetch_subtitles_for_video(
 
 
 def after_organize(db: Session, item: MediaItem, dest_path: Path) -> None:
+    try:
+        from app.services.plugins import run_hook
+        run_hook("organize", item, dest_path)
+    except Exception:
+        pass
+
     if not str(dest_path).endswith(".strm"):
         fetch_subtitles_for_video(dest_path, item=item)
     notify(f"Downloaded: {item.title}", title="Download complete")
@@ -133,6 +139,11 @@ def after_organize(db: Session, item: MediaItem, dest_path: Path) -> None:
 def after_organize_episode(
     db: Session, series: MediaItem, episode: Episode, dest_path: Path
 ) -> None:
+    try:
+        from app.services.plugins import run_hook
+        run_hook("organize_episode", series, episode, dest_path)
+    except Exception:
+        pass
     fetch_subtitles_for_video(dest_path, item=series, episode=episode)
     notify(
         f"Downloaded: {series.title} S{episode.season_number:02d}E{episode.episode_number:02d}",
@@ -144,7 +155,13 @@ def after_organize_episode(
 # ── Event-typed notifications (grab, failure, request, etc.) ─────────────────
 
 def notify_event(event: str, message: str, *, title: str | None = None) -> None:
-    """Notify all channels with an event label (grab, download, failure, request, …)."""
+    try:
+        from app.services.plugins import run_hook
+        run_hook("event", event, message, title=title)
+        run_hook(f"event.{event}", message, title=title)
+    except Exception:
+        pass
+    # Notify all channels with an event label (grab, download, failure, request, …)
     label = title or {
         "grab": "Grabbed",
         "download": "Download complete",
@@ -164,6 +181,11 @@ def notify_event(event: str, message: str, *, title: str | None = None) -> None:
 
 def notify_grab(title: str, indexer: str | None = None) -> None:
     """Notify that a release was sent to the download client."""
+    try:
+        from app.services.plugins import run_hook
+        run_hook("grab", title, indexer=indexer)
+    except Exception:
+        pass
     idx = f" via {indexer}" if indexer else ""
     notify_event("grab", f"{title}{idx}", title="Grabbed")
 

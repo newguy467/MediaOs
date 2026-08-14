@@ -1,5 +1,6 @@
 # Overlay: AMD GPU (VAAPI/AMF where supported)
 #   docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+# healthcheck / restart inherit from base compose when merged
 services:
   mediaos:
     devices:

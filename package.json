@@ -1,19 +1,26 @@
 {
   "name": "mediaos-ui",
   "private": true,
-  "version": "4.13.5",
+  "version": "2.0.27-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "build:ui": "vite build",
-    "typecheck": "echo 'no tsconfig; JSX via vite'"
+    "typecheck": "echo 'no tsconfig; JSX via vite'",
+    "check:lazy": "node scripts/check_lazy_exports.mjs",
+    "verify": "node scripts/check_lazy_exports.mjs && python3 scripts/check_version.py && python3 scripts/check_ui_static.py",
+    "changelog": "python3 scripts/generate_changelog.py",
+    "changelog:write": "python3 scripts/generate_changelog.py --from-fragments --from-git --write --archive-fragments",
+    "changelog:bump": "python3 scripts/generate_changelog.py --from-fragments --from-git --bump --write --archive-fragments",
+    "ci:local": "python3 scripts/check_version.py && python3 scripts/check_ui_static.py && node scripts/check_lazy_exports.mjs"
   },
   "dependencies": {
     "hls.js": "^1.6.17",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

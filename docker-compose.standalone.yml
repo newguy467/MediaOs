@@ -9,24 +9,26 @@
 #
 # docker compose -f docker-compose.standalone.yml up -d
 
+# SECURITY: POSTGRES_PASSWORD is required (no default). Run: bash scripts/generate_secrets.sh
+# Set AUTH_SEED_ADMIN_* or AUTH_API_KEY for production. AUTH_REQUIRE defaults to true.
 services:
   mediaos-db:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine
     environment:
-      POSTGRES_USER: mediaos
-      POSTGRES_PASSWORD: mediaos
-      POSTGRES_DB: mediaos
+      POSTGRES_USER: ${POSTGRES_USER:-mediaos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD — run scripts/generate_secrets.sh}
+      POSTGRES_DB: ${POSTGRES_DB:-mediaos}
     volumes:
       - mediaos_pg:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mediaos"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-mediaos} -d $${POSTGRES_DB:-mediaos}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.5.7
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -35,14 +37,14 @@ services:
     profiles: ["ai"]
 
   mediaos:
-    image: ghcr.io/newguy467/mediaos:latest
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-next}
     build: .
     depends_on:
       mediaos-db:
         condition: service_healthy
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://mediaos:mediaos@mediaos-db:5432/mediaos
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mediaos}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD — run scripts/generate_secrets.sh}@mediaos-db:5432/${POSTGRES_DB:-mediaos}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: llama3.2
       QBIT_URL: http://qbittorrent:8080
@@ -62,8 +64,28 @@ services:
       - ${COMICS_PATH:-./data/comics}:/comics
       - ${MANGA_PATH:-./data/manga}:/manga
       - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+      - ${P_MOVIES_HOST_PATH:-./data/movies}:/data/local-p-movies
+      - ${P_TV_HOST_PATH:-./data/tv}:/data/local-p-tvshows
+      - ${D_MOVIES_HOST_PATH:-./data/movies-d}:/data/local-d-movies
+      - ${D_TV_HOST_PATH:-./data/tv-d}:/data/local-d-tvshows
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
+      - ${GAMES_PATH:-./data/games}:/games
+      - ${ADULT_PATH:-./data/adult}:/adult
+      - ${MEDIAOS_DATA_PATH:-./data/mediaos}:/app/data
+      - ${MEDIAOS_DATA:-./data/mediaos}:/data
+      - ${MEDIAOS_CONFIG:-./config/mediaos}:/config
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    mem_limit: ${MEDIAOS_MEMORY_LIMIT:-2g}
+    cpus: ${MEDIAOS_CPUS:-2.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
@@ -71,7 +93,7 @@ services:
       retries: 3
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:5.0.4
     environment:
       - PUID=1000
       - PGID=1000
@@ -86,7 +108,7 @@ services:
     restart: unless-stopped
 
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:latest
+    image: lscr.io/linuxserver/jellyfin:10.10.3
     environment:
       - PUID=1000
       - PGID=1000
@@ -101,6 +123,10 @@ services:
       - ${COMICS_PATH:-./data/comics}:/comics
       - ${MANGA_PATH:-./data/manga}:/manga
       - ${YOUTUBE_PATH:-./data/youtube}:/youtube
+      - ${P_MOVIES_HOST_PATH:-./data/movies}:/data/local-p-movies
+      - ${P_TV_HOST_PATH:-./data/tv}:/data/local-p-tvshows
+      - ${D_MOVIES_HOST_PATH:-./data/movies-d}:/data/local-d-movies
+      - ${D_TV_HOST_PATH:-./data/tv-d}:/data/local-d-tvshows
     ports:
       - "8096:8096"
     restart: unless-stopped
