@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-_VERSION_FALLBACK = "next"
+_VERSION_FALLBACK = "1.00beta"
 
 
 def get_version() -> str:

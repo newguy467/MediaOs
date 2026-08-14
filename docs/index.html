@@ -202,7 +202,7 @@
   <section class="hero">
     <div class="hero-grid">
       <div>
-        <span class="badge"><span class="dot"></span> Version <code>next</code> · 57 tests passing</span>
+        <span class="badge"><span class="dot"></span> Version <code>1.00beta</code> · 57 tests passing</span>
         <h1>The <span class="grad">Unified Media &amp; Games</span> Operating System</h1>
         <p class="lede">One FastAPI control plane. One custom React UI. It <strong>absorbs</strong> Sonarr, Radarr, Lidarr, Readarr, Bazarr &amp; Prowlarr natively — you never open a separate *arr web UI again.</p>
         <div class="cta-row">
@@ -289,7 +289,7 @@
         <table>
           <thead><tr><th>Service</th><th>Image</th><th>Role</th><th>Port</th></tr></thead>
           <tbody>
-            <tr><td><code>mediaos</code></td><td><code>ghcr.io/newguy467/mediaos:next</code></td><td>Control plane + UI (the app)</td><td>8787</td></tr>
+            <tr><td><code>mediaos</code></td><td><code>ghcr.io/newguy467/mediaos:1.00beta</code></td><td>Control plane + UI (the app)</td><td>8787</td></tr>
             <tr><td><code>mediaos-db</code></td><td><code>postgres:16.14-alpine</code></td><td>Primary database</td><td>5432</td></tr>
             <tr><td><code>redis</code></td><td><code>redis:7.4-alpine</code></td><td>Queues, rate-limit, leader election</td><td>6379</td></tr>
             <tr><td><code>jellyfin</code></td><td><code>lscr.io/linuxserver/jellyfin:10.10.3</code></td><td>Streaming &amp; playback backend</td><td>8096</td></tr>
@@ -397,7 +397,7 @@ docker compose up -d               <span class="c"># core stack</span>
             <tr><td>Alembic migrations</td><td>7 / 7 applied (SQLite + Postgres)</td></tr>
             <tr><td>UI static assets</td><td>81 files (index, CSS, JS, hls)</td></tr>
             <tr><td>.env.example</td><td>293 vars, no hardcoded secrets</td></tr>
-            <tr><td>Version consistency</td><td><code>next</code> everywhere</td></tr>
+            <tr><td>Version consistency</td><td><code>1.00beta</code> everywhere</td></tr>
             <tr><td>No committed <code>.env</code></td><td>Confirmed</td></tr>
             <tr><td>Python syntax</td><td>All files compile</td></tr>
           </tbody>

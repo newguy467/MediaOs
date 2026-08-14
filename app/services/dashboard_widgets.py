@@ -117,7 +117,7 @@ def widget_library_counts(db: Session) -> dict[str, int]:
 def widget_health() -> dict[str, Any]:
     import os
     return {
-        "version": os.environ.get("APP_VERSION", "next"),
+        "version": os.environ.get("APP_VERSION", "1.00beta"),
         "status": "ok",
     }
 
