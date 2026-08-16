@@ -3,11 +3,100 @@ import { PageChrome } from "../components/ui.jsx";
 import Ic from "../icons.jsx";
 import { setAdvancedFlag } from "../storage.js";
 
+function QualityPacksCard({ setPage }) {
+  const [packs, setPacks] = React.useState([]);
+  const [msg, setMsg] = React.useState("");
+  React.useEffect(() => {
+    fetch("/api/quality-ui/presets").then(r=>r.json()).then(d=>setPacks(d.packs||[])).catch(()=>{});
+  }, []);
+  async function apply(id) {
+    setMsg("");
+    try {
+      const r = await fetch(`/api/quality-ui/presets/${id}/apply`, { method: "POST" }).then(async x => {
+        const j = await x.json().catch(()=>({}));
+        if (!x.ok) throw new Error(j.detail || x.statusText);
+        return j;
+      });
+      setMsg("Applied " + (r.pack?.label || id));
+    } catch (e) { setMsg(String(e.message || e)); }
+  }
+  return (
+    <div className="card border border-base-content/10 bg-base-200 mb-4">
+      <div className="card-body p-4 gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="font-semibold text-sm settings-section-title" style={{textTransform:"none",letterSpacing:"normal",opacity:1}}>Quality packs</h2>
+          {setPage && (
+            <button type="button" className="btn btn-ghost btn-xs" onClick={() => setPage("settings-quality")}>
+              Full quality
+            </button>
+          )}
+        </div>
+        <p className="text-xs opacity-60">HD / 4K / Anime presets — one app, not a second Radarr.</p>
+        <div className="flex flex-wrap gap-2">
+          {packs.map((p) => (
+            <button key={p.id} type="button" className="btn btn-xs" onClick={() => apply(p.id)} title={p.description}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {msg && <p className="text-xs opacity-70">{msg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function PathConflictsCard({ setPage }) {
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    fetch("/api/library/path-conflicts")
+      .then((r) => r.json())
+      .then(setData)
+      .catch(() => setData({ issues: [], ok: true }));
+  }, []);
+  if (!data) return null;
+  const issues = data.issues || [];
+  return (
+    <div className={"card border mb-4 " + (data.ok ? "border-base-content/10 bg-base-200" : "border-warning/40 bg-warning/10")}>
+      <div className="card-body p-4 gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h2 className="font-semibold text-sm settings-section-title" style={{textTransform:"none",letterSpacing:"normal",opacity:1}}>Path health</h2>
+          <span className="text-xs opacity-60">
+            {data.counts ? `${data.counts.error || 0} errors · ${data.counts.warning || 0} warnings` : ""}
+          </span>
+        </div>
+        {issues.length === 0 ? (
+          <p className="text-xs opacity-60">No path conflicts detected.</p>
+        ) : (
+          <ul className="text-xs space-y-1 list-disc pl-4">
+            {issues.slice(0, 12).map((i, idx) => (
+              <li key={idx} className={i.severity === "error" ? "text-error" : ""}>
+                {i.message}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex gap-2 flex-wrap">
+          {setPage && (
+            <button type="button" className="btn btn-xs" onClick={() => setPage("settings-library")}>
+              Paths
+            </button>
+          )}
+          {setPage && (
+            <button type="button" className="btn btn-xs btn-ghost" onClick={() => setPage("migrate")}>
+              Migrate
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
   const em = enabledModules || ['movies','tv'];
   const groups = [
     { title: "Library", desc: "Where files live and how they are named (Jellyfin-compatible)", items: [
-      { key: "settings-library", label: "Paths & naming", hint: "Movies / TV / Music folders, episode templates" },
+      { key: "settings-library", label: "Paths & naming", hint: "Library folders + movie/episode naming templates" },
       { key: "settings-quality", label: "Quality profiles", hint: "Scoring, custom formats, upgrades" },
       { key: "settings-quality-matrix", label: "Quality matrices", hint: "Resolution / source / codec / groups tables" },
     ]},
@@ -47,6 +136,8 @@ function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
     ]},
   ];
   // Filter groups by advanced mode + enabled modules
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const q = (settingsQuery || '').trim().toLowerCase();
   const filtered = groups.map(g => {
     let items = g.items.filter(it => {
       if (it.key === 'settings-quality-matrix' && !advanced) return false;
@@ -61,9 +152,15 @@ function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
   return (
     <div className="space-y-5 max-w-5xl">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1 space-y-2">
           <h1 className="mr-page-title">Settings</h1>
           <p className="mr-page-sub">Grouped by area — changes apply immediately (no restart).</p>
+          <input
+            className="input input-bordered input-sm w-full max-w-sm"
+            placeholder="Filter settings…"
+            value={settingsQuery}
+            onChange={(e) => setSettingsQuery(e.target.value)}
+          />
         </div>
         <div className="card bg-base-200 border border-base-content/10 shadow-sm">
           <div className="card-body p-3 flex-row items-center gap-3">
@@ -76,7 +173,11 @@ function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
           </div>
         </div>
       </div>
-      {filtered.map(g=>(
+      <QualityPacksCard setPage={setPage} />
+      <PathConflictsCard setPage={setPage} />
+      {(q ? filtered.map(g => ({...g, items: (g.items||[]).filter(it =>
+      !q || (it.label||"").toLowerCase().includes(q) || (it.hint||"").toLowerCase().includes(q) || (g.title||"").toLowerCase().includes(q)
+    )})).filter(g => (g.items||[]).length) : filtered).map(g=>(
         <div key={g.title} className="space-y-2">
           <div>
             <h2 className="font-semibold text-sm tracking-wide uppercase opacity-70">{g.title}</h2>
@@ -89,7 +190,7 @@ function SettingsHubPage({ setPage, advanced, setAdvanced, enabledModules }) {
                 onClick={()=>setPage && setPage(it.key)}>
                 <div className="card-body p-3 gap-0.5">
                   <div className="font-medium text-sm">{it.label}</div>
-                  <div className="text-[11px] opacity-50 leading-snug">{it.hint}</div>
+                  <div className="text-xs opacity-50 leading-snug settings-hint">{it.hint}</div>
                 </div>
               </button>
             ))}

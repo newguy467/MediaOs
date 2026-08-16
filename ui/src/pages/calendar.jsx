@@ -5,7 +5,7 @@ import { api, TMDB, adultFetch } from "../api.js";
 import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
 import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
 
-function CalendarPage() {
+function CalendarPage({ setPage }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(() => {
@@ -117,7 +117,15 @@ function CalendarPage() {
                 {selected && selectedEvents.length===0 && <p className="text-xs opacity-50">Nothing scheduled.</p>}
                 <div className="space-y-2 max-h-[420px] overflow-y-auto">
                   {selectedEvents.map((ep,i)=>(
-                    <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-base-300/40">
+                    <button type="button" key={i} className="flex items-start gap-2 p-2 rounded-lg bg-base-300/40 w-full text-left hover:bg-primary/10"
+                      onClick={()=>{
+                        const id = ep.media_item_id || ep.series_id || ep.movie_id || ep.id;
+                        const mt = ep.kind === 'movie' ? 'movie' : 'tv';
+                        if (id) {
+                          window.dispatchEvent(new CustomEvent('mediaos-open-item', { detail: { mediaType: mt, id } }));
+                          if (setPage) setPage(mt === 'movie' ? 'movies' : 'tv');
+                        }
+                      }}>
                       <div className="w-8 h-12 rounded bg-base-300 overflow-hidden shrink-0">
                         {ep.poster_path ? <img src={ep.poster_path} alt="" className="object-cover w-full h-full"/> : null}
                       </div>
@@ -133,7 +141,7 @@ function CalendarPage() {
                       <span className={`badge badge-xs ${ep.has_file?'badge-success':ep.status==='downloading'?'badge-info':'badge-ghost'}`}>
                         {ep.has_file?'have':ep.status}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>

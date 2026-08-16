@@ -91,6 +91,12 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "comicvine_api_key": (str, "ComicVine API Key", True),
         "trakt_client_id": (str, "Trakt client ID", False),
         "trakt_access_token": (str, "Trakt access token", True),
+        "lastfm_api_key": (str, "Last.fm API key", True),
+        "lastfm_api_secret": (str, "Last.fm API secret", True),
+        "lastfm_session_key": (str, "Last.fm session key (from auth.getSession)", True),
+        "lastfm_scrobble_out": (bool, "Push music scrobbles to Last.fm", False),
+        "listenbrainz_token": (str, "ListenBrainz user token", True),
+        "listenbrainz_scrobble_out": (bool, "Push music scrobbles to ListenBrainz", False),
     },
     "indexers": {
         "prowlarr_url": (str, "Prowlarr URL (optional)", False),
@@ -159,6 +165,8 @@ SETTINGS_GROUPS: dict[str, dict[str, tuple[type, str, bool]]] = {
         "easydebrid_api_key": (str, "EasyDebrid API key", True),
         "offcloud_api_key": (str, "Offcloud API key", True),
         "movie_download_mode": (str, "Movie mode: download | strm", False),
+        "prefer_stream_on_search": (bool, "Prefer stream/.strm in interactive search UI", False),
+        "games_install_script": (str, "Optional games install script ({path} {title} {id})", True),
         "movie_write_strm_sidecar": (bool, "Write .strm sidecar files", False),
     },
     "youtube": {
@@ -295,12 +303,14 @@ def get_group(db: Session, group: str) -> dict[str, Any]:
     if fields is None:
         raise KeyError(group)
     out = {}
+    from app.services.settings_help import help_for
     for key, (_type, label, secret) in fields.items():
         value = getattr(settings, key, None)
         out[key] = {
             "value": ("" if not value else "••••••••") if secret and value else value,
             "label": label,
             "secret": secret,
+            "help": help_for(key, label),
         }
     return out
 

@@ -88,6 +88,35 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "ALTER TABLE convert_jobs ADD COLUMN health_message VARCHAR",
         ],
     ),
+    (
+        "2.0.28",
+        "Music smart playlists: genre/mood on media_items, play_count on "
+        "music_tracks (music_smartlists table itself is new — created via "
+        "create_all, no ALTER needed)",
+        [
+            "ALTER TABLE media_items ADD COLUMN genre VARCHAR",
+            "ALTER TABLE media_items ADD COLUMN mood VARCHAR",
+            "ALTER TABLE music_tracks ADD COLUMN play_count INTEGER DEFAULT 0",
+        ],
+    ),
+    (
+        "2.0.29",
+        "Comics reading progress: is_read/last_page_read on comic_issues "
+        "(powers a future Continue Reading row, same shape as music's "
+        "play_count)",
+        [
+            "ALTER TABLE comic_issues ADD COLUMN is_read BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE comic_issues ADD COLUMN last_page_read INTEGER",
+        ],
+    ),
+    (
+        "2.0.30",
+        "Comics last_read_at timestamp so Continue Reading can sort by "
+        "most recently read issue",
+        [
+            "ALTER TABLE comic_issues ADD COLUMN last_read_at TIMESTAMP",
+        ],
+    ),
 ]
 
 

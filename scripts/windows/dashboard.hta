@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MediaOS Build Tools</title>
+<HTA:APPLICATION
+    ID="MediaOSDashboard"
+    APPLICATIONNAME="MediaOS Build Tools"
+    BORDER="thick"
+    CAPTION="yes"
+    ICON="%SystemRoot%\System32\shell32.dll"
+    MAXIMIZEBUTTON="yes"
+    MINIMIZEBUTTON="yes"
+    SCROLL="yes"
+    SINGLEINSTANCE="yes"
+    WINDOWSTATE="normal"
+/>
+<style>
+    * { box-sizing: border-box; }
+    html, body {
+        margin: 0; padding: 0;
+        background: #0a0a0a;
+        color: #e30000;
+        font-family: "Consolas", "Lucida Console", monospace;
+        height: 100%;
+        overflow-x: hidden;
+    }
+    #wrap { padding: 22px 26px 30px; }
+    h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+        letter-spacing: 2px;
+        color: #ff1a1a;
+        text-shadow: 0 0 8px rgba(255,0,0,0.55);
+    }
+    .sub {
+        color: #7a7a7a;
+        font-size: 12px;
+        margin-bottom: 18px;
+        letter-spacing: 1px;
+    }
+    .rule {
+        border: none;
+        border-top: 1px solid #3a0000;
+        margin: 14px 0 18px;
+    }
+    .section-title {
+        color: #ff4d4d;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin: 20px 0 8px;
+        border-left: 3px solid #e30000;
+        padding-left: 8px;
+    }
+    .grid {
+        display: block;
+    }
+    .btn {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: #111111;
+        color: #f0f0f0;
+        border: 1px solid #3a0000;
+        border-left: 4px solid #e30000;
+        padding: 10px 14px;
+        margin-bottom: 8px;
+        font-family: inherit;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+    }
+    .btn .num {
+        color: #ff3333;
+        font-weight: bold;
+        margin-right: 8px;
+    }
+    .btn .desc {
+        display: block;
+        color: #8a8a8a;
+        font-size: 11px;
+        margin-top: 2px;
+        margin-left: 22px;
+    }
+    .btn:hover {
+        background: #1c0000;
+        border-left-color: #ff3333;
+        color: #ffffff;
+    }
+    .btn:active {
+        background: #e30000;
+        color: #0a0a0a;
+    }
+    .btn.primary {
+        border-left-color: #ff9900;
+    }
+    .btn.primary:hover {
+        border-left-color: #ffb84d;
+    }
+    .btn.danger {
+        border-left-color: #ff0033;
+    }
+    #status {
+        margin-top: 18px;
+        padding: 10px 14px;
+        background: #111111;
+        border: 1px solid #3a0000;
+        color: #ff6666;
+        font-size: 12px;
+        min-height: 18px;
+    }
+    .footer {
+        margin-top: 20px;
+        color: #4a4a4a;
+        font-size: 10px;
+        letter-spacing: 1px;
+    }
+</style>
+<script language="JScript">
+    // JScript (not VBScript) specifically for decodeURIComponent — HTA's
+    // document.location.pathname is URL-encoded (spaces become %20) and
+    // sometimes carries a leading slash before the drive letter; both need
+    // cleaning up before the path is usable with WScript.Shell.Run.
+    function getScriptDir() {
+        var p = decodeURIComponent(document.location.pathname);
+        p = p.replace(/\//g, "\\");
+        if (p.charAt(0) === "\\" && p.charAt(2) === ":") {
+            p = p.substring(1); // strip a leading "\" before "C:\..."
+        }
+        return p.substring(0, p.lastIndexOf("\\"));
+    }
+
+    function runScript(fileName) {
+        var shell = new ActiveXObject("WScript.Shell");
+        var fullPath = getScriptDir() + "\\" + fileName;
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        if (!fso.FileExists(fullPath)) {
+            document.getElementById("status").innerText =
+                "Not found: " + fullPath;
+            return;
+        }
+        document.getElementById("status").innerText =
+            "Running " + fileName + " in a new window...";
+        // start /d "<scriptDir>" ensures the child cmd's own %~dp0-based
+        // relative paths resolve correctly regardless of the HTA's CWD.
+        shell.Run("cmd /c start \"MediaOS\" /d \"" + getScriptDir() +
+            "\" \"" + fullPath + "\"", 1, false);
+    }
+
+    window.onload = function () {
+        window.resizeTo(640, 920);
+    };
+</script>
+</head>
+<body>
+<div id="wrap">
+    <h1>MEDIAOS // BUILD TOOLS</h1>
+    <div class="sub">Click a step to run it in its own console window. Steps are numbered in the order you'd normally run them.</div>
+    <hr class="rule">
+
+    <div class="section-title">Frontend</div>
+    <div class="grid">
+        <button class="btn" onclick="runScript('01_install_frontend.bat')">
+            <span class="num">01</span>Install frontend dependencies
+            <span class="desc">npm install (repo root — package.json isn't inside ui\)</span>
+        </button>
+        <button class="btn" onclick="runScript('02_build_frontend.bat')">
+            <span class="num">02</span>Build frontend
+            <span class="desc">vite build -&gt; refreshes app\static\assets\</span>
+        </button>
+    </div>
+
+    <div class="section-title">Backend</div>
+    <div class="grid">
+        <button class="btn" onclick="runScript('03_install_backend.bat')">
+            <span class="num">03</span>Install backend dependencies
+            <span class="desc">creates .venv, pip install -r requirements(-dev).txt</span>
+        </button>
+        <button class="btn" onclick="runScript('04_check_backend_imports.bat')">
+            <span class="num">04</span>Check backend imports
+            <span class="desc">python -c "import app.main" — catches what py_compile can't</span>
+        </button>
+    </div>
+
+    <div class="section-title">Verify &amp; Test</div>
+    <div class="grid">
+        <button class="btn" onclick="runScript('05_run_verify_scripts.bat')">
+            <span class="num">05</span>Run verify scripts
+            <span class="desc">check_version / check_ui_static / check_lazy_exports</span>
+        </button>
+        <button class="btn" onclick="runScript('06_run_tests.bat')">
+            <span class="num">06</span>Run tests
+            <span class="desc">pytest tests\ -q --tb=short (sqlite, isolated)</span>
+        </button>
+        <button class="btn" onclick="runScript('09_alembic_ci_check.bat')">
+            <span class="num">09</span>Alembic reversibility check
+            <span class="desc">upgrade head -&gt; downgrade -1 -&gt; upgrade head</span>
+        </button>
+    </div>
+
+    <div class="section-title">Run</div>
+    <div class="grid">
+        <button class="btn" onclick="runScript('07_run_dev_server.bat')">
+            <span class="num">07</span>Run dev server
+            <span class="desc">uvicorn --reload, local sqlite, no Docker needed</span>
+        </button>
+        <button class="btn" onclick="runScript('08_docker_up.bat')">
+            <span class="num">08</span>Docker Compose up
+            <span class="desc">full stack incl. Postgres — pick a compose file</span>
+        </button>
+    </div>
+
+    <div class="section-title">Ship</div>
+    <div class="grid">
+        <button class="btn danger" onclick="runScript('10_git_push_branch.bat')">
+            <span class="num">10</span>Push branch to origin
+            <span class="desc">asks for confirmation before pushing</span>
+        </button>
+    </div>
+
+    <div class="section-title">Everything</div>
+    <div class="grid">
+        <button class="btn primary" onclick="runScript('99_full_build_all.bat')">
+            <span class="num">99</span>Full build &amp; verify pipeline
+            <span class="desc">runs 01 -&gt; 06 in order, stops on first failure</span>
+        </button>
+    </div>
+
+    <div id="status">Ready.</div>
+    <div class="footer">MediaOS · scripts\windows\ · each button opens a normal cmd window so you can read full output and re-run individually</div>
+</div>
+</body>
+</html>

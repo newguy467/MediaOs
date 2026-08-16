@@ -572,6 +572,39 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
             "next": now_next.get("next"),
             "programmes": programmes[:120],
         })
+    # Mark programmes that overlap scheduled/active DVR recordings (same channel + time)
+    try:
+        from app.models import LiveTvRecording
+        recs = (
+            db.query(LiveTvRecording)
+            .filter(LiveTvRecording.status.in_(["scheduled", "recording"]))
+            .all()
+        )
+        def overlaps(a0, a1, b0, b1):
+            if not a0 or not a1 or not b0 or not b1:
+                return False
+            return a0 < b1 and b0 < a1
+        for ch in out_ch:
+            cid = ch.get("id")
+            for prog in ch.get("programmes") or []:
+                ps = prog.get("start_dt") or prog.get("start")
+                pe = prog.get("stop_dt") or prog.get("stop")
+                try:
+                    from datetime import datetime
+                    if isinstance(ps, str):
+                        ps = datetime.fromisoformat(ps.replace("Z", "+00:00"))
+                    if isinstance(pe, str):
+                        pe = datetime.fromisoformat(pe.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                for rec in recs:
+                    if getattr(rec, "channel_id", None) not in (None, cid) and rec.channel_id != cid:
+                        continue
+                    if overlaps(ps, pe, rec.starts_at, rec.ends_at):
+                        prog["_conflict"] = True
+                        break
+    except Exception:
+        pass
     return {
         "from": start_window.isoformat(),
         "to": end.isoformat(),

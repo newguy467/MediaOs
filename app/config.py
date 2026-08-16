@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     jackett_api_key: str = ""
     jackett_sync_on_startup: bool = True
 
-    qbit_url: str = "http://qbittorrent:8080"
+    qbit_url: str = "http://qbittorrent:8080"  # compose overrides to http://gluetun:8080 when qB uses network_mode: service:gluetun
     qbit_username: str = "admin"
     qbit_password: str = ""  # set via QBIT_PASSWORD — no weak default
 
@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     allow_usenet: bool = False
     # download = qBittorrent torrent; strm = write .strm with release URL (no local download)
     movie_download_mode: str = "download"  # download | strm
+    prefer_stream_on_search: bool = False  # interactive UI prefers Stream; grab may still download
+    games_install_script: str = ""  # optional host script: {path} {title} {id}
     # When organizing movies, also write a .strm alongside the video pointing at file path (optional)
     movie_write_strm_sidecar: bool = False
 
@@ -109,6 +111,11 @@ class Settings(BaseSettings):
     discord_webhook_url: str = ""
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    ntfy_url: str = ""
+    ntfy_topic: str = ""
+    ntfy_token: str = ""
+    gotify_url: str = ""
+    gotify_token: str = ""
 
     # Jellyfin library refresh
     jellyfin_url: str = "http://jellyfin:8096"
@@ -212,6 +219,14 @@ class Settings(BaseSettings):
     # Trakt
     trakt_client_id: str = ""
     trakt_access_token: str = ""
+
+    # Last.fm / ListenBrainz (music scrobbling)
+    lastfm_api_key: str = ""
+    lastfm_api_secret: str = ""
+    lastfm_session_key: str = ""  # obtained out-of-band via auth.getToken + auth.getSession
+    lastfm_scrobble_out: bool = True
+    listenbrainz_token: str = ""  # ListenBrainz user token (bearer)
+    listenbrainz_scrobble_out: bool = True
 
     # Naming (TRaSH-style)
     movie_naming_folder: str = "{title} ({year})"

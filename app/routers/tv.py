@@ -399,9 +399,10 @@ def _search_missing_for_series(
 
 
 @router.post("/episodes/{episode_id}/subtitles")
-def fetch_episode_subtitles(episode_id: int, db: Session = Depends(get_db)):
+def fetch_episode_subtitles(episode_id: int, db: Session = Depends(get_db), profile_id: int | None = None):
     from pathlib import Path
     from app.services.subtitles import fetch_subtitles
+    from app.services.subtitle_profiles import resolve_languages
 
     ep = db.get(Episode, episode_id)
     if not ep:
@@ -412,7 +413,14 @@ def fetch_episode_subtitles(episode_id: int, db: Session = Depends(get_db)):
     path = Path(ep.file_path)
     if not path.exists():
         raise HTTPException(400, "File missing on disk")
-    return fetch_subtitles(path, item=series, episode=ep)
+    prof = resolve_languages(profile_id)
+    return fetch_subtitles(
+        path,
+        item=series,
+        episode=ep,
+        languages=prof["languages_csv"],
+        hearing_impaired=prof["hearing_impaired"],
+    )
 
 
 class BulkTvIn(BaseModel):

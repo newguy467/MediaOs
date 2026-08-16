@@ -58,6 +58,29 @@ def list_podcasts(db: Session = Depends(get_db)):
     return db.query(Podcast).order_by(Podcast.title).all()
 
 
+
+class PodcastBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+    auto_download: bool | None = None
+
+
+@router.post("/bulk")
+def bulk_podcasts(payload: PodcastBulkIn, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage", "download"))):
+    """Bulk monitor / auto_download for podcast subscriptions."""
+    q = db.query(Podcast).filter(Podcast.id.in_(payload.ids))
+    n = 0
+    for row in q.all():
+        if payload.monitored is not None:
+            row.monitored = payload.monitored
+        if payload.auto_download is not None:
+            row.auto_download = payload.auto_download
+        db.add(row)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
+
 @router.get("/{podcast_id}", response_model=PodcastOut)
 def get_podcast(podcast_id: int, db: Session = Depends(get_db)):
     row = db.get(Podcast, podcast_id)

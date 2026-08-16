@@ -174,7 +174,17 @@ function InteractiveResultsPanel({ data, loading, busy, onGrab, onClose, mediaIt
             <tbody>
               {rows.map((r,i)=>(
                 <tr key={i} className={r.rejected ? 'opacity-50' : ''}>
-                  <td className="tabular-nums font-mono text-xs">{r.score ?? '—'}</td>
+                  <td className="tabular-nums font-mono text-xs">
+                      {r.score ?? '—'}
+                      {(r.score_breakdown || r._score_breakdown || r.quality_breakdown) && (
+                        <details className="text-[10px] opacity-70">
+                          <summary className="cursor-pointer">Explain</summary>
+                          <pre className="whitespace-pre-wrap max-w-[14rem]">{typeof (r.score_breakdown||r._score_breakdown||r.quality_breakdown)==='string'
+                            ? (r.score_breakdown||r._score_breakdown||r.quality_breakdown)
+                            : JSON.stringify(r.score_breakdown||r._score_breakdown||r.quality_breakdown, null, 1)}</pre>
+                        </details>
+                      )}
+                    </td>
                   <td className="max-w-xs truncate" title={(r.rejections||[]).join(', ') || r.title}>{r.title}</td>
                   <td className="text-xs">{r.indexer||'—'}</td>
                   <td className="text-xs">{r.size ? (r.size>1e9?(r.size/1e9).toFixed(1)+' GB':(r.size/1e6).toFixed(0)+' MB') : '—'}</td>
@@ -186,15 +196,21 @@ function InteractiveResultsPanel({ data, loading, busy, onGrab, onClose, mediaIt
                     {r.is_season_pack && <span className="badge badge-xs badge-info">pack</span>}
                     {r.is_multi_season_pack && <span className="badge badge-xs badge-warning">multi</span>}
                     {r.rejected && <span className="badge badge-xs badge-error" title={(r.rejections||[]).join(', ')}>rej</span>}
+                    {r.rejected && (r.rejections||[]).length > 0 && (
+                      <details className="inline-block ml-1 text-[10px] opacity-70">
+                        <summary className="cursor-pointer">Why</summary>
+                        <ul className="list-disc pl-3 max-w-[12rem]">{(r.rejections||[]).map((x,i)=><li key={i}>{x}</li>)}</ul>
+                      </details>
+                    )}
                     {(r.matched_formats||[]).slice(0,2).map(f=><span key={f} className="badge badge-xs badge-ghost">{f}</span>)}
                   </td>
                   <td className="whitespace-nowrap">
                     {!r.rejected && (r.download_url || r.magnet || r.link) && (
-                      <button type="button" className="btn btn-primary btn-xs" disabled={busy} onClick={()=>onGrab(r)}>Grab</button>
+                      <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>onGrab(r)}>Grab</button>
                     )}
                     {!r.rejected && (r.download_url || r.magnet || r.stream_url) && (
-                      <button type="button" className="btn btn-accent btn-xs ml-1" disabled={busy}
-                        title="Add as stream (.strm) without downloading"
+                      <button type="button" className="btn btn-accent btn-xs mr-1" disabled={busy}
+                        title="Prefer stream / .strm without downloading"
                         onClick={async ()=>{
                           try {
                             const url = r.stream_url || r.download_url || r.magnet;

@@ -48,6 +48,8 @@ function QueuePage() {
     );
   }
   const [items, setItems] = useState([]);
+  const [qSel, setQSel] = useState({});
+  const qSelIds = Object.keys(qSel);
   const [loading, setLoading] = useState(true);
   const [hist, setHist] = useState({downloads:[], events:[]});
   const [tab, setTab] = useState('queue');
@@ -170,7 +172,11 @@ function QueuePage() {
     const st = (q.qbit_state || q.status || '').toLowerCase();
     const isFailed = st.includes('fail') || st.includes('error');
     return (
-      <div key={q.download_id} className="card bg-base-200 shadow-sm">
+      <div key={q.download_id} className="card bg-base-200 shadow-sm relative">
+          <div className="absolute top-2 left-2 z-10" onClick={e=>e.stopPropagation()}>
+            <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!qSel[q.download_id||q.hash]}
+              onChange={e=>{ setQSel(prev=>{ const n={...prev}; const k=q.download_id||q.hash; if(e.target.checked) n[k]=true; else delete n[k]; return n; }); }} />
+          </div>
         <div className="card-body p-3 gap-2">
           <div className="flex justify-between gap-3 items-start">
             <div className="min-w-0">

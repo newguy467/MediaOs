@@ -54,7 +54,8 @@ function SessionsAdminPage() {
   if (loading) {
     return (
       <div className="p-6 space-y-3 max-w-3xl">
-        <h1 className="mr-page-title">Sessions</h1>
+        <div className="alert alert-info text-xs py-2 mb-2">Kids / restricted profiles: disable Adult and limit modules under Users & permissions. Sessions below show active logins.</div>
+      <h1 className="mr-page-title">Sessions</h1>
         <p className="text-sm opacity-50">Active auth tokens</p>
         <div className="skeleton h-10 w-full" />
         <div className="skeleton h-32 w-full" />

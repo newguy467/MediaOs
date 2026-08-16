@@ -11,7 +11,10 @@ export default function GamesPage({ setPage }) {
   const [msg, setMsg] = useState(null);
   const [tab, setTab] = useState("library");
   const [releases, setReleases] = useState([]);
+  const [installJobs, setInstallJobs] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [checked, setChecked] = useState({});
+  const checkedIds = Object.keys(checked);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -29,6 +32,22 @@ export default function GamesPage({ setPage }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const bulkMonitor = async (monitored) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/games/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: checkedIds.map(Number), monitored }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Bulk failed');
+      setChecked({});
+      load();
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
 
   const searchMeta = async () => {
     if (!q.trim()) return;
@@ -64,6 +83,58 @@ export default function GamesPage({ setPage }) {
       setMsg(`Added: ${row.title}`);
       load();
       setTab("library");
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+
+  const toggleGameMonitor = async (g) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/games/' + g.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitored: !g.monitored }),
+      });
+      if (!r.ok) throw new Error('Update failed');
+      load();
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+
+
+  const setTrackStatus = async (gameId, status) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/tracking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId, status }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Track failed');
+      setMsg('Tracking: ' + String(status).replace(/_/g, ' '));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+
+  const loadInstallJobs = () => fetch('/api/games/install-jobs').then(r=>r.json()).then(d=>setInstallJobs(d.items||[])).catch(()=>[]);
+
+  const launchGame = async (gameId) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/games/' + gameId + '/launch', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'No launch target');
+      const primary = j.primary || (j.targets || [])[0];
+      if (primary && primary.url) {
+        window.location.href = primary.url;
+        setMsg('Launching via ' + (primary.label || primary.kind));
+      } else if (primary && primary.path) {
+        setMsg('Install path: ' + primary.path + ' (open on the host)');
+      } else {
+        setMsg(JSON.stringify(j));
+      }
     } catch (e) { setMsg(String(e.message || e)); }
     finally { setBusy(false); }
   };
@@ -116,21 +187,61 @@ export default function GamesPage({ setPage }) {
         <button type="button" className="btn btn-sm btn-ghost" disabled={loading} onClick={load}>Refresh</button>
       </>}
     >
+      {installJobs.length > 0 && (
+        <div className="card bg-base-200 mb-2"><div className="card-body p-3 gap-1">
+          <div className="flex justify-between"><span className="text-xs font-semibold">Install jobs</span>
+            <button type="button" className="btn btn-ghost btn-xs" onClick={()=>setInstallJobs([])}>Hide</button></div>
+          {installJobs.slice(0,8).map(j=>(
+            <div key={j.id} className="text-xs font-mono">
+              #{j.id} game={j.game_id} <span className="badge badge-xs">{j.status}</span>
+              <pre className="text-[10px] opacity-60 max-h-20 overflow-auto whitespace-pre-wrap">{(j.log_text||'').slice(0,400)}</pre>
+            </div>
+          ))}
+        </div></div>
+      )}
       {msg && <div className="alert alert-info text-xs py-2 mb-3">{msg}</div>}
       {loading && <SkeletonLoader rows={12} />}
 
       {tab === "library" && !loading && (
         <>
+          {checkedIds.length > 0 && (
+            <div className="card bg-base-200 mb-3">
+              <div className="card-body p-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs opacity-60">{checkedIds.length} selected</span>
+                  {(games || []).length > 0 && (
+                    <button type="button" className="btn btn-xs btn-ghost" onClick={() => {
+                      const n = {}; (games || []).forEach(g => { n[g.id] = true; }); setChecked(n);
+                    }}>Select all</button>
+                  )}
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(true)}>Monitor</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(false)}>Unmonitor</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => setChecked({})}>Clear</button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="poster-grid">
             {(games || []).map(g => (
-              <PosterTile
-                key={g.id}
-                title={g.title}
-                year={g.year}
-                poster={g.poster_path}
-                status={g.status}
-                onClick={() => searchReleases(g.id)}
-              />
+              <div key={g.id} className="relative group">
+                <label className={`absolute top-2 left-2 z-10 transition-opacity ${checked[g.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!checked[g.id]}
+                    onChange={e => {
+                      setChecked(prev => {
+                        const n = { ...prev };
+                        if (e.target.checked) n[g.id] = true; else delete n[g.id];
+                        return n;
+                      });
+                    }} />
+                </label>
+                <PosterTile
+                  title={g.title}
+                  year={g.year}
+                  poster={g.poster_path}
+                  status={g.status}
+                  onClick={() => searchReleases(g.id)}
+                />
+              </div>
             ))}
           </div>
           {!games.length && (
@@ -143,25 +254,54 @@ export default function GamesPage({ setPage }) {
       )}
 
       {tab === "wanted" && (
-        <div className="overflow-x-auto">
-          <table className="table table-sm">
-            <thead><tr><th>Title</th><th>Year</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              {(wanted || []).map(g => (
-                <tr key={g.id}>
-                  <td>{g.title}</td>
-                  <td>{g.year || "—"}</td>
-                  <td><span className="badge badge-sm">{g.status}</span></td>
-                  <td><button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => searchReleases(g.id)}>Search</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!wanted.length && (
-            <TeachEmpty title="No wanted games" actionLabel="Search to add" onAction={() => setTab("search")}>
-              <p>Monitored games missing a download appear here.</p>
-            </TeachEmpty>
+        <div className="space-y-3">
+          {checkedIds.length > 0 && (
+            <div className="card bg-base-200">
+              <div className="card-body p-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs opacity-60">{checkedIds.length} selected</span>
+                  {(wanted || []).length > 0 && (
+                    <button type="button" className="btn btn-xs btn-ghost" onClick={() => {
+                      const n = {}; (wanted || []).forEach(g => { n[g.id] = true; }); setChecked(n);
+                    }}>Select all</button>
+                  )}
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(true)}>Monitor</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(false)}>Unmonitor</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={() => setChecked({})}>Clear</button>
+                </div>
+              </div>
+            </div>
           )}
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead><tr><th className="w-8"></th><th>Title</th><th>Year</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {(wanted || []).map(g => (
+                  <tr key={g.id}>
+                    <td>
+                      <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!checked[g.id]}
+                        onChange={e => {
+                          setChecked(prev => {
+                            const n = { ...prev };
+                            if (e.target.checked) n[g.id] = true; else delete n[g.id];
+                            return n;
+                          });
+                        }} />
+                    </td>
+                    <td>{g.title}</td>
+                    <td>{g.year || "—"}</td>
+                    <td><span className="badge badge-sm">{g.status}</span></td>
+                    <td><button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => searchReleases(g.id)}>Search</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!wanted.length && (
+              <TeachEmpty title="No wanted games" actionLabel="Search to add" onAction={() => setTab("search")}>
+                <p>Monitored games missing a download appear here.</p>
+              </TeachEmpty>
+            )}
+          </div>
         </div>
       )}
 
@@ -186,7 +326,40 @@ export default function GamesPage({ setPage }) {
       )}
 
       {tab === "releases" && (
-        <div className="overflow-x-auto">
+        <div className="space-y-2">
+          {selectedId && (
+            <div className="flex gap-2 flex-wrap items-center">
+              <span className="text-xs opacity-60">Game #{selectedId}</span>
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={async () => {
+                const g = (games || []).find(x => x.id === selectedId) || (wanted || []).find(x => x.id === selectedId);
+                if (g) await toggleGameMonitor(g);
+              }}>Toggle monitored</button>
+              <button type="button" className="btn btn-xs btn-accent" disabled={busy || !selectedId} onClick={() => launchGame(selectedId)}>Launch</button>
+              <button type="button" className="btn btn-xs" disabled={busy || !selectedId} onClick={async ()=>{
+                setBusy(true); setMsg(null);
+                try {
+                  const r = await fetch('/api/games/'+selectedId+'/install',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+                  const j = await r.json().catch(()=>({}));
+                  if (!r.ok) throw new Error(j.detail||'Install failed');
+                  setMsg('Marked installed: '+(j.install_path||j.path||''));
+                  load();
+                } catch(e){ setMsg(String(e.message||e)); }
+                finally { setBusy(false); }
+              }}>Install</button>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={()=>{ loadInstallJobs(); setMsg(null); }}>Install jobs</button>
+              <select className="select select-bordered select-xs" defaultValue="" disabled={busy || !selectedId}
+                onChange={e=>{ if(e.target.value && selectedId) { setTrackStatus(selectedId, e.target.value); e.target.value=''; } }}>
+                <option value="">Track…</option>
+                <option value="planned">Planned</option>
+                <option value="in_progress">In progress</option>
+                <option value="completed">Completed</option>
+                <option value="dropped">Dropped</option>
+              </select>
+              <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => searchReleases(selectedId)}>Search again</button>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={() => setTab("library")}>Back to library</button>
+            </div>
+          )}
+          <div className="overflow-x-auto">
           <table className="table table-sm">
             <thead><tr><th>Release</th><th>Indexer</th><th>Size</th><th>Seeders</th><th></th></tr></thead>
             <tbody>

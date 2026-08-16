@@ -1,6 +1,6 @@
 # MediaOS Next — Release Notes
 
-**Version:** `1.00beta`  
+**Version:** `1.01beta`  
 **Date:** 2026-08-14  
 **Codename:** MediaOS Next
 
@@ -58,12 +58,12 @@ MediaOS, Jellyfin, and qBittorrent mount the same host directories to the same i
 ### Bug fixes
 
 -   **Alembic migration 0007 SQLite bug** — `batch_alter_table` on SQLite triggered `ValueError: Constraint must have a name` due to unnamed FK constraints. Fixed by using raw `ALTER TABLE ADD COLUMN` SQL for SQLite while keeping `batch_alter_table` for PostgreSQL.
--   **Stale version string** — `dashboard_widgets.py` referenced `2.0.20-dev` while the rest of the app used `2.0.27-dev`. Standardized to `1.00beta`.
+-   **Stale version string** — `dashboard_widgets.py` referenced `2.0.20-dev` while the rest of the app used `2.0.27-dev`. Standardized to `1.01beta`.
 -   **Missing `.gitignore`** — created comprehensive .gitignore to prevent committing `.env` secrets, databases, and build artifacts.
 
 ### Version
 
--   Bumped from `2.0.27-dev` → `1.00beta` across all files (VERSION, Dockerfile, version.py, main.py, dashboard\_widgets.py, plugins.py, example compose files, tests). The health endpoint now reports `version: 1.00beta`.
+-   Bumped from `2.0.27-dev` → `1.01beta` across all files (VERSION, Dockerfile, version.py, main.py, dashboard\_widgets.py, plugins.py, example compose files, tests). The health endpoint now reports `version: 1.01beta`.
 
 ### Documentation
 
@@ -94,7 +94,7 @@ MediaOS, Jellyfin, and qBittorrent mount the same host directories to the same i
 | Alembic migrations | 7/7 applied (SQLite + Postgres) |
 | UI static assets | 81 files (index, CSS, JS, hls) |
 | .env.example | 293 vars, no hardcoded secrets |
-| Version consistency | `1.00beta` everywhere |
+| Version consistency | `1.01beta` everywhere |
 | .gitignore | Present (55 lines) |
 | No old version refs | 0 remaining in code |
 | No committed .env | Confirmed |

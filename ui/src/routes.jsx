@@ -21,6 +21,8 @@ export const PAGE_PATHS = {
   queue: "/queue",
   activity: "/activity",
   modules: "/modules",
+  migrate: "/migrate",
+  "migrate-wizard": "/migrate",
   wanted: "/wanted",
   youtube: "/youtube",
   podcasts: "/podcasts",

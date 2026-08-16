@@ -4,6 +4,7 @@ import { LibraryModuleShell, TeachEmpty, SkeletonLoader } from "../components/ui
 export default function TrackingPage() {
   const [items, setItems] = useState([]);
   const [status, setStatus] = useState("");
+  const [mediaType, setMediaType] = useState("");
   const [tab, setTab] = useState("list");
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState(null);
@@ -12,15 +13,24 @@ export default function TrackingPage() {
   const load = useCallback(() => {
     setLoading(true);
     setMsg(null);
-    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (mediaType) params.set("media_type", mediaType);
+    const q = params.toString() ? "?" + params.toString() : "";
     fetch("/api/tracking" + q)
       .then(r => { if (!r.ok) throw new Error("Tracking load failed"); return r.json(); })
       .then(d => setItems(d.items || d || []))
       .catch(e => setMsg(String(e.message || e)))
       .finally(() => setLoading(false));
-  }, [status]);
+  }, [status, mediaType]);
 
   useEffect(() => { load(); }, [load]);
+
+  const onNav = (id) => {
+    setTab(id);
+    if (id === "list") setStatus("");
+    else setStatus(id);
+  };
 
   const setItemStatus = async (id, newStatus) => {
     setBusy(true); setMsg(null);
@@ -40,21 +50,24 @@ export default function TrackingPage() {
     <LibraryModuleShell
       title="Tracking"
       active={tab}
-      onNav={setTab}
+      onNav={onNav}
       nav={[
         { id: "list", label: "All" },
         { id: "planned", label: "Planned" },
         { id: "in_progress", label: "In progress" },
         { id: "completed", label: "Completed" },
+        { id: "on_hold", label: "On hold" },
+        { id: "dropped", label: "Dropped" },
       ]}
       tools={<>
-        <select className="select select-sm select-bordered" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="planned">Planned</option>
-          <option value="in_progress">In progress</option>
-          <option value="completed">Completed</option>
-          <option value="dropped">Dropped</option>
-          <option value="on_hold">On hold</option>
+        <select className="select select-sm select-bordered" value={mediaType} onChange={e => setMediaType(e.target.value)}>
+          <option value="">All types</option>
+          <option value="movie">Movies</option>
+          <option value="tv">TV</option>
+          <option value="book">Books</option>
+          <option value="comic">Comics</option>
+          <option value="game">Games</option>
+          <option value="music">Music</option>
         </select>
         <button type="button" className="btn btn-sm btn-ghost" onClick={load}>Refresh</button>
       </>}
@@ -74,9 +87,10 @@ export default function TrackingPage() {
                   <td><span className="badge badge-sm">{it.status || "—"}</span></td>
                   <td className="text-xs">{Math.round(it.progress_percent || 0)}%</td>
                   <td className="text-xs">{it.rating ?? "—"}</td>
-                  <td className="flex gap-1">
-                    <button type="button" className="btn btn-xs" disabled={busy} onClick={() => setItemStatus(it.id, "in_progress")}>Play</button>
+                  <td className="flex gap-1 flex-wrap">
+                    <button type="button" className="btn btn-xs" disabled={busy} onClick={() => setItemStatus(it.id, "in_progress")}>In progress</button>
                     <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => setItemStatus(it.id, "completed")}>Done</button>
+                    <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={() => setItemStatus(it.id, "dropped")}>Drop</button>
                   </td>
                 </tr>
               ))}
@@ -85,7 +99,7 @@ export default function TrackingPage() {
           {!items.length && (
             <TeachEmpty title="Nothing tracked yet" actionLabel="Open library" onAction={() => window.location.hash = "#movies"}>
               <p>Track movies, TV, games, books and more with status, progress, and ratings.</p>
-              <p>Items appear when you mark them from library pages or import history.</p>
+              <p>From a movie detail page use the Track… menu, or update rows here.</p>
             </TeachEmpty>
           )}
         </div>

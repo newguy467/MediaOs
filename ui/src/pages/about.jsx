@@ -6,7 +6,7 @@ export default function AboutPage() {
     <PageChrome title="About MediaOS">
       <div className="max-w-3xl space-y-6 p-4">
         <div>
-          <h1 className="text-2xl font-bold">MediaOS</h1>
+          <h1 className="mr-page-title">MediaOS</h1>
           <p className="opacity-70 mt-1">The complete self-hosted media &amp; games OS</p>
         </div>
 

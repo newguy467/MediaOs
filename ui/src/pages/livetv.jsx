@@ -8,9 +8,17 @@ import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo
 function EpgTimeline() {
   const [grid, setGrid] = useState(null);
   const [hours, setHours] = useState(4);
-  const [group, setGroup] = useState('');
+  const [group, setGroup] = useState(() => {
+    try { return localStorage.getItem('mediaos.livetv.guideGroup') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('mediaos.livetv.guideGroup', group || ''); } catch {}
+  }, [group]);
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState([]);
+  const [epgMenu, setEpgMenu] = useState(null); // {ch, prog, x, y}
+  const [portalHealth, setPortalHealth] = useState(null);
+  useEffect(()=>{ fetch('/api/livetv/portal/health').then(r=>r.json()).then(setPortalHealth).catch(()=>null); }, []);
   const [mode, setMode] = useState('timeline'); // timeline | now | recordings | rules
   const [recs, setRecs] = useState([]);
   const [rules, setRules] = useState([]);
@@ -18,7 +26,16 @@ function EpgTimeline() {
   const [msg, setMsg] = useState('');
   const loadRecs = () => fetch('/api/livetv/recordings').then(r=>r.json()).then(d=>setRecs(d.items||d||[])).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } });
   const loadRules = () => fetch('/api/livetv/series-rules').then(r=>r.json()).then(d=>setRules(d.items||[])).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } });
-  const recordProg = async (ch, prog, allowConflict=false) => {
+  
+  const streamChannel = (ch) => {
+    if (!ch || !ch.id) return;
+    // Open proxy stream in player / new tab
+    const url = '/api/livetv/stream/' + ch.id;
+    window.dispatchEvent(new CustomEvent('mediaos-play-live', { detail: { channelId: ch.id, name: ch.name, url } }));
+    window.open(url, '_blank', 'noopener');
+    setMsg && setMsg('Streaming: ' + (ch.name || ch.id));
+  };
+const recordProg = async (ch, prog, allowConflict=false) => {
     try {
       const res = await fetch('/api/livetv/epg/record', {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -69,6 +86,7 @@ function EpgTimeline() {
   const span = Math.max(1, toMs - fromMs);
   const pxPerMs = 180 / (30*60*1000); // ~180px per 30 min
   const totalWidth = Math.max(600, (span / (30*60*1000)) * 180);
+  const nowLeft = Math.max(0, Math.min(totalWidth, ((Date.now() - fromMs) / span) * totalWidth));
 
   function blockStyle(prog) {
     const s = prog.start_dt ? new Date(prog.start_dt).getTime() : (prog.start ? new Date(prog.start).getTime() : fromMs);
@@ -83,6 +101,13 @@ function EpgTimeline() {
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div>
           <h2 className="font-semibold">EPG Guide</h2>
+          <div className="text-[10px] opacity-40">Now line at {Math.round(nowLeft)}px · click programme for actions</div>
+          {portalHealth && (
+            <p className="text-xs opacity-50">
+              {portalHealth.channels||0} channels · {portalHealth.with_stream_url||0} with streams · EPG tags {portalHealth.epg_tvg_ids||0}
+              {!portalHealth.ok && portalHealth.hints && portalHealth.hints[0] ? ` · ${portalHealth.hints[0]}` : ''}
+            </p>
+          )}
           <p className="text-xs opacity-50">{channels.length} channels   horizontal timeline</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
@@ -161,6 +186,19 @@ function EpgTimeline() {
             </tbody>
           </table>
           {!recs.length && <p className="text-sm opacity-50">No recordings yet — click a programme on the timeline.</p>}
+
+      {epgMenu && (
+        <div className="fixed z-50 menu bg-base-200 rounded-box shadow-lg border border-base-content/10 p-2 text-sm"
+          style={{ left: Math.min(epgMenu.x, window.innerWidth - 180), top: Math.min(epgMenu.y, window.innerHeight - 160) }}
+          onMouseLeave={()=>setEpgMenu(null)}>
+          <div className="px-2 py-1 font-medium max-w-[12rem] truncate">{epgMenu.prog?.title || 'Programme'}</div>
+          <button type="button" className="btn btn-xs btn-accent justify-start" onClick={()=>{ streamChannel(epgMenu.ch); setEpgMenu(null); }}>Watch channel</button>
+          <button type="button" className="btn btn-xs justify-start" onClick={()=>{ recordProg(epgMenu.ch, epgMenu.prog); setEpgMenu(null); }}>Record</button>
+          <button type="button" className="btn btn-xs justify-start" onClick={()=>{ setMode('rules'); setEpgMenu(null); }}>Series rules…</button>
+          <button type="button" className="btn btn-xs btn-ghost justify-start" onClick={()=>setEpgMenu(null)}>Cancel</button>
+        </div>
+      )}
+
         </div>
       ) : loading && !grid ? <span className="loading loading-spinner"/> : mode==='now' ? (
         <div className="overflow-auto max-h-[70vh] border border-base-content/10 rounded-lg">
@@ -171,6 +209,7 @@ function EpgTimeline() {
                 <tr key={ch.id} className="hover">
                   <td className="text-xs font-medium">{ch.name}</td>
                   <td className="text-xs">{ch.now?.title||'—'}
+                    {ch.now?.title && <button type="button" className="btn btn-ghost btn-xs ml-1" onClick={()=>streamChannel(ch)}>Watch</button>}
                     {ch.now?.title && <button type="button" className="btn btn-ghost btn-xs ml-1" onClick={()=>recordProg(ch, {title: ch.now.title, start: ch.now.start, stop: ch.now.stop})}>Rec</button>}
                   </td>
                   <td className="text-xs opacity-70">{ch.next?.title||'—'}
@@ -206,10 +245,11 @@ function EpgTimeline() {
                   <div key={i}
                     className="absolute top-1 bottom-1 rounded bg-primary/20 border border-primary/30 px-1 overflow-hidden cursor-pointer hover:bg-primary/40 hover:ring-1 hover:ring-accent"
                     style={blockStyle(prog)}
-                    title={(prog.title||'')+' '+(prog.start||'')+' — click to record'}
-                    onClick={()=>recordProg(ch, prog)}
+                    title={(prog.title||'')+' — click: record · shift+click: stream channel'}
+                    onClick={(e)=>{ e.stopPropagation(); setEpgMenu({ ch, prog, x: e.clientX, y: e.clientY }); }}
                   >
                     <div className="text-[10px] font-medium truncate leading-tight pt-0.5">{prog.title||'Programme'}</div>
+                    {prog._conflict && <span className="badge badge-error badge-xs">conflict</span>}
                     <div className="text-[9px] opacity-60 truncate">Rec</div>
                   </div>
                 ))}
@@ -358,7 +398,12 @@ function LiveTvPage() {
   const [sources, setSources] = useState([]);
   const [channels, setChannels] = useState([]);
   const [q, setQ] = useState('');
-  const [groupFilter, setGroupFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState(() => {
+    try { return localStorage.getItem('mediaos.livetv.group') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('mediaos.livetv.group', groupFilter || ''); } catch {}
+  }, [groupFilter]);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [kind, setKind] = useState('m3u');
@@ -465,6 +510,7 @@ function LiveTvPage() {
         <h1 className="mr-page-title">Live TV / IPTV</h1>
         <p className="text-sm text-base-content/50">M3U · Xtream · EPG · health · Jellyfin · full IPTV</p>
         <p className="text-xs opacity-50 mt-1">Lineup editor: multi-select, enable/disable, bulk group, reorder (↑↓ / Save order), logos, inline Edit (name/group/logo/tvg-id), Map EPG.</p>
+        <p className="text-xs opacity-40 mt-1">Tip: if Now/Next is empty, import an M3U, assign groups, and Map EPG — the guide fills after the next EPG refresh.</p>
         <div className="card bg-base-200 border border-base-content/10 my-3">
           <div className="card-body p-3 gap-2 text-sm">
             <div className="font-semibold text-sm">EPG guides (iptv-org / epg-grabber)</div>
@@ -572,7 +618,7 @@ function LiveTvPage() {
               <h2 className="font-semibold text-sm">Now / Next</h2>
               <button type="button" className="btn btn-xs" onClick={async()=>{
                 setMsg('Syncing EPG…');
-                await fetch('/api/overhaul/epg/sync',{method:'POST'}).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } });
+                await fetch('/api/livetv/epg/refresh',{method:'POST'}).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } });
                 load(); setMsg('EPG sync requested');
               }}>Sync EPG</button>
             </div>

@@ -372,3 +372,30 @@ def anime_absolute(series_id: int, db: Session = Depends(get_db)):
 def dashboard_dense(db: Session = Depends(get_db), _=Depends(require_permission("library.view", "system.view"))):
     from app.services.dashboard_widgets import dashboard_bundle
     return dashboard_bundle(db)
+
+@router.get("/notifications/channels")
+def notification_channels(_: str = Depends(require_admin)):
+    from app.services.notifications import channels_status
+    return {"channels": channels_status()}
+
+
+@router.get("/notifications/history")
+def notification_history(limit: int = 50, _: str = Depends(require_admin)):
+    from app.services.notifications import history
+    return {"items": history(limit)}
+
+
+@router.post("/notifications/test")
+def notification_test(_: str = Depends(require_admin)):
+    from app.services.notifications import test_all
+    return test_all()
+
+
+@router.post("/notifications/send")
+def notification_send(body: dict, _: str = Depends(require_admin)):
+    from app.services.notifications import send
+    return send(
+        body.get("message") or "MediaOS ping",
+        title=body.get("title") or "MediaOS",
+        channels=body.get("channels"),
+    )

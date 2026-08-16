@@ -5,45 +5,24 @@ import { api, TMDB, adultFetch } from "../api.js";
 import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
 import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo, grabPayload, releaseDownloadUrl } from "../components/media.jsx";
 
-function ComicsPullPanel() {
-  const [rows, setRows] = useState([]);
-  const [msg, setMsg] = useState(null);
-  const load = () => fetch('/api/overhaul/comics/pull-list').then(r=>r.json()).then(setRows).catch(()=>[]);
-  useEffect(()=>{ load(); }, []);
-  return (
-    <div className="card bg-base-200 mb-4">
-      <div className="card-body p-3 gap-2">
-        <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-sm flex-1">Weekly pull-list</h2>
-          <button type="button" className="btn btn-xs" onClick={async()=>{
-            setMsg('Syncing…');
-            const r = await fetch('/api/overhaul/comics/pull-list/sync',{method:'POST'}).then(x=>x.json()).catch(e=>({error:String(e)}));
-            setMsg(JSON.stringify(r));
-            load();
-          }}>Sync now</button>
-        </div>
-        {msg && <p className="text-[10px] opacity-60 truncate">{msg}</p>}
-        <div className="overflow-x-auto max-h-48">
-          <table className="table table-xs">
-            <thead><tr><th>Series</th><th>#</th><th>Date</th><th></th></tr></thead>
-            <tbody>
-              {(rows||[]).map(r=>(
-                <tr key={r.id}><td>{r.series_name}</td><td>{r.issue_number||'—'}</td><td>{r.release_date||'—'}</td>
-                <td>{r.grabbed?'✓':''}</td></tr>
-              ))}
-              {!(rows||[]).length && <tr><td colSpan={4} className="opacity-50">Empty — sync or add monitored comics with issue dates</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ComicsPage({ setPage }) {
   const [items, setItems] = useState([]);
   const [detailId, setDetailId] = useState(null);
+  // Jump straight to an item's detail view when opened from Global Search
+  // or the dashboard's Continue Watching row.
+  useEffect(() => {
+    const onOpenItem = (e) => {
+      if (!e.detail || !(e.detail.mediaType === 'comic' || e.detail.mediaType === 'manga')) return;
+      setDetailId(e.detail.id);
+    };
+    window.addEventListener('mediaos-open-item', onOpenItem);
+    return () => window.removeEventListener('mediaos-open-item', onOpenItem);
+  }, []);
   const [tab, setTab] = useState('library'); // library | arcs | pull
+  const [selected, setSelected] = useState({});
+  const selectedIds = Object.keys(selected);
+  const [libFilter, setLibFilter] = useState('all'); // all | comics | manga
+  const [mangaIds, setMangaIds] = useState(null); // Set of ids tagged manga (from GET /comics/manga), lazy-loaded
   const [arcs, setArcs] = useState([]);
   const [arcDetail, setArcDetail] = useState(null);
   const [pull, setPull] = useState([]);
@@ -58,9 +37,29 @@ function ComicsPage({ setPage }) {
   const loadPull = () => fetch('/api/comics/pull').then(r=>r.json()).then(setPull).catch(()=>[]);
   useEffect(()=>{ load(); }, []);
   useEffect(()=>{ if (tab==='arcs') loadArcs(); if (tab==='pull') loadPull(); }, [tab]);
+  useEffect(() => {
+    // Lazy-loaded: only needed once the person filters to Comics/Manga,
+    // same reasoning as arcs/pull only loading on tab switch above.
+    if ((libFilter === 'manga' || libFilter === 'comics') && mangaIds === null) {
+      api.comics.manga()
+        .then(rows => setMangaIds(new Set((rows||[]).map(r => r.id))))
+        .catch(() => setMangaIds(new Set()));
+    }
+  }, [libFilter, mangaIds]);
 
   if (detailId) {
     return <ComicDetailPage comicId={detailId} onBack={()=>{ setDetailId(null); load(); }} />;
+  }
+
+  
+  async function bulkMonitor(monitored) {
+    setBusy(true); setMsg(null);
+    try {
+      await api.comics.bulk({ ids: selectedIds.map(Number), monitored });
+      setSelected({});
+      load();
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
   }
 
   async function searchMissing() {
@@ -104,7 +103,13 @@ function ComicsPage({ setPage }) {
     loadPull();
   }
 
-  const filtered = (items||[]).filter(c => !q || (c.title||'').toLowerCase().includes(q.toLowerCase()));
+  const filtered = (items||[])
+    .filter(c => !q || (c.title||'').toLowerCase().includes(q.toLowerCase()))
+    .filter(c => {
+      if (libFilter === 'all') return true;
+      const isManga = c.media_type === 'manga' || !!(mangaIds && mangaIds.has(c.id));
+      return libFilter === 'manga' ? isManga : !isManga;
+    });
 
   return (
     <div className="space-y-4">
@@ -124,11 +129,41 @@ function ComicsPage({ setPage }) {
 
       {tab==='library' && (
         <>
-          <input className="input input-bordered input-sm w-full max-w-md" placeholder="Filter series…" value={q} onChange={e=>setQ(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input input-bordered input-sm w-full max-w-md" placeholder="Filter series…" value={q} onChange={e=>setQ(e.target.value)} />
+            <div className="join">
+              <button type="button" className={"btn btn-xs join-item "+(libFilter==='all'?'btn-primary':'')} onClick={()=>setLibFilter('all')}>All</button>
+              <button type="button" className={"btn btn-xs join-item "+(libFilter==='comics'?'btn-primary':'')} onClick={()=>setLibFilter('comics')}>Comics</button>
+              <button type="button" className={"btn btn-xs join-item "+(libFilter==='manga'?'btn-primary':'')} onClick={()=>setLibFilter('manga')}>Manga</button>
+            </div>
+          </div>
+          {selectedIds.length > 0 && (
+            <div className="card bg-base-200 mb-2">
+              <div className="card-body p-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs opacity-60">{selectedIds.length} selected</span>
+                  {filtered.length > 0 && (
+                    <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>{
+                      const n={}; filtered.forEach(c=>{ n[c.id]=true; }); setSelected(n);
+                    }}>Select all visible</button>
+                  )}
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(true)}>Monitor</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(false)}>Unmonitor</button>
+                  <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setSelected({})}>Clear</button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="poster-grid">
             {filtered.map(c => (
-              <PosterTile key={c.id} title={c.title} year={c.year} poster={c.poster_path} status={c.status}
-                onClick={()=>setDetailId(c.id)} />
+              <div key={c.id} className="relative group">
+                <label className={`absolute top-2 left-2 z-10 transition-opacity ${selected[c.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e=>e.stopPropagation()}>
+                  <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!selected[c.id]}
+                    onChange={e=>{ setSelected(prev=>{ const n={...prev}; if(e.target.checked) n[c.id]=true; else delete n[c.id]; return n; }); }} />
+                </label>
+                <PosterTile title={c.title} year={c.year} poster={c.poster_path} status={c.status}
+                  onClick={()=>setDetailId(c.id)} />
+              </div>
             ))}
             {!filtered.length && <div className="col-span-full opacity-50 text-sm p-6">No comics yet</div>}
           </div>
@@ -231,19 +266,137 @@ function ComicsPage({ setPage }) {
   );
 }
 
+function ComicReader({ src, title, issueId, initialPage, onClose, onProgress }) {
+  const [meta, setMeta] = useState(null); // {kind, count, pages}
+  const [index, setIndex] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [fit, setFit] = useState('width'); // width | height
+  const progressDebounceRef = useRef(null);
+  // Tracks whether the reader has actually shown a page yet, so the
+  // mount-time setIndex(initialPage) below doesn't itself trigger a
+  // progress save of the page we just loaded from.
+  const openedAtRef = useRef(true);
+
+  useEffect(() => {
+    setLoading(true); setErr(null);
+    fetch(src.pagesUrl).then(r => { if (!r.ok) throw new Error('Failed to open comic'); return r.json(); })
+      .then(d => { setMeta(d); setIndex(Math.min(Math.max(initialPage || 0, 0), Math.max((d?.count || 1) - 1, 0))); openedAtRef.current = true; })
+      .catch(e => setErr(String(e.message || e)))
+      .finally(() => setLoading(false));
+  }, [src.pagesUrl]);
+
+  const count = meta?.count || 0;
+
+  const go = useCallback((delta) => {
+    setIndex(i => Math.min(Math.max(i + delta, 0), Math.max(count - 1, 0)));
+  }, [count]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+      else if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [go, onClose]);
+
+  // Debounced progress save on page-change — issue-only (whole-item/
+  // one-shot reads don't have a comic_issues row to attach progress to).
+  useEffect(() => {
+    if (!issueId || !count) return;
+    if (openedAtRef.current) { openedAtRef.current = false; return; }
+    if (progressDebounceRef.current) clearTimeout(progressDebounceRef.current);
+    progressDebounceRef.current = setTimeout(() => {
+      const isRead = index >= count - 1;
+      api.comics.issueProgress(issueId, { last_page_read: index, is_read: isRead }).catch(() => {});
+      if (onProgress) onProgress(issueId, { last_page_read: index, is_read: isRead });
+    }, 800);
+    return () => { if (progressDebounceRef.current) clearTimeout(progressDebounceRef.current); };
+  }, [index, issueId, count]);
+
+  function closeAndSave() {
+    if (issueId && count) {
+      if (progressDebounceRef.current) clearTimeout(progressDebounceRef.current);
+      const isRead = index >= count - 1;
+      api.comics.issueProgress(issueId, { last_page_read: index, is_read: isRead }).catch(() => {});
+      if (onProgress) onProgress(issueId, { last_page_read: index, is_read: isRead });
+    }
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div className="flex items-center gap-2 px-3 py-2 bg-base-300/95 text-base-content">
+        <span className="text-sm font-semibold flex-1 truncate">{title}</span>
+        {count > 0 && <span className="text-xs tabular-nums opacity-70">{index + 1} / {count}</span>}
+        <button type="button" className="btn btn-ghost btn-xs" onClick={() => setFit(f => f === 'width' ? 'height' : 'width')}>
+          {fit === 'width' ? 'Fit height' : 'Fit width'}
+        </button>
+        <button type="button" className="btn btn-ghost btn-xs btn-square" onClick={closeAndSave}><Ic.X /></button>
+      </div>
+      <div className="flex-1 relative overflow-auto flex items-center justify-center bg-black">
+        {loading && <p className="text-white/60 text-sm">Loading…</p>}
+        {err && <p className="text-error text-sm p-4">{err}</p>}
+        {!loading && !err && count > 0 && (
+          <img
+            key={index}
+            src={src.pageUrlFor(index)}
+            alt={`Page ${index + 1}`}
+            className={(fit === 'width' ? 'w-full h-auto' : 'h-full w-auto') + ' select-none cursor-pointer'}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              go(clickX > rect.width / 2 ? 1 : -1);
+            }}
+          />
+        )}
+        {!loading && !err && count === 0 && <p className="text-white/60 text-sm">No pages found in this file.</p>}
+      </div>
+      <div className="flex items-center justify-center gap-2 px-3 py-2 bg-base-300/95">
+        <button type="button" className="btn btn-sm" disabled={index <= 0} onClick={() => go(-1)}>← Prev</button>
+        <input type="range" min={0} max={Math.max(count - 1, 0)} value={index}
+          onChange={e => setIndex(Number(e.target.value))} className="range range-xs w-48" />
+        <button type="button" className="btn btn-sm" disabled={index >= count - 1} onClick={() => go(1)}>Next →</button>
+      </div>
+    </div>
+  );
+}
+
 function ComicDetailPage({ comicId, onBack }) {
   const [item, setItem] = useState(null);
+  const [issueChecked, setIssueChecked] = useState({});
+  const issueCheckedIds = Object.keys(issueChecked);
   const [issues, setIssues] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [ixResults, setIxResults] = useState(null);
   const [ixLoading, setIxLoading] = useState(false);
+  const [reading, setReading] = useState(null); // {pagesUrl, pageUrlFor, title}
+  const [ixIssue, setIxIssue] = useState(null); // issue object currently being interactively searched
+  const [ixIssueResults, setIxIssueResults] = useState(null);
+  const [ixIssueLoading, setIxIssueLoading] = useState(false);
 
   const load = React.useCallback(() => {
     fetch('/api/comics/'+comicId).then(r=>r.json()).then(setItem).catch(e=>setMsg(String(e.message||e)));
     fetch('/api/comics/'+comicId+'/issues').then(r=>r.json()).then(d=>setIssues(Array.isArray(d)?d:[])).catch(()=>[]);
   }, [comicId]);
   useEffect(()=>{ load(); }, [load]);
+
+  
+  async function setTrackStatus(status) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/tracking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_item_id: comicId, status }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Track failed');
+      setMsg('Tracking: ' + String(status).replace(/_/g, ' '));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
 
   async function autoSearch() {
     setBusy(true); setMsg(null);
@@ -259,6 +412,20 @@ function ComicDetailPage({ comicId, onBack }) {
     try {
       const data = await fetch(`/api/comics/${comicId}/interactive-search`).then(x=>x.json()); setIxResults(data && !Array.isArray(data) ? data : { results: data?.results || data || [], rejected: data?.rejected || [] }); const rows = data?.results || data || [];
       setIxResults(rows||[]);
+    } catch(e) { setMsg(String(e.message||e)); }
+    setIxLoading(false);
+  }
+  async function manualPick() {
+    // GET /releases: a plain ranked list (no rejected/stats envelope),
+    // built for a manual picker and also falling back to the Books
+    // Torznab category when Comics/Manga turns up nothing — broader
+    // recall than /interactive-search, useful when a release is only
+    // mistagged as a generic ebook by an indexer. Feeds the same
+    // InteractiveResultsTable + grab flow as Interactive search.
+    setIxLoading(true); setIxResults([]);
+    try {
+      const rows = await api.comics.releases(comicId);
+      setIxResults(Array.isArray(rows) ? rows : (rows?.results || []));
     } catch(e) { setMsg(String(e.message||e)); }
     setIxLoading(false);
   }
@@ -279,6 +446,54 @@ function ComicDetailPage({ comicId, onBack }) {
     } catch(e) { setMsg(String(e.message||e)); }
     setBusy(false);
   }
+  async function markManga() {
+    setBusy(true);
+    try {
+      await api.comics.tagManga(comicId);
+      setMsg('Tagged as manga');
+      load();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+
+  async function bulkIssueMonitor(monitored) {
+    setBusy(true); setMsg(null);
+    try {
+      for (const id of issueCheckedIds) {
+        await api.comics.monitorIssue(Number(id), { monitored });
+      }
+      const ids = new Set(issueCheckedIds.map(Number));
+      setIssues(rows => rows.map(r => ids.has(r.id) ? { ...r, monitored } : r));
+      setIssueChecked({});
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
+
+  async function toggleIssueMonitor(iss) {
+    try {
+      await api.comics.monitorIssue(iss.id, { monitored: !iss.monitored });
+      setIssues(rows => rows.map(r => r.id === iss.id ? { ...r, monitored: !iss.monitored } : r));
+    } catch(e) { setMsg(String(e.message||e)); }
+  }
+  async function openIssueSearch(iss) {
+    setIxIssue(iss); setIxIssueResults(null); setIxIssueLoading(true);
+    try {
+      const data = await api.comics.searchIssue(comicId, iss.id);
+      setIxIssueResults(data || []);
+    } catch(e) { setMsg(String(e.message||e)); setIxIssueResults([]); }
+    setIxIssueLoading(false);
+  }
+  async function grabIssueRelease(rel) {
+    if (!ixIssue) return;
+    setBusy(true);
+    try {
+      await api.comics.grabIssue(comicId, ixIssue.id, grabPayload(rel));
+      setMsg('Grabbed: '+rel.title);
+      setIxIssueResults(null); setIxIssue(null);
+      load();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
 
   if (!item) return <div className="p-6 opacity-50">Loading…</div>;
   return (
@@ -288,7 +503,25 @@ function ComicDetailPage({ comicId, onBack }) {
       filePath={item.file_path} qualityProfile={item.quality_profile}
       msg={msg} busy={busy} onBack={onBack}
       actions={<>
+        {item.file_path && (
+          <button type="button" className="btn btn-sm btn-primary gap-1" onClick={() => setReading({
+            pagesUrl: `/api/comics/${comicId}/pages`,
+            pageUrlFor: i => `/api/comics/${comicId}/page/${i}`,
+            title: item.title,
+          })}>
+            <span className="w-4 h-4"><Ic.Book /></span> Read
+          </button>
+        )}
         <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={autoSearch}>Search & grab</button>
+        <select className="select select-bordered select-sm" defaultValue="" disabled={busy}
+          onChange={e=>{ if(e.target.value) { setTrackStatus(e.target.value); e.target.value=''; } }} title="Unified tracking">
+          <option value="">Track…</option>
+          <option value="planned">Planned</option>
+          <option value="in_progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="on_hold">On hold</option>
+          <option value="dropped">Dropped</option>
+        </select>
         <button type="button" className="btn btn-sm btn-accent" disabled={busy} title="Add top result as stream"
           onClick={async ()=>{
             setBusy(true);
@@ -305,24 +538,72 @@ function ComicDetailPage({ comicId, onBack }) {
             setBusy(false);
           }}>Stream</button>
         <button type="button" className="btn btn-sm btn-secondary" disabled={busy||ixLoading} onClick={openIx}>Interactive search</button>
+        <button type="button" className="btn btn-sm btn-secondary" disabled={busy||ixLoading} onClick={manualPick} title="Ranked list, broader category fallback">Manual pick</button>
         <button type="button" className="btn btn-sm" disabled={busy} onClick={syncIssues}>Sync issues</button>
+        {item.media_type==='comic' && (item.quality_profile||'').toLowerCase()!=='manga' && (
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={markManga} title="Mark this series as manga (quality profile + Manga filter)">Mark as manga</button>
+        )}
         <button type="button" className="btn btn-sm btn-ghost text-error" onClick={async()=>{ await fetch('/api/comics/'+comicId,{method:'DELETE'}); onBack(); }}>Delete</button>
       </>}
     >
       <InteractiveResultsTable results={ixResults} loading={ixLoading} busy={busy} onGrab={grabRel} onClose={()=>setIxResults(null)} />
+      {ixIssue && (
+        <InteractiveResultsPanel
+          data={ixIssueResults}
+          loading={ixIssueLoading}
+          busy={busy}
+          onGrab={grabIssueRelease}
+          onClose={()=>{ setIxIssue(null); setIxIssueResults(null); }}
+        />
+      )}
       {issues.length>0 && (
         <div className="card bg-base-200"><div className="card-body p-4">
-          <h3 className="font-semibold text-sm">Issues ({issues.length})</h3>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <h3 className="font-semibold text-sm flex-1">Issues ({issues.length})</h3>
+            {issueCheckedIds.length > 0 && (
+              <>
+                <span className="text-xs opacity-60">{issueCheckedIds.length} selected</span>
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkIssueMonitor(true)}>Monitor selected</button>
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkIssueMonitor(false)}>Unmonitor selected</button>
+                <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setIssueChecked({})}>Clear</button>
+              </>
+            )}
+            <button type="button" className="btn btn-xs btn-ghost" onClick={()=>{
+              const n={}; issues.forEach(i=>{ n[i.id]=true; }); setIssueChecked(n);
+            }}>Select all</button>
+          </div>
           <div className="overflow-x-auto max-h-64 overflow-y-auto">
             <table className="table table-xs">
-              <thead><tr><th>#</th><th>Title</th><th>Status</th><th>Mon</th></tr></thead>
+              <thead><tr><th></th><th>Mon</th><th>#</th><th>Title</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {issues.map(iss=>(
                   <tr key={iss.id}>
+                    <td>
+                      <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!issueChecked[iss.id]}
+                        onChange={e=>{ setIssueChecked(prev=>{ const n={...prev}; if(e.target.checked) n[iss.id]=true; else delete n[iss.id]; return n; }); }} />
+                    </td>
+                    <td>
+                      <input type="checkbox" className="checkbox checkbox-xs" checked={!!iss.monitored}
+                        onChange={()=>toggleIssueMonitor(iss)} title="Monitored" />
+                    </td>
                     <td>{iss.issue_number}</td>
                     <td className="text-xs">{iss.title||'—'}</td>
                     <td><span className="badge badge-xs">{iss.status}</span></td>
-                    <td>{iss.monitored?'✓':'—'}</td>
+                    <td className="flex gap-0.5 flex-wrap">
+                      {iss.file_path && (
+                        <button type="button" className="btn btn-ghost btn-xs gap-1" onClick={() => setReading({
+                          pagesUrl: `/api/comics/issues/${iss.id}/pages`,
+                          pageUrlFor: i => `/api/comics/issues/${iss.id}/page/${i}`,
+                          title: `${item.title} #${iss.issue_number||''}`,
+                          issueId: iss.id,
+                          initialPage: iss.last_page_read || 0,
+                        })}>
+                          <span className="w-3 h-3"><Ic.Book /></span> Read
+                        </button>
+                      )}
+                      {iss.is_read && <span className="badge badge-xs badge-success ml-1" title="Read">✓</span>}
+                      <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={()=>openIssueSearch(iss)} title="Interactive search">Search</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -330,6 +611,12 @@ function ComicDetailPage({ comicId, onBack }) {
           </div>
         </div></div>
       )}
+      {reading && <ComicReader
+        src={reading} title={reading.title}
+        issueId={reading.issueId} initialPage={reading.initialPage}
+        onClose={() => setReading(null)}
+        onProgress={(issueId, patch) => setIssues(rows => rows.map(r => r.id === issueId ? { ...r, ...patch } : r))}
+      />}
     </MediaDetailShell>
   );
 }
@@ -337,4 +624,4 @@ function ComicDetailPage({ comicId, onBack }) {
 
 
 
-export { ComicsPullPanel, ComicsPage, ComicDetailPage };
+export { ComicsPage, ComicDetailPage };

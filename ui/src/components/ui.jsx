@@ -176,14 +176,15 @@ function PageChrome({ children, title }) {
   const label = humanizePageTitle(title);
   return (
     <div className="mos-page-chrome">
-      <div className="mos-top-logo-bar flex items-center gap-2.5 mb-4 lg:mb-5 sticky top-0 z-20 py-2.5 -mt-1 px-1 bg-base-100/95 backdrop-blur-md border-b border-base-content/10">
-        <div className="w-9 h-9 flex items-center justify-center shrink-0 rounded-xl bg-primary/10 ring-1 ring-primary/20">
-          <LogoMark size={30} />
+      {/* Mobile-only brand strip — desktop mockup keeps logo only in left sidebar */}
+      <div className="mos-top-logo-bar flex lg:hidden items-center gap-2.5 mb-3 sticky top-0 z-20 py-2 -mt-1 px-1 bg-base-100/95 backdrop-blur-md border-b border-base-content/10">
+        <div className="w-8 h-8 flex items-center justify-center shrink-0 rounded-xl bg-primary/10 ring-1 ring-primary/20">
+          <LogoMark size={26} />
         </div>
-        <div className="font-bold tracking-tight text-sm sm:text-base">
+        <div className="font-bold tracking-tight text-sm">
           <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">MediaOS</span>
         </div>
-        {label && <span className="text-xs opacity-40 ml-1 hidden sm:inline">· {label}</span>}
+        {label && <span className="text-xs opacity-40 ml-1">· {label}</span>}
       </div>
       {children}
     </div>

@@ -79,6 +79,27 @@ def workers():
     return list_jobs()
 
 
+# Literal /workers/search-all MUST be registered before /workers/{job_id}
+# (job_id is str, so "search-all" would otherwise match the param route).
+@router.post("/workers/search-all")
+def job_search_all(_perm: list = Depends(require_permission("settings", "library.manage"))):
+    def _fn(job):
+        from app.database import SessionLocal
+        from app.services.wanted import search_all_missing
+        job.message = "searching missing"
+        job.progress = 10
+        db = SessionLocal()
+        try:
+            result = search_all_missing(db, limit=30)
+            job.progress = 100
+            return result
+        finally:
+            db.close()
+
+    jid = submit("search-all-missing", _fn)
+    return {"job_id": jid}
+
+
 @router.get("/workers/{job_id}")
 def worker_job(job_id: str):
     j = get_job(job_id)
@@ -106,25 +127,6 @@ def trakt_movies(limit: int = 20):
 @router.get("/trakt/trending/shows")
 def trakt_shows(limit: int = 20):
     return trakt_client.trending_shows(limit)
-
-
-@router.post("/workers/search-all")
-def job_search_all(_perm: list = Depends(require_permission("settings", "library.manage"))):
-    def _fn(job):
-        from app.database import SessionLocal
-        from app.services.wanted import search_all_missing
-        job.message = "searching missing"
-        job.progress = 10
-        db = SessionLocal()
-        try:
-            result = search_all_missing(db, limit=30)
-            job.progress = 100
-            return result
-        finally:
-            db.close()
-
-    jid = submit("search-all-missing", _fn)
-    return {"job_id": jid}
 
 
 @router.get("/streams/providers")
@@ -251,15 +253,3 @@ def usenet_session_info(session_id: str):
     if not info:
         raise HTTPException(404, "session not found or expired")
     return info
-
-
-@router.get("/library-watch/status")
-def library_watch_status():
-    from app.services.library_watch import status, poll_once
-    return {**status(), "poll": poll_once()}
-
-
-@router.get("/storage")
-def parity_storage():
-    from app.services.storage import library_storage
-    return library_storage()

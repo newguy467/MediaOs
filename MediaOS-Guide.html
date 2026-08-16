@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MediaOS — Quick Start Guide</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "Segoe UI", Tahoma, sans-serif;
+    background: #0b0714; color: #d8c9ff; line-height: 1.6;
+  }
+  .top {
+    background: linear-gradient(135deg, #1b1130 0%, #0a0714 100%);
+    border-bottom: 1px solid #2a1c4a; padding: 24px 32px;
+  }
+  .brand { font-size: 26px; font-weight: 700; color: #c9a2ff; text-shadow: 0 0 10px rgba(180,120,255,0.45); }
+  .brand span { color: #43e8ff; text-shadow: 0 0 10px rgba(67,232,255,0.4); }
+  .tag { font-size: 13px; color: #8577a8; margin-top: 4px; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 28px 32px 60px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: #43e8ff; margin: 32px 0 12px; }
+  h2:first-of-type { margin-top: 0; }
+  p, li { font-size: 14px; color: #cbb9f5; }
+  code, .kbd {
+    background: #1a1230; border: 1px solid #6d28d9; border-radius: 6px;
+    padding: 2px 7px; font-family: Consolas, monospace; font-size: 12.5px; color: #e9d5ff;
+  }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 10px; font-size: 13px; border-bottom: 1px solid #2a1c4a; }
+  th { color: #43e8ff; font-weight: 700; }
+  td { color: #cbb9f5; }
+  .card {
+    background: #14102a; border: 1px solid #2a1c4a; border-radius: 10px;
+    padding: 16px 18px; margin-top: 10px;
+  }
+  a { color: #99f6ff; }
+  ol li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">Media<span>OS</span></div>
+    <div class="tag">Quick-start guide &amp; control panel reference</div>
+  </div>
+  <div class="wrap">
+
+    <h2>First run</h2>
+    <div class="card">
+      <ol>
+        <li>Double-click <code>Start-MediaOS.bat</code> to open the Control Panel.</li>
+        <li>Pick a stack from the <b>Stack</b> dropdown (leave it on the default unless you need standalone/GPU-transcode profiles).</li>
+        <li>Click <b>Start MediaOS</b>. On the very first run this also creates <code>.env</code> from <code>.env.example</code> and generates a database password for you.</li>
+        <li>Wait ~10–20 seconds for containers to come up, then click <b>Health Check</b> to confirm everything's green.</li>
+        <li>Click <b>Open MediaOS UI</b> to start managing your library.</li>
+      </ol>
+    </div>
+
+    <h2>Control panel buttons</h2>
+    <table>
+      <tr><th>Button</th><th>What it does</th></tr>
+      <tr><td>Start / Stop / Restart</td><td>Runs <code>docker compose</code> for the stack selected in the dropdown.</td></tr>
+      <tr><td>Update</td><td>Pulls the latest source (if using git) and rebuilds/restarts containers.</td></tr>
+      <tr><td>Open MediaOS UI</td><td>Opens the web app in your default browser.</td></tr>
+      <tr><td>Health Check</td><td>Shows container status and probes <code>/api/health</code>.</td></tr>
+      <tr><td>View Logs</td><td>Live-tails the main app container's logs.</td></tr>
+      <tr><td>Open Data Folder</td><td>Opens the <code>data\</code> folder — your media libraries and downloads.</td></tr>
+      <tr><td>Backup Config + Database</td><td>Dumps the database and zips it with <code>.env</code> into <code>backups\</code>.</td></tr>
+      <tr><td>Edit .env</td><td>Opens the environment file in Notepad.</td></tr>
+    </table>
+
+    <h2>Ports (defaults)</h2>
+    <table>
+      <tr><th>Service</th><th>URL</th></tr>
+      <tr><td>MediaOS UI</td><td><code>http://localhost:8787</code></td></tr>
+      <tr><td>Jellyfin</td><td><code>http://localhost:8096</code></td></tr>
+      <tr><td>qBittorrent</td><td><code>http://localhost:8080</code></td></tr>
+    </table>
+    <p>Change these via <code>MEDIAOS_HOST_PORT</code>, <code>JELLYFIN_HOST_PORT</code>, and <code>QBIT_HOST_PORT</code> in <code>.env</code>.</p>
+
+    <h2>Troubleshooting</h2>
+    <div class="card">
+      <ul>
+        <li><b>Health Check shows "UNREACHABLE"</b> — the app container may still be starting, or Docker Desktop isn't running. Check <b>View Logs</b>.</li>
+        <li><b>Start fails immediately</b> — make sure Docker Desktop is installed and running; the script checks for <code>docker</code> on PATH first.</li>
+        <li><b>Forgot your database password</b> — it's in <code>.env</code> under <code>POSTGRES_PASSWORD</code>; open it with <b>Edit .env</b>.</li>
+        <li><b>Need to rebuild from source instead</b> — see <code>scripts\windows\dashboard.bat</code>, the developer build/test dashboard.</li>
+      </ul>
+    </div>
+
+    <h2>More</h2>
+    <p>Full architecture and advanced setup live in <code>README.md</code> and <code>ARCHITECTURE.md</code> at the repo root.</p>
+  </div>
+</body>
+</html>

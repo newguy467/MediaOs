@@ -12,6 +12,7 @@ from app.models import Download, Episode, ItemStatus, MediaItem, MediaType
 from app.services.activity import log_activity
 from app.services.unpack import unpack_path
 from app.services.crossseed import notify_cross_seed
+from app.services.library_gaps import apply_path_map
 from app.services import naming as trash_naming
 
 def _series_dir(series) -> Path:
@@ -267,6 +268,21 @@ def _same_filesystem(a: Path, b: Path) -> bool:
         return False
 
 
+
+def _map_path(db, path: Path | str, media_type: str | None = None) -> Path:
+    """Apply enabled PathMap rules (container → host) when present."""
+    raw = str(path or "")
+    if not raw:
+        return Path(raw)
+    try:
+        mt = None
+        if media_type is not None:
+            mt = media_type.value if hasattr(media_type, "value") else str(media_type)
+        mapped = apply_path_map(db, raw, mt)
+        return Path(mapped)
+    except Exception:
+        return Path(raw)
+
 def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> str:
     """Place *src* at *dest_path*.
 
@@ -412,6 +428,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         if not torrent or torrent.get("progress", 0) < 1.0:
             continue
         content_path = Path(torrent.get("content_path") or torrent.get("save_path") or "")
+        content_path = _map_path(db, content_path, getattr(item, "media_type", None))
         try:
             unpack_path(content_path)
         except Exception:
@@ -435,6 +452,7 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         file_stem = trash_naming.movie_file(item.title, item.year, quality=qtoken, tmdb_id=tmdb_id)
         dest_dir = _library_root_for(item) / folder
         dest_path = dest_dir / f"{file_stem}{video_file.suffix.lower()}"
+        dest_path = _map_path(db, dest_path, getattr(item, "media_type", None))
         try:
             placed = _move_video(video_file, dest_path)
         except Exception as exc:
@@ -499,6 +517,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
             continue
 
         content_path = Path(torrent.get("content_path") or "")
+        content_path = _map_path(db, content_path, "tv")
         try:
             unpack_path(content_path)
         except Exception:
@@ -571,6 +590,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                         _series_dir(series) / trash_naming.season_folder(s)
                     )
                     dest_path = dest_dir / vf.name
+                    dest_path = _map_path(db, dest_path, "tv")
                     try:
                         pl = _move_video(vf, dest_path)
                         if pl == "hardlink":
@@ -591,6 +611,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 )
                 stem = trash_naming.episode_file(series.title, s, e, (ep_row.title if ep_row else None), quality=trash_naming.quality_token_from_release(release_title))
                 dest_path = dest_dir / f"{stem}{vf.suffix.lower()}"
+                dest_path = _map_path(db, dest_path, "tv")
                 try:
                     pl = _move_video(vf, dest_path)
                     if pl == "hardlink":
@@ -680,6 +701,7 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
             )
             stem = trash_naming.episode_file(series.title, s, e, (episode.title if episode else None), quality=trash_naming.quality_token_from_release(release_title))
             dest_path = dest_dir / f"{stem}{video_file.suffix.lower()}"
+            dest_path = _map_path(db, dest_path, "tv")
             try:
                 placed = _move_video(video_file, dest_path)
             except Exception as exc:
@@ -714,6 +736,16 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 pass
 
     db.commit()
+    
+    # Episode-aware tracking sync for unique series
+    try:
+        from app.services.tracking_aggregate import sync_series_tracking
+        series_ids = {getattr(ep, "media_item_id", None) for ep in organized}
+        for sid in series_ids:
+            if sid:
+                sync_series_tracking(db, sid)
+    except Exception:
+        pass
     return organized
 
 
@@ -1032,6 +1064,7 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
         if not torrent or torrent.get("progress", 0) < 1.0:
             continue
         content_path = Path(torrent.get("content_path") or "")
+        content_path = _map_path(db, content_path, "tv")
         try:
             unpack_path(content_path)
         except Exception:

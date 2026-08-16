@@ -213,3 +213,35 @@ def backfill_provider_ids(db: Session = Depends(get_db), _: str = Depends(requir
             updated += 1
     db.commit()
     return {"ok": True, "updated": updated, "scanned": len(rows)}
+
+
+class ArrValidateIn(BaseModel):
+    url: str
+    api_key: str
+    kind: str = "sonarr"
+
+
+@router.post("/validate")
+def validate_arr(payload: ArrValidateIn, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Pre-flight: connection + library shape + side-by-side vs MediaOS (no writes)."""
+    from app.services.arr_validation import full_preflight
+    try:
+        return full_preflight(db, payload.url, payload.api_key, payload.kind)
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/validate/connection")
+def validate_arr_connection(payload: ArrValidateIn, _: str = Depends(require_admin)):
+    from app.services.arr_validation import validate_connection
+    return validate_connection(payload.url, payload.api_key, payload.kind)
+
+
+@router.post("/validate/side-by-side")
+def validate_arr_side_by_side(payload: ArrValidateIn, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    from app.services.arr_validation import side_by_side
+    try:
+        return side_by_side(db, payload.url, payload.api_key, payload.kind)
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+

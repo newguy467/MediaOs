@@ -43,7 +43,8 @@ function UsersPermissionsPage() {
   if (loading && !users.length) {
     return (
       <div className="p-6 space-y-3 max-w-3xl">
-        <h1 className="mr-page-title">Users & permissions</h1>
+        <div className="alert text-xs py-2 mb-2">Tip: create a restricted user without <code>adult</code> / <code>settings</code> permissions for kids profiles.</div>
+      <h1 className="mr-page-title">Users & permissions</h1>
         <div className="skeleton h-8 w-56" />
         <div className="skeleton h-24 w-full" />
         <div className="skeleton h-24 w-full" />
