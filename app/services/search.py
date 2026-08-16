@@ -13,7 +13,11 @@ from app.config import settings
 from app.models import Blocklist, Episode, MediaItem
 from app.services.quality import rank_releases
 from app.services.quality.store import get_default_profile, get_profile_by_name
-from app.services.release_enrichment import enrich_many
+from app.services.release_enrichment import enrich_many as _enrich_many, rank_releases_stream_first
+
+def enrich_many(releases):
+    return rank_releases_stream_first(_enrich_many(releases))
+
 import logging
 log = logging.getLogger("mediaos.search")
 

@@ -117,6 +117,15 @@ The first-run wizard will guide you through:
 
 Then: **Discover → add media → MediaOS searches indexers → grabs via qBittorrent (through VPN) → imports to library → Jellyfin streams it.**
 
+### Windows: use the Control Panel instead
+
+On Windows, double-click **`Start-MediaOS.bat`** for a GUI control panel
+(start/stop/restart, open the UI, health check, live logs, backup,
+update, edit `.env`) instead of typing `docker compose` commands. See
+`MediaOS-Guide.html` (or **`Open-MediaOS-Guide.bat`**) for a walkthrough,
+and `scripts/panel/README.md` for what each button runs. Building from
+source on Windows instead? See `scripts/windows/dashboard.bat`.
+
 * * *
 
 ## What's inside MediaOS (102 features)
@@ -160,7 +169,7 @@ mediaos-next/
 │   ├── models/                 # SQLAlchemy 2.0 models (Postgres + SQLite)
 │   └── static/                 # Pre-built React UI (dark purple/neon theme)
 ├── alembic/                    # 7 versioned migrations
-├── tests/                      # 57 tests (compose architecture + app smoke)
+├── tests/                      # 64+ tests (API contracts, route-order, services, compose, smoke)
 └── docs/
     ├── VPN-SETUP.md            # Gluetun kill-switch configuration
     ├── QUICKSTART.md           # First 10 minutes
@@ -187,8 +196,38 @@ mediaos-next/
 ## Development
 
 ```bash
-# Run the test suite (57 tests, uses SQLite — no Postgres needed)
-python3 -m pytest tests/ -v
+# Run the test suite (SQLite — no Postgres needed)
+export AUTH_REQUIRE=false
+pip install -r requirements.txt -r requirements-dev.txt  # once
+python3 -m pytest tests/ -q
+# or full local CI gate (version + UI static + lazy exports + pytest):
+npm run ci:local
+
+
+### Database in CI / local tests
+
+Pytest defaults to **SQLite** (`DATABASE_URL=sqlite:///...`) so the suite runs without Postgres.
+Alembic migrations are exercised against that SQLite DB in CI. For production-like checks, point
+`DATABASE_URL` at Postgres and run `alembic upgrade head` (see `docker-compose` for the full stack).
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for `ci:local`, pytest, and optional Playwright E2E.
+
+Post-`1.01beta` changes are tracked under **Unreleased** in [CHANGELOG.md](./CHANGELOG.md).
+
+## E2E (optional)
+
+Browser smokes use Playwright and **skip** unless a live UI is available:
+
+```bash
+npm run test:e2e:install   # once: download Chromium
+# start MediaOS UI (e.g. docker compose up / npm run dev)
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:8787 npm run test:e2e
+```
+
+In CI the optional `e2e` job runs only when repository variable `PLAYWRIGHT_BASE_URL` is set.
+
 
 # Start the app locally (SQLite, no Docker)
 DATABASE_URL="sqlite:///./data/dev.db" uvicorn app.main:app --reload --port 8787

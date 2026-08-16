@@ -911,3 +911,148 @@ def list_episodes(
             }
         )
     return out
+
+
+@router.get("/api/v3/filesystem")
+def filesystem_browse(
+    path: str = "",
+    _: bool = Depends(require_arr_key),
+):
+    """Minimal filesystem listing for LunaSea / *arr clients (container paths)."""
+    from pathlib import Path as P
+    from app.config import settings
+    roots = [
+        getattr(settings, "movies_library_path", None) or "/movies",
+        getattr(settings, "tv_library_path", None) or "/tv",
+        getattr(settings, "downloads_path", None) or "/downloads",
+        getattr(settings, "music_library_path", None) or "/music",
+    ]
+    target = (path or "").strip() or roots[0]
+    # prevent path traversal outside known roots
+    try:
+        tp = P(target).resolve()
+    except Exception:
+        tp = P(target)
+    allowed = False
+    for r in roots:
+        try:
+            if str(tp).startswith(str(P(r).resolve())) or str(target).startswith(r):
+                allowed = True
+                break
+        except Exception:
+            if str(target).startswith(r):
+                allowed = True
+                break
+    if not allowed and target not in roots:
+        # still return empty rather than 403 for client compatibility
+        return {"directories": [], "files": [], "path": target}
+    dirs, files = [], []
+    try:
+        base = P(target)
+        if base.is_dir():
+            for child in sorted(base.iterdir()):
+                if child.is_dir():
+                    dirs.append({"path": str(child), "name": child.name, "type": "folder"})
+                else:
+                    files.append({"path": str(child), "name": child.name, "type": "file", "size": child.stat().st_size})
+    except Exception:
+        pass
+    return {"directories": dirs, "files": files, "path": target}
+
+
+@router.get("/api/v3/config/host")
+def config_host(_: bool = Depends(require_arr_key)):
+    from app.version import get_version
+    return {
+        "bindAddress": "*",
+        "port": 8000,
+        "urlBase": "",
+        "instanceName": "MediaOS",
+        "applicationUrl": "",
+        "apiKey": "",  # never echo real key
+        "sslPort": 0,
+        "enableSsl": False,
+        "version": get_version(),
+    }
+
+
+@router.get("/api/v3/qualitydefinition")
+def quality_definition(_: bool = Depends(require_arr_key)):
+    """Static quality definitions so clients can render quality columns."""
+    defs = [
+        ("2160p", 2160), ("1080p", 1080), ("720p", 720), ("576p", 576),
+        ("480p", 480), ("SD", 480), ("Raw-HD", 1080), ("Unknown", 0),
+    ]
+    out = []
+    for i, (name, h) in enumerate(defs, start=1):
+        out.append({
+            "id": i,
+            "quality": {"id": i, "name": name, "source": "bluray", "resolution": h},
+            "title": name,
+            "weight": i,
+            "minSize": 0,
+            "maxSize": 0,
+            "preferredSize": 0,
+        })
+    return out
+
+
+@router.get("/api/v3/downloadclient")
+def download_clients_arr(_: bool = Depends(require_arr_key)):
+    from app.config import settings
+    clients = []
+    if getattr(settings, "qbit_url", None):
+        clients.append({
+            "id": 1,
+            "name": "qBittorrent",
+            "implementation": "QBittorrent",
+            "enable": True,
+            "protocol": "torrent",
+            "priority": 1,
+            "removeCompletedDownloads": True,
+            "removeFailedDownloads": True,
+            "fields": [
+                {"name": "host", "value": settings.qbit_url},
+            ],
+        })
+    if getattr(settings, "sabnzbd_url", None):
+        clients.append({
+            "id": 2,
+            "name": "SABnzbd",
+            "implementation": "Sabnzbd",
+            "enable": True,
+            "protocol": "usenet",
+            "priority": 2,
+            "fields": [{"name": "host", "value": settings.sabnzbd_url}],
+        })
+    return clients
+
+
+@router.get("/api/v3/command")
+def list_commands(_: bool = Depends(require_arr_key)):
+    return []
+
+
+@router.get("/api/v3/episodefile")
+def list_episode_files(
+    seriesId: int | None = None,
+    _: bool = Depends(require_arr_key),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Episode).filter(Episode.file_path.isnot(None))
+    if seriesId is not None:
+        q = q.filter(Episode.series_id == seriesId)
+    rows = q.limit(2000).all()
+    return [
+        {
+            "id": ep.id,
+            "seriesId": ep.series_id,
+            "seasonNumber": ep.season_number,
+            "relativePath": ep.file_path,
+            "path": ep.file_path,
+            "size": 0,
+            "dateAdded": None,
+            "quality": {"quality": {"name": "Unknown"}},
+        }
+        for ep in rows
+    ]

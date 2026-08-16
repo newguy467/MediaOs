@@ -14,6 +14,14 @@ from app.models import TrackedItem
 
 log = logging.getLogger(__name__)
 
+TRACKING_STATUSES = [
+    {"id": "planned", "label": "Wanted / Planned"},
+    {"id": "in_progress", "label": "In Progress"},
+    {"id": "completed", "label": "Completed"},
+    {"id": "on_hold", "label": "On Hold"},
+    {"id": "dropped", "label": "Dropped"},
+]
+
 router = APIRouter(prefix="/tracking", tags=["tracking"])
 
 
@@ -136,6 +144,59 @@ def upsert_tracked(
     return {"ok": True, "id": t.id, "action": "created"}
 
 
+
+
+class TrackedBulkIn(BaseModel):
+    items: list[TrackedIn]
+
+
+@router.post("/bulk")
+def bulk_upsert_tracked(
+    body: TrackedBulkIn,
+    db: Session = Depends(get_db),
+    _=Depends(require_permission("library")),
+):
+    """Upsert many tracking rows (same rules as single POST)."""
+    results = []
+    for item in body.items:
+        # reuse single-path logic via internal call pattern
+        if not item.media_item_id and not item.game_id:
+            results.append({"ok": False, "error": "ids required"})
+            continue
+        existing = None
+        if item.media_item_id:
+            existing = db.query(TrackedItem).filter(TrackedItem.media_item_id == item.media_item_id).first()
+        elif item.game_id:
+            existing = db.query(TrackedItem).filter(TrackedItem.game_id == item.game_id).first()
+        if existing:
+            existing.status = item.status
+            existing.progress_percent = item.progress_percent
+            existing.rating = item.rating
+            existing.notes = item.notes
+            if item.status == "completed":
+                existing.completed_at = datetime.now(timezone.utc)
+            if item.status == "in_progress" and not existing.started_at:
+                existing.started_at = datetime.now(timezone.utc)
+            db.add(existing)
+            results.append({"ok": True, "id": existing.id, "action": "updated"})
+        else:
+            row = TrackedItem(
+                media_item_id=item.media_item_id,
+                game_id=item.game_id,
+                status=item.status,
+                progress_percent=item.progress_percent,
+                rating=item.rating,
+                notes=item.notes,
+                started_at=datetime.now(timezone.utc) if item.status == "in_progress" else None,
+                completed_at=datetime.now(timezone.utc) if item.status == "completed" else None,
+            )
+            db.add(row)
+            db.flush()
+            results.append({"ok": True, "id": row.id, "action": "created"})
+    db.commit()
+    return {"ok": True, "results": results, "count": len(results)}
+
+
 @router.patch("/{tracked_id}")
 def update_tracked(
     tracked_id: int,
@@ -206,3 +267,36 @@ def bump_rewatch(tracked_id: int, db: Session = Depends(get_db), _=Depends(requi
     ))
     db.commit()
     return {"ok": True, "rewatch_count": t.rewatch_count}
+
+
+@router.get("/statuses")
+def list_tracking_statuses():
+    """Canonical unified tracking statuses across movies/TV/games/books/comics."""
+    return {"statuses": TRACKING_STATUSES}
+
+
+@router.post("/{tracked_id}/status")
+def set_tracking_status(tracked_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    from datetime import datetime, timezone
+    from app.models import TrackedItem
+    row = db.get(TrackedItem, tracked_id)
+    if not row:
+        raise HTTPException(404, "Not found")
+    status = (body.get("status") or "").strip().lower()
+    allowed = {s["id"] for s in TRACKING_STATUSES}
+    if status not in allowed:
+        raise HTTPException(400, f"status must be one of {sorted(allowed)}")
+    row.status = status
+    now = datetime.now(timezone.utc)
+    if status == "in_progress" and not getattr(row, "started_at", None):
+        row.started_at = now
+    if status == "completed":
+        row.completed_at = now
+        if getattr(row, "progress_percent", None) is not None:
+            row.progress_percent = 100.0
+    row.updated_at = now
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "id": row.id, "status": row.status}
+

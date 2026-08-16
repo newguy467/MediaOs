@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta charset="utf-8">
+<title>MediaOS Control Panel</title>
+<HTA:APPLICATION
+  ID="MediaOSPanel"
+  APPLICATIONNAME="MediaOS Control Panel"
+  BORDER="thin"
+  BORDERSTYLE="static"
+  CAPTION="yes"
+  SHOWINTASKBAR="yes"
+  SINGLEINSTANCE="yes"
+  SYSMENU="yes"
+  SCROLL="yes"
+  WINDOWSTATE="normal"
+  MAXIMIZEBUTTON="yes"
+  MINIMIZEBUTTON="yes"
+/>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    background: #0b0714;
+    color: #d8c9ff;
+    min-height: 100vh;
+  }
+  .top {
+    background: linear-gradient(135deg, #1b1130 0%, #0a0714 100%);
+    border-bottom: 1px solid #2a1c4a;
+    padding: 18px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand {
+    font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
+    color: #c9a2ff; text-shadow: 0 0 10px rgba(180,120,255,0.45);
+  }
+  .brand span { color: #43e8ff; text-shadow: 0 0 10px rgba(67,232,255,0.4); }
+  .path { font-size: 12px; color: #8577a8; }
+  .wrap { padding: 22px 28px 40px; max-width: 1100px; margin: 0 auto; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px;
+    color: #43e8ff; margin: 22px 0 12px; font-weight: 700;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px;
+  }
+  button.btn {
+    appearance: none; border: 1px solid #6d28d9;
+    background: #1a1230; color: #d8c9ff;
+    border-radius: 10px; padding: 14px 16px;
+    font-size: 13px; font-weight: 700; cursor: pointer;
+    text-align: left; transition: 0.15s;
+    font-family: inherit; width: 100%;
+  }
+  button.btn:hover { border-color: #a855f7; background: #241a3d; box-shadow: 0 0 10px rgba(168,85,247,0.3); }
+  button.btn.primary { background: #241a3d; border-color: #a855f7; color: #e9d5ff; }
+  button.btn.primary:hover { background: #2c2049; box-shadow: 0 0 12px rgba(168,85,247,0.4); }
+  button.btn.ok { background: #0f2a30; border-color: #22d3ee; color: #99f6ff; }
+  button.btn.ok:hover { background: #123640; box-shadow: 0 0 10px rgba(34,211,238,0.35); }
+  button.btn.warn { background: #332a10; border-color: #f59e0b; color: #ffd666; }
+  button.btn.warn:hover { background: #3d3313; box-shadow: 0 0 10px rgba(245,158,11,0.3); }
+  button.btn.danger { background: #33131c; border-color: #f43f5e; color: #ff9fae; }
+  button.btn.danger:hover { background: #401820; box-shadow: 0 0 10px rgba(244,63,94,0.3); }
+  .sub { display: block; font-size: 11px; font-weight: 400; color: #8577a8; margin-top: 4px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  select {
+    background: #1a1230; color: #d8c9ff; border: 1px solid #6d28d9;
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; font-family: inherit;
+  }
+  label.inline { font-size: 12px; color: #8577a8; }
+  #log {
+    margin-top: 18px; background: #08050f; border: 1px solid #2a1c4a;
+    border-radius: 10px; padding: 12px 14px; font-family: Consolas, monospace;
+    font-size: 12px; color: #43e8ff; min-height: 60px; max-height: 200px; overflow-y: auto;
+  }
+  .note { font-size: 12px; color: #6b6088; margin-top: 16px; line-height: 1.5; }
+</style>
+<script language="JScript">
+function shell() { return new ActiveXObject("WScript.Shell"); }
+function fso() { return new ActiveXObject("Scripting.FileSystemObject"); }
+
+function log(msg) {
+  var el = document.getElementById("log");
+  var t = new Date().toLocaleTimeString();
+  el.innerHTML = "[" + t + "] " + msg + "<br>" + el.innerHTML;
+}
+
+function htaDir() {
+  var p = unescape(window.location.pathname);
+  if (p.charAt(0) == "/") p = p.substr(1);
+  p = p.replace(/\//g, "\\");
+  var i = p.lastIndexOf("\\");
+  return i < 0 ? p : p.substring(0, i);
+}
+
+function composeFile() {
+  var sel = document.getElementById("composeSelect");
+  return sel ? sel.value : "docker-compose.yml";
+}
+
+function runPanelScript(name) {
+  try {
+    var pkg = htaDir();
+    var path = pkg + "\\scripts\\panel\\" + name;
+    if (!fso().FileExists(path)) {
+      log("Missing: " + path);
+      return;
+    }
+    var cf = composeFile();
+    shell().Run('cmd /c ""' + path + '" "' + cf + '""', 1, false);
+    log("Launched " + name + "  (" + cf + ")");
+  } catch (e) {
+    log("Error: " + e.message);
+  }
+}
+
+function openUrl(url) {
+  try { shell().Run(url); log("Open " + url); }
+  catch (e) { log(e.message); }
+}
+
+function runFile(relPath, label) {
+  try {
+    var path = htaDir() + "\\" + relPath;
+    if (!fso().FileExists(path)) {
+      log("Missing: " + path);
+      return;
+    }
+    if (/\.hta$/i.test(path)) {
+      shell().Run('mshta.exe "' + path + '"', 1, false);
+    } else {
+      shell().Run('cmd /c "' + path + '"', 1, false);
+    }
+    log("Launched " + (label || relPath));
+  } catch (e) {
+    log("Error: " + e.message);
+  }
+}
+
+function onLoad() {
+  document.getElementById("pkgPath").innerText = htaDir();
+  log("Ready.");
+}
+</script>
+</head>
+<body onload="onLoad()">
+  <div class="top">
+    <div>
+      <div class="brand">Media<span>OS</span> Control Panel</div>
+      <div class="path">Folder: <span id="pkgPath"></span></div>
+    </div>
+    <div class="row">
+      <label class="inline" for="composeSelect">Stack:</label>
+      <select id="composeSelect">
+        <option value="docker-compose.yml">docker-compose.yml (default)</option>
+        <option value="docker-compose.standalone.yml">standalone (all-in-one)</option>
+        <option value="docker-compose.nvidia.yml">nvidia (GPU transcode)</option>
+        <option value="docker-compose.amd.yml">amd (GPU transcode)</option>
+        <option value="docker-compose.intel.yml">intel (QSV transcode)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <h2>Stack</h2>
+    <div class="grid">
+      <button class="btn primary" onclick="runPanelScript('start.bat')">
+        Start MediaOS
+        <span class="sub">docker compose up -d · bootstraps .env on first run</span>
+      </button>
+      <button class="btn danger" onclick="runPanelScript('stop.bat')">
+        Stop MediaOS
+        <span class="sub">docker compose down · data volumes untouched</span>
+      </button>
+      <button class="btn" onclick="runPanelScript('restart.bat')">
+        Restart MediaOS
+        <span class="sub">docker compose restart</span>
+      </button>
+      <button class="btn warn" onclick="runPanelScript('update.bat')">
+        Update
+        <span class="sub">git pull + rebuild + up -d</span>
+      </button>
+    </div>
+
+    <h2>Access</h2>
+    <div class="grid">
+      <button class="btn ok" onclick="runPanelScript('open-ui.bat')">
+        Open MediaOS UI
+        <span class="sub">Opens the web app in your browser</span>
+      </button>
+      <button class="btn ok" onclick="runPanelScript('health-check.bat')">
+        Health Check
+        <span class="sub">Container status + /api/health probe</span>
+      </button>
+      <button class="btn ok" onclick="runPanelScript('view-logs.bat')">
+        View Logs
+        <span class="sub">Live-tail the mediaos container</span>
+      </button>
+      <button class="btn ok" onclick="runPanelScript('open-data-folder.bat')">
+        Open Data Folder
+        <span class="sub">Media libraries + downloads</span>
+      </button>
+    </div>
+
+    <h2>Maintenance</h2>
+    <div class="grid">
+      <button class="btn" onclick="runPanelScript('backup.bat')">
+        Backup Config + Database
+        <span class="sub">pg_dump + .env → backups\&lt;timestamp&gt;.zip</span>
+      </button>
+      <button class="btn" onclick="runPanelScript('edit-env.bat')">
+        Edit .env
+        <span class="sub">Opens in Notepad · creates from template if missing</span>
+      </button>
+      <button class="btn" onclick="openUrl(htaDir() + '\\MediaOS-Guide.html')">
+        Open Guide
+        <span class="sub">Quick-start &amp; troubleshooting</span>
+      </button>
+    </div>
+
+    <h2>Developer</h2>
+    <div class="grid">
+      <button class="btn warn" onclick="runFile('scripts\\windows\\dashboard.hta', 'Build Tools Dashboard')">
+        Build Tools Dashboard
+        <span class="sub">Install deps · build UI · run tests · dev server</span>
+      </button>
+    </div>
+
+    <div id="log"></div>
+    <div class="note">
+      Each action opens its own console window so you can read the full
+      output — closing this panel does not stop anything that's already
+      running. Change the "Stack" dropdown above before Start / Stop /
+      Restart / Update / Health Check / Logs / Backup if you're not using
+      the default <code>docker-compose.yml</code>. The Build Tools
+      Dashboard is a separate window for working on MediaOS's source code
+      (install/build/test/push) — most people running the app day-to-day
+      won't need it.
+    </div>
+  </div>
+</body>
+</html>

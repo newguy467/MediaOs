@@ -89,6 +89,12 @@ class MediaItem(Base):
     series_status: Mapped[str | None] = mapped_column(String, nullable=True)
     # Series/saga name for books, audiobooks, comic volumes
     series_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Comma-separated tags, substring/OR-matched (same convention as
+    # LiveTvVirtualChannel.genre_filter). Used today by music smart playlists
+    # (source=library_genre / library_mood); generic enough for other media
+    # types to adopt later without a schema change.
+    genre: Mapped[str | None] = mapped_column(String, nullable=True)
+    mood: Mapped[str | None] = mapped_column(String, nullable=True)
 
     file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -397,6 +403,35 @@ class SmartList(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class MusicSmartlist(Base):
+    """A saved, live-updating *filter over the existing local music library*.
+
+    Deliberately a separate model from SmartList: SmartList's whole shape
+    (source_ref against an external API, min_year/max_year/min_vote_average,
+    last_added_count) is built around discovering and adding *new* items from
+    TMDb/Trakt/IMDb. A music smart playlist does the opposite — it queries
+    MediaItem/MusicTrack rows already in the library and re-evaluates on
+    every read, so there's nothing to "run" or "add"; see
+    app/services/music_smartlists.py `resolve_smartlist()`.
+    """
+
+    __tablename__ = "music_smartlists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # library_genre | library_mood | library_recent | library_most_played
+    source: Mapped[str] = mapped_column(String, default="library_genre")
+    # Substring match against MediaItem.genre / .mood, comma list = OR
+    # (same convention as LiveTvVirtualChannel.genre_filter).
+    genre_filter: Mapped[str | None] = mapped_column(String, nullable=True)
+    mood_filter: Mapped[str | None] = mapped_column(String, nullable=True)
+    # library_recent: only include albums added in the last N days
+    added_within_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # library_most_played: only include tracks with at least this many plays
+    min_play_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_limit: Mapped[int] = mapped_column(Integer, default=50)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
 
 class Indexer(Base):
     """Built-in Torznab/Newznab indexer (Prowlarr replacement path)."""
@@ -592,6 +627,9 @@ class ComicIssue(Base):
     status: Mapped[ItemStatus] = mapped_column(Enum(ItemStatus), default=ItemStatus.wanted)
     file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_page_read: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     volume: Mapped["MediaItem"] = relationship()
 
@@ -692,6 +730,12 @@ class MusicTrack(Base):
     file_path: Mapped[str | None] = mapped_column(String, nullable=True)
     monitored: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[ItemStatus] = mapped_column(Enum(ItemStatus), default=ItemStatus.wanted)
+    # Local play counter, incremented via POST /api/music/track/{id}/played —
+    # the frontend calls this from the same ~50%-played threshold that
+    # already drives scrobble-out (store.js `_scrobbleOut`). Powers the
+    # library_most_played smart playlist source; independent of Last.fm/
+    # ListenBrainz, which only track plays remotely and only when enabled.
+    play_count: Mapped[int] = mapped_column(Integer, default=0)
 
     album: Mapped["MediaItem"] = relationship()
 
@@ -989,4 +1033,31 @@ class HomelabLink(Base):
     health_check_url: Mapped[str | None] = mapped_column(String, nullable=True)
     last_status: Mapped[str | None] = mapped_column(String, nullable=True)  # up|down|unknown
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class GameInstallJob(Base):
+    """Host install script run for a game."""
+    __tablename__ = "game_install_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, default="queued")  # queued|running|done|failed
+    command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    returncode: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PathMap(Base):
+    """Container path ↔ host path mapping for organize/stream."""
+    __tablename__ = "path_maps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="default")
+    container_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    host_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    media_type: Mapped[str | None] = mapped_column(String, nullable=True)  # optional scope
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

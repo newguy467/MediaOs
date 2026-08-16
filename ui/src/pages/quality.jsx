@@ -5,6 +5,39 @@ import { api, TMDB, adultFetch } from "../api.js";
 import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
 import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
 
+function QualityPacksRow() {
+  const [packs, setPacks] = React.useState([]);
+  const [busy, setBusy] = React.useState(null);
+  const [msg, setMsg] = React.useState("");
+  React.useEffect(() => {
+    fetch("/api/quality-ui/presets").then(r=>r.json()).then(d=>setPacks(d.packs||[])).catch(()=>{});
+  }, []);
+  async function apply(id) {
+    setBusy(id); setMsg("");
+    try {
+      const r = await fetch(`/api/quality-ui/presets/${id}/apply`, { method: "POST" }).then(async x=>{
+        const j = await x.json().catch(()=>({}));
+        if (!x.ok) throw new Error(j.detail||x.statusText);
+        return j;
+      });
+      setMsg(`Applied ${r.pack?.label || id}`);
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(null);
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        {packs.map(p => (
+          <button key={p.id} type="button" className="btn btn-sm" disabled={busy===p.id} onClick={()=>apply(p.id)} title={p.help||p.description}>
+            {busy===p.id ? "…" : p.label}
+          </button>
+        ))}
+      </div>
+      {msg && <p className="text-xs opacity-70">{msg}</p>}
+    </div>
+  );
+}
+
 function QualityProfilesPage() {
   const empty = () => ({
     name: '', media_type: 'movie', is_default: false, cutoff: '1080p', min_seeders: 3,
@@ -124,6 +157,14 @@ function QualityProfilesPage() {
               <span className="opacity-80">{trashStatus.message}</span>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="card mr-panel border-0">
+        <div className="card-body p-4 gap-2">
+          <h2 className="font-semibold text-sm">Quality packs</h2>
+          <p className="text-xs opacity-50">One-click HD / 4K / Anime preference packs (stored as active preset).</p>
+          <QualityPacksRow />
         </div>
       </div>
 

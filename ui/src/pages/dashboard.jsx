@@ -107,20 +107,35 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
     { id: 'external_arr', enabled: true },
     { id: 'games_wanted', enabled: true },
     { id: 'continue_watching', enabled: true },
+    { id: 'continue_reading', enabled: true },
   ];
   const [layout, setLayout] = useState(() => {
     try {
       const raw = localStorage.getItem('mediaos.dashboard.layout');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved)) {
+          // Merge in any new default widgets (e.g. continue_reading) without
+          // wiping the user's enable/order preferences for known ids.
+          const have = new Set(saved.map(w => w && w.id).filter(Boolean));
+          const merged = [...saved];
+          for (const w of DEFAULT_LAYOUT) {
+            if (!have.has(w.id)) merged.push({ ...w });
+          }
+          return merged;
+        }
+      }
     } catch {}
     return DEFAULT_LAYOUT;
   });
   const [edit, setEdit] = useState(false);
   const [bundle, setBundle] = useState(null);
   const [nowPlaying, setNowPlaying] = useState(null);
+  const [attention, setAttention] = useState([]);
   const load = () => {
     fetch('/api/overhaul/dashboard').then(r=>r.json()).then(setBundle).catch(()=>setBundle(null));
     fetch('/api/now-playing').then(r=>r.json()).then(setNowPlaying).catch(()=>setNowPlaying(null));
+    fetch('/api/library/attention').then(r=>r.json()).then(d=>setAttention(d.items||[])).catch(()=>setAttention([]));
   };
   useEffect(()=>{ load(); const i=setInterval(load, 30000); return ()=>clearInterval(i); }, []);
   function saveLayout(next) {
@@ -150,6 +165,7 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
   const externalArr = bundle?.external_arr || [];
   const gamesWanted = bundle?.games_wanted || [];
   const continueWatching = bundle?.continue_watching || [];
+  const continueReading = bundle?.continue_reading || [];
   const movieN = movies?.length ?? lib.movie ?? 0;
   const tvN = series?.length ?? lib.tv ?? 0;
 
@@ -296,9 +312,23 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
       render: () => (
         <div className="card bg-base-200 border border-base-content/5">
           <div className="card-body p-4 gap-1 text-xs">
-            <h2 className="font-semibold text-sm">System</h2>
+            <div className="flex justify-between items-center">
+              <h2 className="font-semibold text-sm">System</h2>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setPage&&setPage('settings')}>Settings</button>
+            </div>
             <div>MediaOs <b>v{health.version||'—'}</b> · {health.status||'ok'}</div>
             <div className="opacity-50">Scheduler searches new/missing TV episodes automatically (calendar + RSS lookback).</div>
+            {(health.status && String(health.status).toLowerCase()!=='ok') && (
+              <div className="alert alert-warning text-xs py-1 mt-1">
+                Health not OK — open <button type="button" className="link" onClick={()=>setPage&&setPage('settings')}>Settings</button>
+                {' '}or <button type="button" className="link" onClick={()=>setPage&&setPage('settings-vpnsettings')}>VPN</button>.
+              </div>
+            )}
+            {(externalArr||[]).some(a=>a.status==='down') && (
+              <div className="text-xs text-error mt-1">
+                External *arr down — <button type="button" className="link" onClick={()=>setPage&&setPage('settings-integrations')}>Integrations</button>
+              </div>
+            )}
           </div>
         </div>
       ),
@@ -357,10 +387,60 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
         <div className="card bg-base-200 border border-base-content/5">
           <div className="card-body p-4 gap-2">
             <h2 className="font-semibold text-sm">Continue watching</h2>
-            {(continueWatching||[]).slice(0,6).map((c,i)=>(
-              <div key={i} className="text-xs">#{c.media_item_id||c.game_id} — {Math.round(c.progress_percent||0)}% <span className="opacity-50">{c.source||''}</span></div>
-            ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {(continueWatching||[]).slice(0,6).map((c,i)=>(
+                <button key={i} type="button" className="text-left group" onClick={()=>{
+                  if (c.page) setPage && setPage(c.page);
+                  window.dispatchEvent(new CustomEvent('mediaos-open-item', {
+                    detail: { mediaType: c.media_type, id: c.media_item_id || c.game_id },
+                  }));
+                }}>
+                  <div className="aspect-[2/3] w-full rounded overflow-hidden bg-base-300 relative">
+                    {c.poster_path
+                      ? <img className="w-full h-full object-cover group-hover:opacity-80" src={c.poster_path.startsWith('http')?c.poster_path:`${TMDB}${c.poster_path}`} alt="" loading="lazy" />
+                      : <div className="w-full h-full flex items-center justify-center text-xs opacity-40 p-1 text-center">{c.title}</div>}
+                    <progress className="progress progress-primary absolute bottom-0 left-0 right-0 h-1 rounded-none" value={Math.round(c.progress_percent||0)} max="100"></progress>
+                  </div>
+                  <div className="text-xs mt-1 truncate">{c.title}</div>
+                  {c.subtitle && <div className="text-[10px] opacity-50 truncate">{c.subtitle}</div>}
+                </button>
+              ))}
+            </div>
             {!continueWatching.length && <p className="text-xs opacity-50">No in-progress items</p>}
+          </div>
+        </div>
+      ),
+    },
+    continue_reading: {
+      label: 'Continue reading',
+      render: () => (
+        <div className="card bg-base-200 border border-base-content/5">
+          <div className="card-body p-4 gap-2">
+            <h2 className="font-semibold text-sm">Continue reading</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {(continueReading||[]).slice(0,6).map((c,i)=>(
+                <button key={i} type="button" className="text-left group" onClick={()=>{
+                  if (c.page) setPage && setPage(c.page);
+                  window.dispatchEvent(new CustomEvent('mediaos-open-item', {
+                    detail: { mediaType: c.media_type, id: c.media_item_id },
+                  }));
+                }}>
+                  <div className="aspect-[2/3] w-full rounded overflow-hidden bg-base-300 relative">
+                    {c.poster_path
+                      ? <img className="w-full h-full object-cover group-hover:opacity-80" src={c.poster_path.startsWith('http')?c.poster_path:c.poster_path} alt="" loading="lazy" />
+                      : <div className="w-full h-full flex items-center justify-center text-xs opacity-40 p-1 text-center">{c.title}</div>}
+                  </div>
+                  <div className="text-xs mt-1 truncate">{c.title}</div>
+                  {c.subtitle && <div className="text-[10px] opacity-50 truncate">{c.subtitle}</div>}
+                </button>
+              ))}
+            </div>
+            {!continueReading.length && (
+              <div className="text-xs opacity-50 space-y-1">
+                <p>No in-progress comics/manga</p>
+                <p>Open a comic and mark pages read, or <button type="button" className="link link-hover" onClick={()=>saveLayout(DEFAULT_LAYOUT)}>reset dashboard layout</button> if this widget was hidden.</p>
+              </div>
+            )}
           </div>
         </div>
       ),
@@ -409,7 +489,16 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
         </div></div>
       )}
       <div className="space-y-4">
-        {layout.filter(w=>w.enabled && (w.id!=='games_wanted' || em.includes('games')) && (w.id!=='dvr' || em.includes('livetv'))).map(w=>(
+        {attention.length > 0 && (
+        <div className="alert alert-warning text-xs py-2 mb-3 flex flex-wrap gap-2 items-center">
+          <span className="font-semibold">Needs attention</span>
+          {attention.slice(0,6).map((a,i)=>(
+            <span key={i} className="badge badge-sm badge-outline truncate max-w-[10rem]">{a.kind}: {a.title}</span>
+          ))}
+          <button type="button" className="btn btn-xs" onClick={()=>setPage&&setPage('activity')}>Open activity</button>
+        </div>
+      )}
+      {layout.filter(w=>w.enabled && (w.id!=='games_wanted' || em.includes('games')) && (w.id!=='dvr' || em.includes('livetv'))).map(w=>(
           <div key={w.id}>{widgetDefs[w.id]?.render?.()}</div>
         ))}
       </div>

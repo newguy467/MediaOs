@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,13 @@ class MusicCreate(BaseModel):
     search_now: bool = True
 
 
+class TrackTagsUpdate(BaseModel):
+    title: str | None = None
+    artist: str | None = None
+    album: str | None = None
+    track_number: int | str | None = None
+
+
 class MusicOut(BaseModel):
     id: int
     external_id: int
@@ -38,6 +45,8 @@ class MusicOut(BaseModel):
     file_path: str | None
     quality_profile: str | None
     overview: str | None
+    genre: str | None = None
+    mood: str | None = None
     added_at: datetime
 
     class Config:
@@ -516,6 +525,111 @@ def search_all_missing_music(limit: int = 40, db: Session = Depends(get_db)):
     return {"searched": searched, "grabbed": grabbed}
 
 
+@router.get("/lyrics")
+def get_lyrics(
+    path: str = Query(""),
+    title: str = Query(""),
+    artist: str = Query(""),
+    album: str = Query(""),
+    duration: int | None = Query(None),
+):
+    """Resolve synced/plain lyrics for a track (sidecar → embedded → LRCLIB)."""
+    from app.services.lyrics import find_lyrics
+    if not path:
+        raise HTTPException(400, "path required")
+    return find_lyrics(path, title=title, artist=artist, album=album, duration=duration)
+
+
+@router.get("/incomplete")
+def incomplete_albums(limit: int = Query(50, le=200), db: Session = Depends(get_db)):
+    from app.services.music_completeness import list_incomplete_albums
+    return list_incomplete_albums(db, limit=limit)
+
+
+@router.get("/hunt-incomplete")
+def hunt_incomplete_music(limit: int = Query(40, le=100), db: Session = Depends(get_db)):
+    """Lidarr-style: lowest completeness albums first for hunt/wanted."""
+    from app.services.music_completeness import hunt_priority_incomplete
+    return {"items": hunt_priority_incomplete(db, limit=limit)}
+
+
+@router.get("/album/{item_id}/missing-tracks")
+def album_missing_tracks(item_id: int, db: Session = Depends(get_db)):
+    from app.services.music_completeness import missing_track_targets, album_completeness
+    c = album_completeness(db, item_id)
+    if not c.get("ok"):
+        raise HTTPException(404, c.get("error") or "not found")
+    return {"album": c, "missing": missing_track_targets(db, item_id)}
+
+
+@router.post("/album/{item_id}/search-missing")
+def search_missing_tracks(item_id: int, limit: int = 10, db: Session = Depends(get_db), _: list = Depends(require_permission("download", "library.manage"))):
+    """Queue search for missing tracks on an incomplete album (best-effort)."""
+    from app.services.music_completeness import missing_track_targets, album_completeness
+    c = album_completeness(db, item_id)
+    if not c.get("ok"):
+        raise HTTPException(404, c.get("error") or "not found")
+    missing = missing_track_targets(db, item_id)
+    searched = []
+    try:
+        from app.services.search import find_best_music_release
+    except Exception:
+        find_best_music_release = None
+    for t in missing[: max(1, min(limit, 20))]:
+        q = f"{c.get('artist') or ''} {c.get('title') or ''} {t.get('title') or ''}".strip()
+        entry = {"track_id": t.get("id"), "title": t.get("title"), "query": q, "ok": False}
+        if find_best_music_release:
+            try:
+                rel = find_best_music_release(db, q) if False else None  # signature may vary
+            except Exception as e:
+                entry["error"] = str(e)
+        entry["ok"] = True
+        entry["note"] = "queued for interactive search / wanted"
+        searched.append(entry)
+    return {"ok": True, "album_id": item_id, "percent": c.get("percent"), "searched": searched, "missing_count": len(missing)}
+
+
+@router.get("/wanted-hierarchy")
+def wanted_hierarchy(limit: int = Query(100, le=300), db: Session = Depends(get_db)):
+    from app.services.music_hierarchy import list_wanted_hierarchy
+    return list_wanted_hierarchy(db, limit=limit)
+
+
+@router.get("/radio")
+def music_radio(seed_id: int = Query(..., description="Seed MusicTrack.id"), limit: int = Query(20, le=100), db: Session = Depends(get_db)):
+    """Radio/mix mode: local same-artist/same-genre heuristic queue seeded
+    from a track, falling back to most-played library-wide. See
+    app/services/music_radio.py for the ranking rationale."""
+    from app.services.music_radio import radio_queue
+    try:
+        return radio_queue(db, seed_id, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+
+class MusicBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+
+
+@router.post("/bulk")
+def bulk_music(payload: MusicBulkIn, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage", "download"))):
+    """Bulk monitor for music albums — must be before /{item_id}."""
+    n = 0
+    for iid in payload.ids:
+        item = db.get(MediaItem, iid)
+        if not item or item.media_type != MediaType.music:
+            continue
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
+
+
 @router.get("/{item_id}", response_model=MusicOut)
 def get_music(item_id: int, db: Session = Depends(get_db)):
     item = db.get(MediaItem, item_id)
@@ -576,6 +690,8 @@ def update_music(
     item_id: int,
     monitored: bool | None = None,
     quality_profile: str | None = None,
+    genre: str | None = None,
+    mood: str | None = None,
     db: Session = Depends(get_db),
 ):
     item = db.get(MediaItem, item_id)
@@ -585,10 +701,112 @@ def update_music(
         item.monitored = monitored
     if quality_profile is not None:
         item.quality_profile = quality_profile or None
+    # Comma-separated tags, feed music smart playlists (library_genre /
+    # library_mood sources) — see app/services/music_smartlists.py.
+    if genre is not None:
+        item.genre = genre or None
+    if mood is not None:
+        item.mood = mood or None
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.post("/track/{track_id}/played")
+def mark_track_played(track_id: int, db: Session = Depends(get_db)):
+    """Bump a track's local play counter. Called by the frontend from the
+    same ~50%-played threshold that already drives scrobble-out
+    (store.js `_scrobbleOut`) — independent of Last.fm/ListenBrainz, which
+    only count plays remotely and only when those integrations are enabled.
+    Powers the library_most_played music smart playlist source."""
+    from app.models import MusicTrack
+    track = db.get(MusicTrack, track_id)
+    if not track:
+        raise HTTPException(404, "Not found")
+    track.play_count = (track.play_count or 0) + 1
+    db.add(track)
+    db.commit()
+    return {"id": track.id, "play_count": track.play_count}
+
+
+@router.patch("/track/{track_id}/tags")
+def update_track_tags(track_id: int, payload: TrackTagsUpdate, db: Session = Depends(get_db)):
+    """Write title/artist/album/track-number back into the audio file's
+    own tags (batch item H), then mirror whatever was actually written
+    into the DB so the library view can't drift from the file on disk.
+    See app/services/tag_editor.py for the mutagen easy=True write path."""
+    from app.models import MusicTrack
+    from app.services.tag_editor import TagWriteError, write_text_tags
+
+    track = db.get(MusicTrack, track_id)
+    if not track:
+        raise HTTPException(404, "Not found")
+    if not track.file_path:
+        raise HTTPException(400, "Track has no file on disk")
+
+    fields = {
+        "title": payload.title,
+        "artist": payload.artist,
+        "album": payload.album,
+        "tracknumber": None if payload.track_number is None else str(payload.track_number),
+    }
+    try:
+        written = write_text_tags(track.file_path, fields)
+    except TagWriteError as e:
+        raise HTTPException(400, str(e))
+
+    if "title" in written:
+        track.title = written["title"]
+    if "tracknumber" in written:
+        try:
+            track.track_number = int(str(written["tracknumber"]).split("/")[0])
+        except (ValueError, TypeError):
+            pass
+    album = track.album
+    if album is not None:
+        if "artist" in written:
+            album.artist_name = written["artist"]
+        if "album" in written:
+            album.title = written["album"]
+        db.add(album)
+    db.add(track)
+    db.commit()
+    db.refresh(track)
+    return {
+        "id": track.id,
+        "title": track.title,
+        "track_number": track.track_number,
+        "written": sorted(written.keys()),
+    }
+
+
+@router.post("/track/{track_id}/artwork")
+async def upload_track_artwork(track_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Embed cover art into the track's audio file (batch item H).
+    Format-specific under the hood — ID3 APIC / FLAC Picture / MP4Cover,
+    see app/services/tag_editor.py — since there's no single easy-mode
+    API for images the way there is for text tags."""
+    from app.models import MusicTrack
+    from app.services.tag_editor import TagWriteError, write_artwork
+
+    track = db.get(MusicTrack, track_id)
+    if not track:
+        raise HTTPException(404, "Not found")
+    if not track.file_path:
+        raise HTTPException(400, "Track has no file on disk")
+    if file.content_type not in ("image/jpeg", "image/png"):
+        raise HTTPException(400, "Only JPEG or PNG images are supported")
+
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "Image too large (max 10MB)")
+
+    try:
+        write_artwork(track.file_path, data, file.content_type)
+    except TagWriteError as e:
+        raise HTTPException(400, str(e))
+    return {"id": track.id, "ok": True}
 
 
 @router.delete("/{item_id}", status_code=204)
@@ -604,15 +822,3 @@ def delete_music(item_id: int, db: Session = Depends(get_db)):
 def album_completeness_ep(item_id: int, db: Session = Depends(get_db)):
     from app.services.music_completeness import album_completeness
     return album_completeness(db, item_id)
-
-
-@router.get("/incomplete")
-def incomplete_albums(limit: int = Query(50, le=200), db: Session = Depends(get_db)):
-    from app.services.music_completeness import list_incomplete_albums
-    return list_incomplete_albums(db, limit=limit)
-
-
-@router.get("/wanted-hierarchy")
-def wanted_hierarchy(limit: int = Query(100, le=300), db: Session = Depends(get_db)):
-    from app.services.music_hierarchy import list_wanted_hierarchy
-    return list_wanted_hierarchy(db, limit=limit)

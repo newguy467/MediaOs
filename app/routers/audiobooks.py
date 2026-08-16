@@ -104,6 +104,32 @@ def add_audiobook(payload: AudiobookCreate, db: Session = Depends(get_db), _: li
     return item
 
 
+
+
+class AudiobookBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+    quality_profile: str | None = None
+
+
+@router.post("/bulk")
+def bulk_audiobooks(payload: AudiobookBulkIn, db: Session = Depends(get_db)):
+    """Bulk monitor / quality-profile update — same shape as books/movies."""
+    q = db.query(MediaItem).filter(
+        MediaItem.media_type == MediaType.audiobook,
+        MediaItem.id.in_(payload.ids),
+    )
+    n = 0
+    for item in q.all():
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
 @router.delete("/{item_id}", status_code=204)
 def delete_audiobook(item_id: int, db: Session = Depends(get_db)):
     item = db.get(MediaItem, item_id)
@@ -142,6 +168,36 @@ def search_all_missing_audiobooks(limit: int = 40, db: Session = Depends(get_db)
     db.commit()
     return {"searched": searched, "grabbed": grabbed}
 
+
+
+
+
+@router.get("/wanted-hierarchy")
+def audiobooks_wanted_hierarchy(db: Session = Depends(get_db)):
+    rows = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == MediaType.audiobook,
+            MediaItem.monitored.is_(True),
+            MediaItem.status.in_([ItemStatus.wanted, ItemStatus.missing, ItemStatus.failed]),
+        )
+        .order_by(MediaItem.title)
+        .all()
+    )
+    tree: dict = {}
+    for b in rows:
+        author = (getattr(b, "artist_name", None) or b.overview or "Unknown").split(",")[0].strip() or "Unknown"
+        tree.setdefault(author, []).append({
+            "id": b.id,
+            "title": b.title,
+            "status": b.status.value if b.status else None,
+        })
+    return {
+        "authors": [
+            {"name": n, "wanted_count": len(items), "items": items}
+            for n, items in sorted(tree.items(), key=lambda x: (-len(x[1]), x[0].lower()))
+        ]
+    }
 
 @router.get("/{item_id}")
 def get_audiobook(item_id: int, db: Session = Depends(get_db)):
@@ -207,3 +263,5 @@ def search_and_grab_audiobook(item_id: int, db: Session = Depends(get_db)):
         "title": release.get("title"),
         "indexer": release.get("indexer"),
     }
+
+

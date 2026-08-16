@@ -70,6 +70,12 @@ def _apprise_notify(message: str) -> None:
 
 def notify(message: str, *, title: str = "mediaos") -> None:
     """Fan-out to all configured notification channels."""
+    try:
+        from app.services.notifications import send as _center_send
+        _center_send(message, title=title)
+        return
+    except Exception:
+        pass
     _apprise_notify(message)
     _discord_notify(message, title=title)
     _telegram_notify(f"{title}: {message}" if title else message)

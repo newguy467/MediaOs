@@ -238,6 +238,7 @@ class ScoreResult:
     rejection_reason: str | None = None
     matched_formats: list[str] = field(default_factory=list)
     parsed: ParsedRelease | None = None
+    breakdown: dict = field(default_factory=dict)
 
 
 def _cf_matches(cf: CustomFormat, parsed: ParsedRelease, title: str) -> bool:
@@ -313,6 +314,7 @@ def score_release(
                 score=score,
                 rejection_reason=f"seeders {seeders or 0} < min {profile.min_seeders}",
                 parsed=parsed,
+                breakdown={"total": score, "rejected": "seeders"},
             )
 
     # Size soft bonus (avoid tiny fakes / huge trash without quality tags)
@@ -348,6 +350,7 @@ def score_release(
         score=score,
         matched_formats=matched,
         parsed=parsed,
+        breakdown={"total": score, "matched_formats": matched},
     )
 
 
@@ -573,3 +576,62 @@ def default_adult_profile() -> QualityProfile:
         ],
     )
 
+
+
+# Named packs — pick one and go (TRaSH-inspired, single app)
+PRESET_PACKS = {
+    "hd": {
+        "id": "hd",
+        "label": "HD (1080p)",
+        "description": "Prefer 1080p WEB/BluRay; solid default for most libraries",
+        "preferred_resolutions": ["1080p", "720p"],
+        "cutoff_resolution": "1080p",
+        "min_score": 0,
+    },
+    "uhd": {
+        "id": "uhd",
+        "label": "4K / UHD",
+        "description": "Prefer 2160p with HDR/DV scoring boosts",
+        "preferred_resolutions": ["2160p", "1080p"],
+        "cutoff_resolution": "2160p",
+        "min_score": 0,
+    },
+    "anime": {
+        "id": "anime",
+        "label": "Anime",
+        "description": "Anime-friendly ranking (1080p WEB preferred)",
+        "preferred_resolutions": ["1080p", "720p", "2160p"],
+        "cutoff_resolution": "1080p",
+        "min_score": 0,
+    },
+    "any": {
+        "id": "any",
+        "label": "Any quality",
+        "description": "No resolution cutoff — grab the best score available",
+        "preferred_resolutions": ["2160p", "1080p", "720p", "480p"],
+        "cutoff_resolution": None,
+        "min_score": -5000,
+    },
+}
+
+
+def list_preset_packs() -> list[dict]:
+    return list(PRESET_PACKS.values())
+
+
+def apply_preset_pack(pack_id: str) -> dict:
+    """Return a QualityProfile-like dict for the pack (caller persists if needed)."""
+    pack = PRESET_PACKS.get(pack_id) or PRESET_PACKS.get(str(pack_id).lower())
+    if not pack:
+        raise ValueError(f"Unknown preset pack: {pack_id}")
+    return {
+        "ok": True,
+        "pack": pack,
+        "profile": {
+            "name": pack["label"],
+            "preferred_resolutions": list(pack.get("preferred_resolutions") or []),
+            "cutoff_resolution": pack.get("cutoff_resolution"),
+            "min_score": pack.get("min_score", 0),
+            "source": f"preset:{pack['id']}",
+        },
+    }

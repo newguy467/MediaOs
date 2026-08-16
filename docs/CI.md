@@ -32,3 +32,9 @@ Require:
 ```bash
 npm run changelog:bump
 ```
+
+### Database in CI / local tests
+
+Pytest defaults to **SQLite** (`DATABASE_URL=sqlite:///...`) so the suite runs without Postgres.
+Alembic migrations are exercised against that SQLite DB in CI. For production-like checks, point
+`DATABASE_URL` at Postgres and run `alembic upgrade head` (see `docker-compose` for the full stack).

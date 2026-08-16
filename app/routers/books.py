@@ -93,6 +93,28 @@ def add_book(payload: BookCreate, db: Session = Depends(get_db), _: list = Depen
     return item
 
 
+
+
+class BookBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+    quality_profile: str | None = None
+
+
+@router.post("/bulk")
+def bulk_books(payload: BookBulkIn, db: Session = Depends(get_db)):
+    q = db.query(MediaItem).filter(MediaItem.media_type == MediaType.book, MediaItem.id.in_(payload.ids))
+    n = 0
+    for item in q.all():
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
 @router.delete("/{item_id}", status_code=204)
 def delete_book(item_id: int, db: Session = Depends(get_db)):
     item = db.get(MediaItem, item_id)
@@ -119,6 +141,37 @@ def search_and_grab_book(item_id: int, db: Session = Depends(get_db)):
 
 
 
+
+
+@router.get("/wanted-hierarchy")
+def books_wanted_hierarchy(db: Session = Depends(get_db)):
+    """Readarr-style author → wanted books tree."""
+    rows = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == MediaType.book,
+            MediaItem.monitored.is_(True),
+            MediaItem.status.in_([ItemStatus.wanted, ItemStatus.missing, ItemStatus.failed]),
+        )
+        .order_by(MediaItem.title)
+        .all()
+    )
+    tree: dict = {}
+    for b in rows:
+        author = (b.overview or "Unknown Author").split(",")[0].strip() or "Unknown Author"
+        tree.setdefault(author, []).append({
+            "id": b.id,
+            "title": b.title,
+            "year": b.year,
+            "status": b.status.value if b.status else None,
+            "poster_path": b.poster_path,
+        })
+    return {
+        "authors": [
+            {"name": n, "wanted_count": len(books), "books": books}
+            for n, books in sorted(tree.items(), key=lambda x: (-len(x[1]), x[0].lower()))
+        ]
+    }
 
 @router.get("/{item_id}")
 def get_book(item_id: int, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.view"))):
@@ -166,12 +219,6 @@ class BookUpdate(BaseModel):
 class BookFileIn(BaseModel):
     path: str | None = None
     clear: bool = False
-
-
-class BookBulkIn(BaseModel):
-    ids: list[int]
-    monitored: bool | None = None
-    quality_profile: str | None = None
 
 
 @router.patch("/{item_id}", response_model=BookOut)
@@ -245,19 +292,7 @@ def search_missing_books(limit: int = 40, db: Session = Depends(get_db)):
     return {"searched": searched, "grabbed": grabbed}
 
 
-@router.post("/bulk")
-def bulk_books(payload: BookBulkIn, db: Session = Depends(get_db)):
-    q = db.query(MediaItem).filter(MediaItem.media_type == MediaType.book, MediaItem.id.in_(payload.ids))
-    n = 0
-    for item in q.all():
-        if payload.monitored is not None:
-            item.monitored = payload.monitored
-        if payload.quality_profile is not None:
-            item.quality_profile = payload.quality_profile
-        db.add(item)
-        n += 1
-    db.commit()
-    return {"ok": True, "updated": n}
+
 
 
 @router.get("/authors/search")
@@ -332,3 +367,5 @@ def library_authors(db: Session = Depends(get_db)):
             for n, books in sorted(tree.items(), key=lambda x: x[0].lower())
         ]
     }
+
+

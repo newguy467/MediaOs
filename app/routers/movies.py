@@ -158,6 +158,24 @@ def search_all_missing_movies(limit: int = 40, db: Session = Depends(get_db)):
     return {"searched": searched, "grabbed": grabbed}
 
 
+@router.post("/bulk")
+def bulk_update_movies(payload: BulkProfileIn, db: Session = Depends(get_db)):
+    """Bulk monitor / quality-profile — must be registered before /{item_id}."""
+    updated = 0
+    for iid in payload.ids:
+        item = db.get(MediaItem, iid)
+        if not item or item.media_type != MediaType.movie:
+            continue
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        db.add(item)
+        updated += 1
+    db.commit()
+    return {"updated": updated}
+
+
 @router.get("/{item_id}", response_model=MovieOut)
 def get_movie(item_id: int, db: Session = Depends(get_db)):
     item = db.get(MediaItem, item_id)
@@ -313,10 +331,11 @@ def delete_movie(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{item_id}/subtitles")
-def fetch_movie_subtitles(item_id: int, db: Session = Depends(get_db)):
+def fetch_movie_subtitles(item_id: int, db: Session = Depends(get_db), profile_id: int | None = None):
     from pathlib import Path
 
     from app.services.subtitles import fetch_subtitles
+    from app.services.subtitle_profiles import resolve_languages
     item = db.get(MediaItem, item_id)
     if not item or item.media_type != MediaType.movie:
         raise HTTPException(404, "Not found")
@@ -325,24 +344,13 @@ def fetch_movie_subtitles(item_id: int, db: Session = Depends(get_db)):
     video = Path(item.file_path)
     if not video.is_file():
         raise HTTPException(400, "File missing on disk")
-    return fetch_subtitles(video, item=item)
-
-
-@router.post("/bulk")
-def bulk_update_movies(payload: BulkProfileIn, db: Session = Depends(get_db)):
-    updated = 0
-    for iid in payload.ids:
-        item = db.get(MediaItem, iid)
-        if not item or item.media_type != MediaType.movie:
-            continue
-        if payload.quality_profile is not None:
-            item.quality_profile = payload.quality_profile
-        if payload.monitored is not None:
-            item.monitored = payload.monitored
-        db.add(item)
-        updated += 1
-    db.commit()
-    return {"updated": updated}
+    prof = resolve_languages(profile_id)
+    return fetch_subtitles(
+        video,
+        item=item,
+        languages=prof["languages_csv"],
+        hearing_impaired=prof["hearing_impaired"],
+    )
 
 
 @router.patch("/{item_id}/desired-qualities")

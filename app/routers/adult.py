@@ -332,6 +332,28 @@ def search_all_missing_adult(
     return {"searched": searched, "grabbed": grabbed}
 
 
+
+
+
+
+@router.post("/bulk")
+def bulk_update(
+    payload: BulkIn,
+    db: Session = Depends(get_db),
+    _unlock=Depends(require_adult_unlock),
+):
+    q = db.query(MediaItem).filter(MediaItem.media_type == MediaType.adult, MediaItem.id.in_(payload.ids))
+    n = 0
+    for item in q.all():
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
 @router.get("/{item_id}")
 def get_adult(item_id: int, db: Session = Depends(get_db), _unlock=Depends(require_adult_unlock)):
     item = db.query(MediaItem).filter(MediaItem.id == item_id, MediaItem.media_type == MediaType.adult).one_or_none()
@@ -505,25 +527,6 @@ def manage_file(
     db.add(item)
     db.commit()
     return _out(item)
-
-
-@router.post("/bulk")
-def bulk_update(
-    payload: BulkIn,
-    db: Session = Depends(get_db),
-    _unlock=Depends(require_adult_unlock),
-):
-    q = db.query(MediaItem).filter(MediaItem.media_type == MediaType.adult, MediaItem.id.in_(payload.ids))
-    n = 0
-    for item in q.all():
-        if payload.monitored is not None:
-            item.monitored = payload.monitored
-        if payload.quality_profile is not None:
-            item.quality_profile = payload.quality_profile
-        db.add(item)
-        n += 1
-    db.commit()
-    return {"ok": True, "updated": n}
 
 
 @router.post("/search")

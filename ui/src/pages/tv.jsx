@@ -9,6 +9,16 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
   const showSkeleton = libLoading && !(series&&series.length);
   // skeleton rendered in list body when showSkeleton
   const [detailId, setDetailId] = useState(null);
+  // Jump straight to an item's detail view when opened from Global Search
+  // or the dashboard's Continue Watching row.
+  useEffect(() => {
+    const onOpenItem = (e) => {
+      if (!e.detail || !(e.detail.mediaType === 'tv')) return;
+      setDetailId(e.detail.id);
+    };
+    window.addEventListener('mediaos-open-item', onOpenItem);
+    return () => window.removeEventListener('mediaos-open-item', onOpenItem);
+  }, []);
   const [profiles, setProfiles] = useState([]);
   const [tvNav, setTvNav] = useState('series'); // series | add | import | mass | seasonpass
   const [q, setQ] = useState('');
@@ -106,18 +116,18 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 justify-between">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold tracking-tight">
+            <h1 className="mr-page-title">
               {tvNav==='series'?'Series':tvNav==='add'?'Add Series':tvNav==='import'?'Library Import':tvNav==='mass'?'Mass Editor':'Season Pass'}
             </h1>
             {tvNav==='series' && (
               <span className="badge badge-ghost badge-sm">{list.length}</span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" className="btn btn-ghost btn-sm gap-1" disabled={busy} onClick={updateAll} title="Search all missing episodes">
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+            <button type="button" className="btn btn-ghost btn-sm gap-1 shrink-0" disabled={busy} onClick={updateAll} title="Search all missing episodes">
               <Ic.Refresh /> Update all
             </button>
-            <button type="button" className="btn btn-ghost btn-sm gap-1" disabled={busy} onClick={async()=>{
+            <button type="button" className="btn btn-ghost btn-sm gap-1 shrink-0" disabled={busy} onClick={async()=>{
               setBusy(true);
               for (const s of series.filter(x=>x.monitored && (x.missing_count||0)>0).slice(0,20)) {
                 try { await api.tv.searchMissing(s.id); } catch(e) { setMsg(String(e.message||e)); }
@@ -126,17 +136,17 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
             }} title="Search monitored missing">
               <Ic.Rss /> RSS Sync
             </button>
-            <label className="input input-bordered input-sm flex items-center gap-2 w-40">
+            <label className="input input-bordered input-sm flex items-center gap-2 w-36 max-w-[11rem] shrink-0">
               <Ic.Search />
-              <input className="grow bg-transparent outline-none text-sm" placeholder="Search" value={q} onChange={e=>setQ(e.target.value)} />
+              <input className="grow bg-transparent outline-none text-sm min-w-0" placeholder="Search" value={q} onChange={e=>setQ(e.target.value)} />
             </label>
-            <select className="select select-bordered select-sm w-28" value={sort} onChange={e=>setSort(e.target.value)}>
+            <select className="select select-bordered select-sm w-28 shrink-0" value={sort} onChange={e=>setSort(e.target.value)}>
               <option value="title">Title</option>
               <option value="progress">Progress</option>
               <option value="missing">Missing</option>
               <option value="year">Year</option>
             </select>
-            <select className="select select-bordered select-sm w-28" value={filter} onChange={e=>setFilter(e.target.value)}>
+            <select className="select select-bordered select-sm w-28 shrink-0" value={filter} onChange={e=>setFilter(e.target.value)}>
               <option value="all">All</option>
               <option value="monitored">Monitored</option>
               <option value="missing">Has missing</option>
@@ -145,6 +155,26 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
           </div>
         </div>
         {msg && <div className="text-xs opacity-60">{msg}</div>}
+        {tvNav==='series' && Object.keys(selected).length > 0 && (
+          <div className="card bg-base-200 mb-2">
+            <div className="card-body p-3 gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs opacity-60">{Object.keys(selected).length} selected</span>
+                <button type="button" className="btn btn-xs" onClick={()=>setTvNav('mass')}>Open Mass Editor</button>
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={async()=>{
+                  try { await api.tv.bulk({ ids: Object.keys(selected).map(Number), monitored: true }); setSelected({}); refreshSeries && refreshSeries(); }
+                  catch(e){ setMsg(String(e.message||e)); }
+                }}>Monitor</button>
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={async()=>{
+                  try { await api.tv.bulk({ ids: Object.keys(selected).map(Number), monitored: false }); setSelected({}); refreshSeries && refreshSeries(); }
+                  catch(e){ setMsg(String(e.message||e)); }
+                }}>Unmonitor</button>
+                <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setSelected({})}>Clear</button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {tvNav==='add' && (
           <div className="space-y-3">
@@ -184,6 +214,14 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
                 }
                 setMsg('Search queued for selected');
               }}>Search missing</button>
+              <button type="button" className="btn btn-sm btn-accent" disabled={!Object.keys(selected).length} onClick={async()=>{
+                try {
+                  await api.tv.bulk({ ids: Object.keys(selected).map(Number), monitored: true });
+                  setMsg('Monitored selected (Season Pass-style: keep grabbing new eps)');
+                  setSelected({}); refreshSeries && refreshSeries();
+                } catch(e) { setMsg(String(e.message||e)); }
+              }} title="Monitor selected series so future episodes stay wanted">Season Pass monitor</button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setTvNav('seasonpass')}>Open Season Pass tab</button>
               <select className="select select-bordered select-sm" id="tv-bulk-profile" defaultValue="">
                 <option value="">Bulk quality…</option>
                 {tvProfiles.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
@@ -241,7 +279,7 @@ function TvPage({ series, refreshSeries, setMiniPlayer, setPage, libLoading=fals
                     <div key={s.id} className="group relative rounded-lg overflow-hidden bg-base-200 shadow-sm hover:shadow-md hover:ring-2 hover:ring-primary/40 transition-all cursor-pointer"
                       onClick={()=>setDetailId(s.id)}>
                       {/* select checkbox for mass editor */}
-                      <label className="absolute top-1.5 left-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
+                      <label className={`absolute top-1.5 left-1.5 z-10 transition-opacity ${selected[s.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e=>e.stopPropagation()}>
                         <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!selected[s.id]}
                           onChange={e=>{ setSelected(prev=>{ const n={...prev}; if(e.target.checked) n[s.id]=true; else delete n[s.id]; return n; }); }} />
                       </label>
@@ -428,6 +466,20 @@ function SeriesDetailPage({ seriesId, onBack, refreshSeries, setMiniPlayer }) {
     await fetch(`/api/tv/episodes/${ep.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ monitored: !ep.monitored }) });
     load();
   }
+  
+  async function setTrackStatus(status) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/tracking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_item_id: seriesId, status }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Track failed');
+      setMsg('Tracking: ' + String(status).replace(/_/g, ' '));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
+
   async function toggleMonitored() {
     await fetch(`/api/tv/${seriesId}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ monitored: !series.monitored }) });
     load(); refreshSeries && refreshSeries();
@@ -469,12 +521,21 @@ function SeriesDetailPage({ seriesId, onBack, refreshSeries, setMiniPlayer }) {
               <option value="">Default profile</option>
               {tvProfiles.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
             </select>
+            <select className="select select-bordered select-sm" defaultValue="" disabled={busy}
+              onChange={e=>{ if(e.target.value) { setTrackStatus(e.target.value); e.target.value=''; } }} title="Unified tracking">
+              <option value="">Track…</option>
+              <option value="planned">Planned</option>
+              <option value="in_progress">In progress</option>
+              <option value="completed">Completed</option>
+              <option value="on_hold">On hold</option>
+              <option value="dropped">Dropped</option>
+            </select>
           </div>
           <progress className="progress progress-primary w-full max-w-md h-2" value={ep?Math.round(100*dl/ep):0} max="100" />
           {series.overview && <p className="text-sm opacity-70 line-clamp-4 max-w-2xl">{series.overview}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={searchMissing}>Search missing (auto)</button>
-            <button type="button" className="btn btn-sm btn-accent" disabled={busy} title="Prefer stream / .strm path"
+            <button type="button" className="btn btn-sm btn-accent" disabled={busy} title="Add top interactive-search result as stream / .strm (parity)"
               onClick={async ()=>{
                 setBusy(true); setMsg(null);
                 try {

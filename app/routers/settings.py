@@ -295,6 +295,7 @@ def get_movie_settings():
 
     return {
         "download_mode": cfg.movie_download_mode,
+        "prefer_stream_on_search": bool(getattr(cfg, "prefer_stream_on_search", False)),
         "write_strm_sidecar": cfg.movie_write_strm_sidecar,
         "upgrade_enabled": cfg.upgrade_enabled,
         "upgrade_min_score_gap": cfg.upgrade_min_score_gap,

@@ -7,12 +7,55 @@ import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo
 
 function MoviesPage({ movies, refreshMovies, setMiniPlayer, setPage, libLoading=false }) {
   const [detailId, setDetailId] = useState(null);
+  // Jump straight to an item's detail view when opened from Global Search
+  // or the dashboard's Continue Watching row.
+  useEffect(() => {
+    const onOpenItem = (e) => {
+      if (!e.detail || !(e.detail.mediaType === 'movie')) return;
+      setDetailId(e.detail.id);
+    };
+    window.addEventListener('mediaos-open-item', onOpenItem);
+    return () => window.removeEventListener('mediaos-open-item', onOpenItem);
+  }, []);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all'); // all | monitored | missing | downloaded
   const [selected, setSelected] = useState({});
   const [qp, setQp] = useState('');
+  const [profiles, setProfiles] = useState([]);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => { api.settings.profiles().then(setProfiles).catch(()=>{}); }, []);
+  const movieProfiles = profiles.filter(p => p.media_type === 'movie');
+  const selectedIds = Object.keys(selected);
+
+  async function bulkMonitor(monitored) {
+    setBusy(true); setMsg(null);
+    try {
+      await api.movies.bulk({ ids: selectedIds.map(Number), monitored });
+      setSelected({});
+      refreshMovies && refreshMovies();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function bulkSearchMissing() {
+    setBusy(true); setMsg(null);
+    try {
+      for (const id of selectedIds) { await api.movies.searchNow(Number(id)); }
+      setMsg('Search queued for selected'); refreshMovies && refreshMovies();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function bulkApplyProfile() {
+    if (!qp) return;
+    setBusy(true); setMsg(null);
+    try {
+      await api.movies.bulk({ ids: selectedIds.map(Number), quality_profile: qp });
+      setSelected({}); setQp('');
+      refreshMovies && refreshMovies();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
 
   if (detailId) {
     return <MovieDetailPage movieId={detailId} onBack={()=>setDetailId(null)} refreshMovies={refreshMovies} setMiniPlayer={setMiniPlayer} />;
@@ -62,18 +105,52 @@ function MoviesPage({ movies, refreshMovies, setMiniPlayer, setPage, libLoading=
       </>}
     >
       {msg && <div className="alert alert-info text-xs py-2 mb-3">{msg}</div>}
+      {selectedIds.length > 0 && (
+        <div className="card bg-base-200 mb-3">
+          <div className="card-body p-3 gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs opacity-60">{selectedIds.length} selected</span>
+              {filtered.length > 0 && (
+              <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>{
+                const n={};
+                filtered.forEach(m=>{ n[m.id]=true; });
+                setSelected(n);
+              }}>Select all visible</button>
+              )}
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(true)}>Monitor selected</button>
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(false)}>Unmonitor selected</button>
+              <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={bulkSearchMissing}>Search missing</button>
+              {movieProfiles.length > 0 && (
+              <>
+              <select className="select select-bordered select-xs" value={qp} onChange={e=>setQp(e.target.value)}>
+                <option value="">Bulk quality…</option>
+                {movieProfiles.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+              </select>
+              <button type="button" className="btn btn-xs" disabled={busy||!qp} onClick={bulkApplyProfile}>Apply profile</button>
+              </>
+              )}
+              <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>setSelected({})}>Clear</button>
+            </div>
+          </div>
+        </div>
+      )}
       {libLoading && !movies?.length && <SkeletonLoader rows={12} />}
       <div className="poster-grid">
         {filtered.map(m => (
-          <PosterTile
-            key={m.id}
-            title={m.title}
-            year={m.year}
-            poster={m.poster_path}
-            status={m.status}
-            quality={m.quality_profile || (m.status==='downloaded' ? 'HD' : null)}
-            onClick={() => setDetailId(m.id)}
-          />
+          <div key={m.id} className="relative group">
+            <label className={`absolute top-2 left-2 z-10 transition-opacity ${selected[m.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e=>e.stopPropagation()}>
+              <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!selected[m.id]}
+                onChange={e=>{ setSelected(prev=>{ const n={...prev}; if(e.target.checked) n[m.id]=true; else delete n[m.id]; return n; }); }} />
+            </label>
+            <PosterTile
+              title={m.title}
+              year={m.year}
+              poster={m.poster_path}
+              status={m.status}
+              quality={m.quality_profile || (m.status==='downloaded' ? 'HD' : null)}
+              onClick={() => setDetailId(m.id)}
+            />
+          </div>
         ))}
       </div>
       {!filtered.length && <div className="opacity-50 text-sm p-8 text-center">No movies — use Discover or search to add</div>}
@@ -92,6 +169,21 @@ function MovieDetailPage({ movieId, onBack, refreshMovies, setMiniPlayer }) {
     api.movies.get(movieId).then(setMovie).catch(e=>setMsg(String(e.message||e)));
   }, [movieId]);
   useEffect(()=>{ load(); }, [load]);
+
+  
+  async function setTrackStatus(status) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_item_id: movie.id, status }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Track failed');
+      setMsg('Tracking: ' + status.replace('_', ' '));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
 
   async function toggleMonitor() {
     if (!movie) return;
@@ -189,7 +281,7 @@ function MovieDetailPage({ movieId, onBack, refreshMovies, setMiniPlayer }) {
           {movie.file_path && <p className="text-xs font-mono opacity-50 break-all">{movie.file_path}</p>}
           <div className="flex flex-wrap gap-2 pt-2">
             <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={autoSearch}>Search & grab</button>
-            <button type="button" className="btn btn-sm btn-accent" disabled={busy} title="Prefer stream / .strm path"
+            <button type="button" className="btn btn-sm btn-accent" disabled={busy} title="Add top interactive-search result as stream / .strm (parity)"
               onClick={async ()=>{
                 setBusy(true); setMsg(null);
                 try {
@@ -207,6 +299,16 @@ function MovieDetailPage({ movieId, onBack, refreshMovies, setMiniPlayer }) {
               }}>Stream</button>
             <button type="button" className="btn btn-sm btn-secondary" disabled={busy||ixLoading} onClick={openInteractive}>Interactive search</button>
             <button type="button" className="btn btn-sm" disabled={busy} onClick={toggleMonitor}>{movie.monitored?'Unmonitor':'Monitor'}</button>
+            <select className="select select-bordered select-sm" defaultValue="" disabled={busy}
+              onChange={e=>{ if(e.target.value) { setTrackStatus(e.target.value); e.target.value=''; } }}
+              title="Unified tracking status">
+              <option value="">Track…</option>
+              <option value="planned">Planned</option>
+              <option value="in_progress">In progress</option>
+              <option value="completed">Completed</option>
+              <option value="on_hold">On hold</option>
+              <option value="dropped">Dropped</option>
+            </select>
             <button type="button" className="btn btn-sm" disabled={busy} onClick={doRefresh}>Refresh metadata</button>
             {movie.file_path && <button type="button" className="btn btn-sm" disabled={busy} onClick={doSubs}>Subtitles</button>}
             {movie.file_path && setMiniPlayer && (

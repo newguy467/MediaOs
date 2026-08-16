@@ -29,7 +29,7 @@ from app.services import rate_limit
 from app.services.quality import rank_releases
 from app.services.quality.parser import parse_release_title
 from app.services.quality.profiles import resolution_rank
-from app.services.release_enrichment import enrich_many
+from app.services.release_enrichment import enrich_many, rank_releases_stream_first
 from app.services.search import (
     _blocked_titles,
     _profile_for_item,
@@ -347,6 +347,12 @@ def _score_and_split(
         accepted.append(row)
 
     accepted.sort(key=lambda x: (x.get("_score") or 0, x.get("seeders") or 0), reverse=True)
+    try:
+        from app.config import settings as _cfg
+        if bool(getattr(_cfg, "prefer_stream_on_search", False)):
+            accepted = rank_releases_stream_first(accepted, force=True)
+    except Exception:
+        pass
     rejected.sort(key=lambda x: (x.get("_score") or 0), reverse=True)
     return accepted, rejected, breakdown
 

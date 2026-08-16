@@ -228,7 +228,7 @@ services:
   # One FastAPI backend, one custom React UI. The user manages everything here.
   # ---------------------------------------------------------------------------
   mediaos:
-    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.00beta}
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.01beta}
     build: .
     depends_on:
       mediaos-db:

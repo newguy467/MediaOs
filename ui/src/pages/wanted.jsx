@@ -9,10 +9,32 @@ function WantedPage() {
   const [data, setData] = useState({ movies:[], episodes:[], music:[], books:[], audiobooks:[], adult:[], counts:{} });
   const [tab, setTab] = useState('movies');
   const [loading, setLoading] = useState(true);
+  const [checked, setChecked] = useState({}); // { "movie-12": true }
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const load = () => { setLoading(true); api.wanted.list().then(setData).catch(e => { console.warn(e); if (typeof setMsg === 'function') setMsg(String(e.message || e)); }).finally(()=>setLoading(false)); };
   useEffect(() => { load(); }, []);
+  
+  async function searchSelected() {
+    const keys = Object.keys(checked);
+    if (!keys.length) return;
+    setBusy('bulk');
+    setMsg(null);
+    let ok = 0, fail = 0;
+    for (const key of keys) {
+      const [kind, id] = key.split('-');
+      try {
+        await searchOne(kind, Number(id));
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setChecked({});
+    setBusy(null);
+    setMsg(`Searched ${ok}` + (fail ? `, ${fail} failed` : ''));
+  }
+
   async function searchOne(kind, id) {
     setBusy(kind+'-'+id); setMsg(null);
     try {
@@ -67,35 +89,46 @@ function WantedPage() {
           }}>{busy==='hunt'?'Hunting…':'Run hunt'}</button>
         </div>
       </div>
+      {Object.keys(checked).length > 0 && (
+        <div className="card bg-base-200 mb-3">
+          <div className="card-body p-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs opacity-60">{Object.keys(checked).length} selected</span>
+              <button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={searchSelected}>Search selected</button>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setChecked({})}>Clear</button>
+            </div>
+          </div>
+        </div>
+      )}
       {msg && <div className="alert alert-info text-sm py-2"><span>{msg}</span></div>}
       <div className="tabs tabs-boxed w-fit flex-wrap">
         {tabs.map(t=>(<a key={t.key} className={'tab '+(tab===t.key?'tab-active':'')} onClick={()=>setTab(t.key)}>{t.label}</a>))}
       </div>
       {loading ? <span className="loading loading-spinner text-primary"/> : (
         <div className="mr-panel overflow-x-auto">
-          {tab==='movies' && <table className="table table-sm"><thead><tr><th>Title</th><th>Year</th><th>Status</th><th>Last search</th><th></th></tr></thead><tbody>
+          {tab==='movies' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Title</th><th>Year</th><th>Status</th><th>Last search</th><th></th></tr></thead><tbody>
             {(data.movies||[]).length===0?<tr><td colSpan={5} className="opacity-40">No missing movies</td></tr>:
-              data.movies.map(m=>(<tr key={m.id}><td className="font-medium">{m.title}</td><td className="text-xs opacity-50">{m.year||'—'}</td><td><span className="badge badge-sm">{m.status}</span></td><td className="text-xs font-mono">{m.last_searched_at?new Date(m.last_searched_at).toLocaleString():'never'}</td>
+              data.movies.map(m=>(<tr key={m.id}><td><input type="checkbox" className="checkbox checkbox-xs" checked={!!checked['movie-'+m.id]} onChange={e=>{ setChecked(prev=>{ const n={...prev}; const k='movie-'+m.id; if(e.target.checked) n[k]=true; else delete n[k]; return n; }); }} /></td><td className="font-medium">{m.title}</td><td className="text-xs opacity-50">{m.year||'—'}</td><td><span className="badge badge-sm">{m.status}</span></td><td className="text-xs font-mono">{m.last_searched_at?new Date(m.last_searched_at).toLocaleString():'never'}</td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('movie',m.id)}>{busy==='movie-'+m.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
-          {tab==='episodes' && <table className="table table-sm"><thead><tr><th>Series</th><th>Ep</th><th>Title</th><th>Air</th><th>Status</th><th></th></tr></thead><tbody>
+          {tab==='episodes' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Series</th><th>Ep</th><th>Title</th><th>Air</th><th>Status</th><th></th></tr></thead><tbody>
             {(data.episodes||[]).length===0?<tr><td colSpan={6} className="opacity-40">No missing episodes</td></tr>:
-              data.episodes.map(e=>(<tr key={e.id}><td className="font-medium text-sm">{e.series_title}</td><td className="font-mono text-xs">S{String(e.season_number).padStart(2,'0')}E{String(e.episode_number).padStart(2,'0')}</td><td className="text-sm opacity-70">{e.title||'—'}</td><td className="text-xs">{e.air_date||'—'}</td><td><span className="badge badge-sm">{e.status}</span></td>
+              data.episodes.map(e=>(<tr key={e.id}><td><input type="checkbox" className="checkbox checkbox-xs" checked={!!checked['episode-'+e.id]} onChange={ev=>{ setChecked(prev=>{ const n={...prev}; const k='episode-'+e.id; if(ev.target.checked) n[k]=true; else delete n[k]; return n; }); }} /></td><td className="font-medium text-sm">{e.series_title}</td><td className="font-mono text-xs">S{String(e.season_number).padStart(2,'0')}E{String(e.episode_number).padStart(2,'0')}</td><td className="text-sm opacity-70">{e.title||'—'}</td><td className="text-xs">{e.air_date||'—'}</td><td><span className="badge badge-sm">{e.status}</span></td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('episode',e.id)}>{busy==='episode-'+e.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
           {tab==='music' && <table className="table table-sm"><thead><tr><th>Artist</th><th>Album</th><th>Year</th><th>Status</th><th></th></tr></thead><tbody>
             {(data.music||[]).length===0?<tr><td colSpan={5} className="opacity-40">No missing albums</td></tr>:
               data.music.map(m=>(<tr key={m.id}><td className="text-sm">{m.artist_name||'—'}</td><td className="font-medium">{m.title}</td><td className="text-xs opacity-50">{m.year||'—'}</td><td><span className="badge badge-sm">{m.status}</span></td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('music',m.id)}>{busy==='music-'+m.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
-          {tab==='books' && <table className="table table-sm"><thead><tr><th>Title</th><th>Author</th><th>Status</th><th></th></tr></thead><tbody>
+          {tab==='books' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Title</th><th>Author</th><th>Status</th><th></th></tr></thead><tbody>
             {(data.books||[]).length===0?<tr><td colSpan={4} className="opacity-40">No missing books</td></tr>:
-              data.books.map(b=>(<tr key={b.id}><td className="font-medium">{b.title}</td><td className="text-sm opacity-60">{b.overview||'—'}</td><td><span className="badge badge-sm">{b.status}</span></td>
+              data.books.map(b=>(<tr key={b.id}><td><input type="checkbox" className="checkbox checkbox-xs" checked={!!checked['book-'+b.id]} onChange={e=>{ setChecked(prev=>{ const n={...prev}; const k='book-'+b.id; if(e.target.checked) n[k]=true; else delete n[k]; return n; }); }} /></td><td className="font-medium">{b.title}</td><td className="text-sm opacity-60">{b.overview||'—'}</td><td><span className="badge badge-sm">{b.status}</span></td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('book',b.id)}>{busy==='book-'+b.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
-          {tab==='audiobooks' && <table className="table table-sm"><thead><tr><th>Title</th><th>Author</th><th>Status</th><th></th></tr></thead><tbody>
+          {tab==='audiobooks' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Title</th><th>Author</th><th>Status</th><th></th></tr></thead><tbody>
             {(data.audiobooks||[]).length===0?<tr><td colSpan={4} className="opacity-40">No missing audiobooks</td></tr>:
-              data.audiobooks.map(a=>(<tr key={a.id}><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.overview||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
+              data.audiobooks.map(a=>(<tr key={a.id}><td><input type="checkbox" className="checkbox checkbox-xs" checked={!!checked['audiobook-'+a.id]} onChange={e=>{ setChecked(prev=>{ const n={...prev}; const k='audiobook-'+a.id; if(e.target.checked) n[k]=true; else delete n[k]; return n; }); }} /></td><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.overview||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('audiobook',a.id)}>{busy==='audiobook-'+a.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
-          {tab==='adult' && <table className="table table-sm"><thead><tr><th>Title</th><th>Year</th><th>Status</th><th></th></tr></thead><tbody>
+          {tab==='adult' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Title</th><th>Year</th><th>Status</th><th></th></tr></thead><tbody>
             {(data.adult||[]).length===0?<tr><td colSpan={4} className="opacity-40">No missing adult titles</td></tr>:
-              data.adult.map(a=>(<tr key={a.id}><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.year||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
+              data.adult.map(a=>(<tr key={a.id}><td><input type="checkbox" className="checkbox checkbox-xs" checked={!!checked['adult-'+a.id]} onChange={e=>{ setChecked(prev=>{ const n={...prev}; const k='adult-'+a.id; if(e.target.checked) n[k]=true; else delete n[k]; return n; }); }} /></td><td className="font-medium">{a.title}</td><td className="text-sm opacity-60">{a.year||'—'}</td><td><span className="badge badge-sm">{a.status}</span></td>
               <td><button type="button" className="btn btn-xs btn-primary" disabled={!!busy} onClick={()=>searchOne('adult',a.id)}>{busy==='adult-'+a.id?'…':'Search'}</button></td></tr>))}</tbody></table>}
         </div>
       )}

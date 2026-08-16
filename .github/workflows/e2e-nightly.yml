@@ -1,0 +1,23 @@
+name: E2E nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    name: Playwright against staging
+    runs-on: ubuntu-latest
+    if: ${{ vars.PLAYWRIGHT_BASE_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Playwright
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Smoke
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ vars.PLAYWRIGHT_BASE_URL }}
+        run: npx playwright test e2e/smoke.spec.js

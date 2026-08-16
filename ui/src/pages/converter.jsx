@@ -173,6 +173,9 @@ function ConverterDashboard({ setPage }) {
       <div>
         <h2 className="font-semibold mb-2">Recent jobs</h2>
         <div className="space-y-1">
+          {!jobs.length && (
+            <tr><td colSpan={9} className="text-sm opacity-50 py-8 text-center">No conversion jobs — scan a library folder or enqueue a file. Failed jobs can be selected and retried.</td></tr>
+          )}
           {jobs.map(j=>(
             <div key={j.id} className="flex justify-between gap-2 p-2 bg-base-200 rounded text-sm">
               <div className="min-w-0 truncate font-mono text-xs">{j.source_path}</div>
@@ -193,6 +196,8 @@ function ConverterDashboard({ setPage }) {
 function ConverterQueue() {
   const [jobs, setJobs] = useState([]);
   const [filter, setFilter] = useState('');
+  const [jobSel, setJobSel] = useState({});
+  const jobSelIds = Object.keys(jobSel);
   const load = () => fetch('/api/converter/jobs?limit=200'+(filter?'&status='+filter:'')).then(r=>r.json()).then(setJobs).catch(()=>[]);
   useEffect(()=>{ load(); const id=setInterval(load, 3000); return ()=>clearInterval(id); }, [filter]);
   return (
@@ -208,15 +213,34 @@ function ConverterQueue() {
             {['queued','running','done','failed','cancelled'].map(s=><option key={s} value={s}>{s}</option>)}
           </select>
           <button type="button" className="btn btn-sm" onClick={async()=>{ await fetch('/api/converter/jobs/clear?status=done',{method:'POST'}); load(); }}>Clear done</button>
+          {jobSelIds.length > 0 && (
+            <>
+              <span className="text-xs opacity-60 self-center">{jobSelIds.length} selected</span>
+              <button type="button" className="btn btn-sm btn-primary" onClick={async()=>{
+                for (const id of jobSelIds) {
+                  await fetch('/api/converter/jobs/'+id+'/retry',{method:'POST'}).catch(()=>{});
+                }
+                setJobSel({}); load();
+              }}>Retry selected</button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={()=>setJobSel({})}>Clear selection</button>
+            </>
+          )}
           <button type="button" className="btn btn-sm btn-primary" onClick={async()=>{ await fetch('/api/converter/worker/tick',{method:'POST'}); load(); }}>Process next</button>
         </div>
       </div>
       <div className="overflow-x-auto">
         <table className="table table-sm">
-          <thead><tr><th>ID</th><th>Source</th><th>Preset</th><th>Codec</th><th>Status</th><th>Progress</th><th>Size</th><th></th></tr></thead>
+          <thead><tr><th className="w-8"></th><th>ID</th><th>Source</th><th>Preset</th><th>Codec</th><th>Status</th><th>Progress</th><th>Size</th><th></th></tr></thead>
           <tbody>
-            {jobs.map(j=>(
+            {!jobs.length && (
+            <tr><td colSpan={8} className="text-sm opacity-50 py-8 text-center">No conversion jobs — scan a library folder or enqueue a file. Failed jobs can be selected and retried.</td></tr>
+          )}
+          {jobs.map(j=>(
               <tr key={j.id}>
+                <td>
+                  <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!jobSel[j.id]}
+                    onChange={e=>{ setJobSel(prev=>{ const n={...prev}; if(e.target.checked) n[j.id]=true; else delete n[j.id]; return n; }); }} />
+                </td>
                 <td className="font-mono text-xs">{j.id}</td>
                 <td className="font-mono text-xs max-w-xs truncate" title={j.source_path}>{j.source_path}</td>
                 <td className="text-xs">{j.preset_name||'—'}</td>

@@ -63,3 +63,38 @@ def enrich_release(rel: dict[str, Any]) -> dict[str, Any]:
 
 def enrich_many(releases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [enrich_release(r) for r in releases]
+
+
+def _looks_streamable(rel: dict) -> bool:
+    if rel.get("stream_url"):
+        return True
+    proto = (rel.get("protocol") or rel.get("downloadProtocol") or "").lower()
+    if proto in ("stream", "strm", "http", "https", "debrid"):
+        return True
+    url = (rel.get("download_url") or rel.get("magnet") or rel.get("link") or "")
+    if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")) and "magnet:" not in url[:12]:
+        # hosters / direct links often streamable
+        return True
+    return False
+
+
+def rank_releases_stream_first(releases: list[dict], force: bool | None = None) -> list[dict]:
+    """When stream preference is on, stable-sort streamable rows ahead of peers.
+
+    Does not drop torrents — only reorders so interactive UI and auto-grab
+    see streamable options first.
+    """
+    if force is None:
+        try:
+            from app.config import settings
+            force = bool(getattr(settings, "prefer_stream_on_search", False)) or (
+                (getattr(settings, "movie_download_mode", "download") or "download").lower() == "strm"
+            )
+        except Exception:
+            force = False
+    if not force or not releases:
+        return releases
+    streamable, other = [], []
+    for r in releases:
+        (streamable if _looks_streamable(r) else other).append(r)
+    return streamable + other
