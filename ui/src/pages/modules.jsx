@@ -11,6 +11,10 @@ function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("all");
   const [showInstalledOnly, setShowInstalledOnly] = useState(false);
+  const [conflicts, setConflicts] = useState([]);
+  const [modFilter, setModFilter] = useState("all"); // all | on | off
+  const [modCategory, setModCategory] = useState("all");
+  const [modQuery, setModQuery] = useState("");
 
   const loadModules = () => {
     fetch("/api/modules")
@@ -18,6 +22,7 @@ function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
       .then((d) => {
         setCatalog(d.catalog || []);
         if (d.enabled) setEnabledModules(d.enabled);
+        setConflicts(d.conflicts || []);
       })
       .catch((e) => setMsg(String(e)));
   };
@@ -187,33 +192,55 @@ function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
 
   const renderModuleCard = (m) => {
     const on = m.enabled || (enabledModules || []).includes(m.id);
+    const needsPath = on && m.needs_path_setup;
     return (
       <div
         key={m.id}
-        className={"card bg-base-200 shadow-sm border " + (on ? "border-primary/40" : "border-transparent")}
+        className={
+          "card bg-base-200 shadow-sm border " +
+          (needsPath ? "border-warning/50 " : on ? "border-primary/40 " : "border-transparent ")
+        }
       >
         <div className="card-body p-4 gap-2">
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-semibold flex items-center gap-2 flex-wrap">
+            <div className="min-w-0">
+              <h3 className="font-semibold flex items-center gap-2 flex-wrap text-sm">
                 {m.label}
                 {m.core && <span className="badge badge-primary badge-xs">Required</span>}
                 {on && !m.core && <span className="badge badge-success badge-xs">On</span>}
                 {!on && !m.core && <span className="badge badge-ghost badge-xs">Off</span>}
+                {m.category && m.category !== "core" && (
+                  <span className="badge badge-outline badge-xs opacity-70">{m.category}</span>
+                )}
               </h3>
               <p className="text-xs opacity-60 mt-1">{m.description}</p>
+              {(m.tags || []).length > 0 && (
+                <p className="text-[10px] opacity-40 mt-1 flex flex-wrap gap-1">
+                  {(m.tags || []).map((tag) => (
+                    <span key={tag} className="badge badge-ghost badge-xs">{tag}</span>
+                  ))}
+                </p>
+              )}
             </div>
             <input
               type="checkbox"
-              className="toggle toggle-primary"
+              className="toggle toggle-primary shrink-0"
               checked={!!on}
               disabled={!!m.core || busy === m.id}
               title={m.core ? "Movies and TV cannot be disabled" : on ? "Disable" : "Enable"}
               onChange={() => toggleModule(m.id, on, m.core)}
             />
           </div>
-          {m.requires_path && on && (
-            <p className="text-[10px] opacity-50">Path setting: {m.requires_path}</p>
+          {m.requires_path && (
+            <div className={"text-[10px] rounded px-2 py-1 " + (needsPath ? "bg-warning/20 text-warning-content" : "opacity-50")}>
+              {needsPath ? "⚠ Set path: " : "Path: "}
+              <code>{m.path_label || m.requires_path}</code>
+              {needsPath && setPage && (
+                <button type="button" className="btn btn-ghost btn-xs ml-2" onClick={() => setPage("settings")}>
+                  Settings
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -361,18 +388,83 @@ function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
 
       {tab === "modules" && (
         <div className="space-y-4">
+          <p className="text-sm opacity-60">
+            Add or remove capabilities in one control plane — Movies &amp; TV stay on. Toggle optional modules like a store shelf.
+          </p>
+          {conflicts.length > 0 && (
+            <div className="alert alert-warning text-xs py-2">
+              <div>
+                <p className="font-semibold">Conflicts</p>
+                <ul className="list-disc pl-4 mt-1">
+                  {conflicts.map((c, i) => (
+                    <li key={i}>{c.message || JSON.stringify(c)}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 items-center">
+            <input
+              className="input input-bordered input-sm flex-1 min-w-[10rem]"
+              placeholder="Search modules…"
+              value={modQuery}
+              onChange={(e) => setModQuery(e.target.value)}
+            />
+            {["all", "on", "off"].map((f) => (
+              <button
+                key={f}
+                type="button"
+                className={"btn btn-xs " + (modFilter === f ? "btn-primary" : "btn-ghost")}
+                onClick={() => setModFilter(f)}
+              >
+                {f === "all" ? "All" : f === "on" ? "Enabled" : "Disabled"}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={"btn btn-xs " + (modCategory === "all" ? "btn-primary" : "btn-ghost")}
+              onClick={() => setModCategory("all")}
+            >
+              All categories
+            </button>
+            {[...new Set(catalog.map((m) => m.category).filter(Boolean))].map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={"btn btn-xs " + (modCategory === c ? "btn-primary" : "btn-ghost")}
+                onClick={() => setModCategory(c)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
           {core.length > 0 && (
             <div className="space-y-2">
-              <h2 className="text-sm font-semibold opacity-70 uppercase tracking-wide">Required</h2>
-              <div className="grid gap-3 sm:grid-cols-2">{core.map(renderModuleCard)}</div>
+              <h2 className="text-sm font-semibold opacity-70 uppercase tracking-wide">Core (always on)</h2>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{core.map(renderModuleCard)}</div>
             </div>
           )}
           <div className="space-y-2">
-            <h2 className="text-sm font-semibold opacity-70 uppercase tracking-wide">Optional — click to enable</h2>
-            <div className="grid gap-3 sm:grid-cols-2">{optional.map(renderModuleCard)}</div>
+            <h2 className="text-sm font-semibold opacity-70 uppercase tracking-wide">Store — add or remove</h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {optional
+                .filter((m) => {
+                  const on = m.enabled || (enabledModules || []).includes(m.id);
+                  if (modFilter === "on" && !on) return false;
+                  if (modFilter === "off" && on) return false;
+                  if (modCategory !== "all" && (m.category || "") !== modCategory) return false;
+                  if (modQuery.trim()) {
+                    const s = modQuery.trim().toLowerCase();
+                    const blob = `${m.label} ${m.description} ${m.id} ${(m.tags || []).join(" ")}`.toLowerCase();
+                    if (!blob.includes(s)) return false;
+                  }
+                  return true;
+                })
+                .map(renderModuleCard)}
+            </div>
           </div>
           <p className="text-xs opacity-50">
-            Disabling a module only hides it from the sidebar; library data stays on disk. You can also choose modules in the Setup wizard.
+            Disabling only hides the module from the sidebar; library data stays on disk. Set library paths under Settings when a card warns. Plugins (community) live on the other tabs.
           </p>
         </div>
       )}

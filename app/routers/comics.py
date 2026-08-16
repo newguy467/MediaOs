@@ -1,7 +1,7 @@
 """Comics (ComicVine) + Manga (MangaDex)."""
 from __future__ import annotations
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.clients.comicvine import comicvine_client
@@ -155,6 +155,32 @@ def add_comic(payload: ComicCreate, db: Session = Depends(get_db), _: list = Dep
     )
     db.add(item); db.commit(); db.refresh(item)
     return item
+
+
+class ComicBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+    quality_profile: str | None = None
+
+
+@router.post("/bulk")
+def bulk_comics(payload: ComicBulkIn, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage"))):
+    """Bulk monitor/quality for comic volumes — before /{item_id}."""
+    n = 0
+    for iid in payload.ids:
+        item = db.get(MediaItem, iid)
+        if not item or item.media_type not in (MediaType.comic, MediaType.manga):
+            continue
+        if payload.monitored is not None:
+            item.monitored = payload.monitored
+        if payload.quality_profile is not None:
+            item.quality_profile = payload.quality_profile
+        db.add(item)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
+
 
 @router.delete("/{item_id}", status_code=204)
 def delete_comic(item_id: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage"))):
@@ -392,9 +418,16 @@ class IssueOut(BaseModel):
     monitored: bool
     status: str
     file_path: str | None
+    is_read: bool
+    last_page_read: int | None
 
     class Config:
         from_attributes = True
+
+
+class IssueProgressIn(BaseModel):
+    last_page_read: int | None = None
+    is_read: bool | None = None
 
 
 @router.get("/{item_id}/issues", response_model=list[IssueOut])
@@ -409,6 +442,38 @@ def list_issues(item_id: int, db: Session = Depends(get_db), _: list = Depends(r
         .order_by(ComicIssue.issue_number)
         .all()
     )
+
+
+@router.get("/{item_id}/pages")
+def item_pages(item_id: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    """List of readable pages for a volume stored as a single file
+    (one-shots, or issues that were never split out) — item.file_path
+    rather than a per-issue file. See app/services/comic_reader.py."""
+    from app.services.comic_reader import ComicReadError, list_pages
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type not in (MediaType.comic, MediaType.manga):
+        raise HTTPException(404, "Not found")
+    if not item.file_path:
+        raise HTTPException(400, "No file on disk for this item")
+    try:
+        return list_pages(item.file_path)
+    except ComicReadError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/{item_id}/page/{index}")
+def item_page(item_id: int, index: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    from app.services.comic_reader import ComicReadError, read_page
+    item = db.get(MediaItem, item_id)
+    if not item or item.media_type not in (MediaType.comic, MediaType.manga):
+        raise HTTPException(404, "Not found")
+    if not item.file_path:
+        raise HTTPException(400, "No file on disk for this item")
+    try:
+        data, mime = read_page(item.file_path, index)
+    except ComicReadError as e:
+        raise HTTPException(400, str(e))
+    return Response(content=data, media_type=mime)
 
 
 @router.post("/{item_id}/issues/sync")
@@ -520,6 +585,103 @@ def toggle_issue_monitor(issue_id: int, body: dict, db: Session = Depends(get_db
     return {"id": issue.id, "monitored": issue.monitored}
 
 
+@router.post("/issues/{issue_id}/progress")
+def update_issue_progress(issue_id: int, body: IssueProgressIn, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    """Persist reading progress for a single issue. Called by the reader
+    (ComicReader in comics.jsx) on a debounced page-change and again on
+    close, mirroring how music's /track/{id}/played is called from a
+    passive playback trigger rather than a library-management action —
+    library.view is enough, this isn't editing library content.
+
+    last_page_read is the 0-based index of the page currently on screen.
+    is_read is left for the caller to set explicitly (the reader marks it
+    true once the last page has been viewed, or the person can revert it
+    from the issues table) rather than inferred here from a page number,
+    since "reached the last page" and "read" aren't quite the same thing
+    for a caller that doesn't send a total page count in the same request.
+    """
+    from datetime import datetime, timezone
+    from app.models import ComicIssue
+    issue = db.get(ComicIssue, issue_id)
+    if not issue:
+        raise HTTPException(404, "Not found")
+    if body.last_page_read is not None:
+        issue.last_page_read = max(0, body.last_page_read)
+    if body.is_read is not None:
+        issue.is_read = body.is_read
+    # Always stamp last_read_at on any progress write so Continue Reading
+    # can order by "most recently opened", even for unfinished issues.
+    issue.last_read_at = datetime.now(timezone.utc)
+    db.add(issue)
+    # Soft tracking writeback on parent series when reading issues
+    try:
+        from app.models import TrackedItem, MediaItem
+        series_id = getattr(issue, "media_item_id", None) or getattr(issue, "comic_id", None)
+        if series_id:
+            tracked = db.query(TrackedItem).filter(TrackedItem.media_item_id == series_id).first()
+            now = datetime.now(timezone.utc)
+            pct = 100.0 if body.is_read else max(1.0, float(issue.last_page_read or 0))
+            # crude progress signal; refined when total pages known
+            if tracked:
+                tracked.progress_percent = max(tracked.progress_percent or 0, min(99.0, pct) if not body.is_read else max(tracked.progress_percent or 0, 5.0))
+                if (tracked.status or "planned") in ("planned", "on_hold", ""):
+                    tracked.status = "in_progress"
+                    tracked.started_at = tracked.started_at or now
+                tracked.updated_at = now
+                db.add(tracked)
+            else:
+                db.add(TrackedItem(
+                    media_item_id=series_id,
+                    status="in_progress",
+                    progress_percent=min(99.0, pct) if not body.is_read else 5.0,
+                    started_at=now,
+                ))
+    except Exception:
+        pass
+    db.commit()
+    return {
+        "id": issue.id,
+        "last_page_read": issue.last_page_read,
+        "is_read": issue.is_read,
+        "last_read_at": issue.last_read_at.isoformat() if issue.last_read_at else None,
+    }
+
+
+@router.get("/issues/{issue_id}/pages")
+def issue_pages(issue_id: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    """List of readable pages for a single issue's file — see
+    app/services/comic_reader.py for the format-by-format breakdown."""
+    from app.models import ComicIssue
+    from app.services.comic_reader import ComicReadError, list_pages
+    issue = db.get(ComicIssue, issue_id)
+    if not issue:
+        raise HTTPException(404, "Not found")
+    if not issue.file_path:
+        raise HTTPException(400, "Issue has no file on disk")
+    try:
+        return list_pages(issue.file_path)
+    except ComicReadError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/issues/{issue_id}/page/{index}")
+def issue_page(issue_id: int, index: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.view"))):
+    """A single rendered page image, addressed by the 0-based index
+    returned from issue_pages() above."""
+    from app.models import ComicIssue
+    from app.services.comic_reader import ComicReadError, read_page
+    issue = db.get(ComicIssue, issue_id)
+    if not issue:
+        raise HTTPException(404, "Not found")
+    if not issue.file_path:
+        raise HTTPException(400, "Issue has no file on disk")
+    try:
+        data, mime = read_page(issue.file_path, index)
+    except ComicReadError as e:
+        raise HTTPException(400, str(e))
+    return Response(content=data, media_type=mime)
+
+
 
 @router.patch("/{item_id}/tag-manga")
 def tag_manga(item_id: int, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage"))):
@@ -558,7 +720,18 @@ def arc_reading_order(arc_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{item_id}/metatag")
 def metatag_comic(item_id: int, body: dict | None = None, db: Session = Depends(get_db), _: list = Depends(require_permission("library.manage"))):
-    """Apply ComicInfo-style metadata to on-disk comic (best-effort)."""
+    """Apply ComicInfo-style metadata to the on-disk comic.
+
+    Embeds ComicInfo.xml as a zip member for .cbz/.zip (what
+    ComicTagger/Kavita/ComicRack actually read) via
+    app/services/comic_metadata.embed_comicinfo(); falls back to a
+    sidecar file for formats that can't be rewritten in place
+    (.cbr/.rar — see that module's docstring for why) or any other
+    extension. Both paths go through _assert_under_library first —
+    unlike the version this replaced, a path outside the library
+    roots or a write failure is a 400, not a silently-swallowed
+    "ok": true with a failure note buried in `path`.
+    """
     item = db.get(MediaItem, item_id)
     if not item:
         raise HTTPException(404, "not found")
@@ -574,38 +747,25 @@ def metatag_comic(item_id: int, body: dict | None = None, db: Session = Depends(
     }
     path = item.file_path
     written = False
+    embedded = False
     note = "metadata stored on item"
     if path:
+        from pathlib import Path as P
+        from app.services.comic_metadata import ComicMetaError, EMBEDDABLE_EXTENSIONS, embed_comicinfo, write_sidecar
         try:
-            from pathlib import Path as P
-            sidecar = P(path).with_suffix(P(path).suffix + ".comicinfo.xml") if P(path).suffix else P(str(path) + ".comicinfo.xml")
-            # minimal ComicInfo.xml
-            import html
-            xml = (
-                '<?xml version="1.0" encoding="utf-8"?>\n'
-                "<ComicInfo>\n"
-                f"  <Title>{html.escape(str(meta.get('title') or ''))}</Title>\n"
-                f"  <Series>{html.escape(str(meta.get('series') or ''))}</Series>\n"
-                f"  <Number>{html.escape(str(meta.get('number') or ''))}</Number>\n"
-                f"  <Year>{html.escape(str(meta.get('year') or ''))}</Year>\n"
-                f"  <Summary>{html.escape(str(meta.get('summary') or ''))}</Summary>\n"
-                f"  <Publisher>{html.escape(str(meta.get('publisher') or ''))}</Publisher>\n"
-                "</ComicInfo>\n"
-            )
-            # write next to file when path is a file; else into folder
-            target = P(path)
-            if target.is_file():
-                out = target.parent / "ComicInfo.xml"
+            if P(path).suffix.lower() in EMBEDDABLE_EXTENSIONS:
+                member = embed_comicinfo(path, meta)
+                written = True
+                embedded = True
+                note = f"{path} (embedded: {member})"
             else:
-                out = target / "ComicInfo.xml"
-            out.write_text(xml, encoding="utf-8")
-            written = True
-            note = str(out)
-        except Exception as e:
-            note = f"sidecar failed: {e}"
+                note = write_sidecar(path, meta)
+                written = True
+        except ComicMetaError as e:
+            raise HTTPException(400, str(e))
     # persist overview if provided
     if body.get("summary"):
         item.overview = body["summary"]
         db.add(item)
         db.commit()
-    return {"ok": True, "item_id": item_id, "written": written, "path": note, "meta": meta}
+    return {"ok": True, "item_id": item_id, "written": written, "embedded": embedded, "path": note, "meta": meta}

@@ -618,11 +618,13 @@ def load_plugins() -> list[str]:
     loaded: list[str] = []
     # Avoid double-register on reload
     if not any(k.startswith("core.") for k in _REGISTRY):
-        register("core.games", name="Games Module", version="1.00beta", source="core")
-        register("core.scrobbling", name="Scrobbling Layer", version="1.00beta", source="core")
-        register("core.tracking", name="Unified Tracking", version="1.00beta", source="core")
-        register("core.homelab", name="Homelab Links", version="1.00beta", source="core")
-        register("core.converter", name="Tdarr-class Converter", version="1.00beta", source="core")
+        from app.version import get_version
+        _core_version = get_version()
+        register("core.games", name="Games Module", version=_core_version, source="core")
+        register("core.scrobbling", name="Scrobbling Layer", version=_core_version, source="core")
+        register("core.tracking", name="Unified Tracking", version=_core_version, source="core")
+        register("core.homelab", name="Homelab Links", version=_core_version, source="core")
+        register("core.converter", name="Tdarr-class Converter", version=_core_version, source="core")
         loaded.extend(["core.games", "core.scrobbling", "core.tracking", "core.homelab"])
 
     raw = (

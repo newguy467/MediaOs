@@ -11,6 +11,8 @@ import {
   StatsGrid, LibraryLegend,
 } from "./components/ui.jsx";
 import { MediaPlayer } from "./components/media.jsx";
+import MusicPlayerBar from "./player/MusicPlayerBar.jsx";
+import GlobalSearch from "./components/GlobalSearch.jsx";
 
 const lazyNamed = (loader, name) => React.lazy(() => loader().then(m => ({ default: m[name] || m.default })));
 
@@ -52,7 +54,9 @@ const IndexersPage = lazyNamed(() => import("./pages/indexers.jsx"), "IndexersPa
 const IntegrationsPage = lazyNamed(() => import("./pages/integrations.jsx"), "IntegrationsPage");
 const WantedPage = lazyNamed(() => import("./pages/wanted.jsx"), "WantedPage");
 const ModuleStorePage = lazyNamed(() => import("./pages/modules.jsx"), "ModuleStorePage");
+const FirstRunTour = lazyNamed(() => import("./components/first-run-tour.jsx"), "FirstRunTour");
 const SetupWizardPage = lazyNamed(() => import("./pages/setup.jsx"), "SetupWizardPage");
+const MigrateWizardPage = lazyNamed(() => import("./pages/migrate-wizard.jsx"), "MigrateWizardPage");
 const DashboardPage = lazyNamed(() => import("./pages/dashboard.jsx"), "DashboardPage");
 const GuidedFirstRun = lazyNamed(() => import("./pages/dashboard.jsx"), "GuidedFirstRun");
 const GlossaryPage = lazyNamed(() => import("./pages/dashboard.jsx"), "GlossaryPage");
@@ -130,6 +134,7 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules, the
   });
   const secondaryAll = [
     { key: 'dashboard', label: 'Home', Icon: Ic.Home, mod: null },
+    { key: 'global-search', label: 'Search', Icon: Ic.Search, mod: null },
     { key: 'ai-search', label: 'AI Search', Icon: Ic.Search, mod: null },
     { key: 'scrobbling', label: 'History', Icon: Ic.Activity, mod: 'scrobbling' },
     { key: 'tracking', label: 'Tracking', Icon: Ic.List, mod: 'tracking' },
@@ -185,6 +190,11 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules, the
                 onClose && onClose();
                 return;
               }
+              if (item.key === 'global-search') {
+                window.dispatchEvent(new CustomEvent('mediaos-open-search'));
+                onClose && onClose();
+                return;
+              }
               setPage(item.key);
               onClose && onClose();
             }}
@@ -205,6 +215,11 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules, the
             onClick={() => {
               if (item.key === 'ai-search') {
                 window.dispatchEvent(new CustomEvent('mediaos-open-ai'));
+                onClose && onClose();
+                return;
+              }
+              if (item.key === 'global-search') {
+                window.dispatchEvent(new CustomEvent('mediaos-open-search'));
                 onClose && onClose();
                 return;
               }
@@ -277,13 +292,15 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'import':       return <ImportPage movies={movies} series={series} />;
     case 'quality-lab': return <QualityLabPage />;
     case 'workers': return <div className="p-6 space-y-3 max-w-3xl"><h1 className="mr-page-title">Workers</h1><p className="text-sm opacity-60">Background schedulers: missing search, library watch, Jackett sync (6h), EPG refresh, cleanup, converter watch. Live progress is on Queue (SSE) and History.</p><div className="flex gap-2"><button type="button" className="btn btn-sm" onClick={()=>setPage&&setPage('queue')}>Queue</button><button type="button" className="btn btn-sm" onClick={()=>setPage&&setPage('activity')}>History</button><button type="button" className="btn btn-sm" onClick={()=>setPage&&setPage('logs')}>Logs</button></div></div>;
-    case 'parity': return <div className='p-6'><h1 className='mr-page-title'>Stack parity</h1><p className='text-sm opacity-60'>mediaos replaces Sonarr/Radarr/Lidarr/Readarr/Bazarr/Prowlarr for day-to-day. Use Settings → Integrations for migrators, TRaSH, and Jackett sync.</p><ul className='list-disc ml-5 text-sm mt-3 space-y-1'><li>Movies + TV + quality + indexers ✅</li><li>Music artists/albums/tracks ✅</li><li>Books + audiobooks ✅</li><li>Subtitles wanted ✅</li><li>Cleanuparr-style cleaner ✅</li></ul></div>;
+    case 'parity': return <div className='p-6'><h1 className='mr-page-title'>Stack parity</h1><p className='text-sm opacity-60'>mediaos replaces Sonarr/Radarr/Lidarr/Readarr/Bazarr/Prowlarr for day-to-day. Use <strong>Migrate</strong> for *arr import, Quality for TRaSH/packs, Integrations for external URLs.</p><ul className='list-disc ml-5 text-sm mt-3 space-y-1'><li>Movies + TV + quality + indexers ✅</li><li>Music artists/albums/tracks ✅</li><li>Books + audiobooks ✅</li><li>Subtitles wanted ✅</li><li>Cleanuparr-style cleaner ✅</li></ul></div>;
     case 'adult': return (enabledModules||[]).includes('adult') ? <AdultPage /> : <ModuleDisabled name="Adult" setPage={setPage} />;
     case 'settings-hub': return <SettingsHubPage setPage={setPage} advanced={advanced} setAdvanced={setAdvanced} enabledModules={enabledModules} />;
     case 'settings-users': return <UsersPermissionsPage />;
     case 'modules': return <ModuleStorePage enabledModules={enabledModules} setEnabledModules={setEnabledModules} setPage={setPage} />;
     case 'settings-setup': return <SetupWizardPage onDone={()=>{ if(setPage) setPage('dashboard'); }} />;
     case 'setup': return <SetupWizardPage onDone={()=>{ if(setPage) setPage('dashboard'); }} />;
+    case 'migrate': return <MigrateWizardPage setPage={setPage} />;
+    case 'migrate-wizard': return <MigrateWizardPage setPage={setPage} />;
     case 'login': return <LoginPage setPage={setPage} />;
     case 'glossary': return <GlossaryPage />;
     case 'wanted-subtitles': return <WantedSubtitlesPage setPage={setPage} />;
@@ -294,28 +311,28 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'settings-quality': return <QualityProfilesPage />;
     case 'settings-quality-matrix': return <QualityMatrixPage setPage={setPage} />;
     case 'settings-vpn':     return <VpnSettingsPage />;
-    case 'settings-youtube': return <ConfigGroupPage group="youtube" title="YouTube / Login" Icon={Ic.Compass} description="Creator downloads, cookies login for age-restricted content, and SponsorBlock ad/sponsor removal. Changes apply immediately." />;
+    case 'settings-youtube': return <ConfigGroupPage group="youtube" title="YouTube / Login" Icon={Ic.Compass} description="Creator downloads, cookies login for age-restricted content, and SponsorBlock ad/sponsor removal. Changes apply immediately." setPage={setPage} />;
     case 'settings-themes': return <ThemesPage currentTheme={theme} setTheme={setTheme} />;
     case 'settings-indexers':  return <IndexersPage />;
-    case 'settings-downloads': return <ConfigGroupPage group="downloads" title="Download Clients" Icon={Ic.Download} description="qBittorrent, SABnzbd, NZBGet — changes apply immediately, no restart." />;
-    case 'settings-library':   return <ConfigGroupPage group="library" title="Library Storage" Icon={Ic.Folder} description="Library and downloads paths — changes apply immediately, no restart." />;
-    case 'settings-indexers-cfg': return <ConfigGroupPage group="indexers" title="Indexers / Prowlarr / Jackett" Icon={Ic.Server} description="Prowlarr optional. Jackett sync + Cardigann builtins replace most indexer management." />;
+    case 'settings-downloads': return <ConfigGroupPage group="downloads" title="Download Clients" Icon={Ic.Download} description="qBittorrent, SABnzbd, NZBGet — changes apply immediately, no restart." setPage={setPage} />;
+    case 'settings-library':   return <ConfigGroupPage group="library" title="Library Storage" Icon={Ic.Folder} description="Library and downloads paths — changes apply immediately, no restart." setPage={setPage} />;
+    case 'settings-indexers-cfg': return <ConfigGroupPage group="indexers" title="Indexers / Prowlarr / Jackett" Icon={Ic.Server} description="Prowlarr optional. Jackett sync + Cardigann builtins replace most indexer management." setPage={setPage} />;
     case 'settings-subtitles': return <SubtitlesSettingsPage setPage={setPage} />;
     case 'settings-adult': return <AdultSettingsPage setPage={setPage} />;
     case 'settings-hunt': return <ConfigGroupPage group="hunt" title="Hunt engine" Icon={Ic.Activity} description="Built-in NeutArr/Huntarr-class aggressive missing search + optional upgrades. Runs on a schedule; no extra container." setPage={setPage} />;
-    case 'settings-cleanup': return <ConfigGroupPage group="cleanup" title="Queue cleaner" Icon={Ic.AlertTri} description="Cleanuparr-style strikes, stall detection, seed ratio." />;
-    case 'settings-system':    return <ConfigGroupPage group="system" title="System" Icon={Ic.Server} description="Search, upgrades, and notification settings — changes apply immediately, no restart." />;
-    case 'settings-metadata': return <ConfigGroupPage group="metadata" title="Metadata APIs" Icon={Ic.Compass} description="TMDb, TVDb, ComicVine, Trakt — changes apply immediately." />;
-    case 'settings-debrid': return <ConfigGroupPage group="debrid" title="Debrid providers" Icon={Ic.Download} description="Real-Debrid, TorBox, AllDebrid, Premiumize, put.io, and more." />;
+    case 'settings-cleanup': return <ConfigGroupPage group="cleanup" title="Queue cleaner" Icon={Ic.AlertTri} description="Cleanuparr-style strikes, stall detection, seed ratio." setPage={setPage} />;
+    case 'settings-system':    return <ConfigGroupPage group="system" title="System" Icon={Ic.Server} description="Search, upgrades, and notification settings — changes apply immediately, no restart." setPage={setPage} />;
+    case 'settings-metadata': return <ConfigGroupPage group="metadata" title="Metadata APIs" Icon={Ic.Compass} description="TMDb, TVDb, ComicVine, Trakt — changes apply immediately." setPage={setPage} />;
+    case 'settings-debrid': return <ConfigGroupPage group="debrid" title="Debrid providers" Icon={Ic.Download} description="Real-Debrid, TorBox, AllDebrid, Premiumize, put.io, and more." setPage={setPage} />;
     
-    case 'settings-usenet': return <ConfigGroupPage group="usenet" title="Usenet / NNTP" Icon={Ic.Server} description="NNTP for seekable streaming (SABnzbd/NZBGet are under Downloads)." />;
-    case 'settings-auth': return <ConfigGroupPage group="auth" title="Authentication" Icon={Ic.Users} description="Admin login, API keys, ARR-compat key." />;
+    case 'settings-usenet': return <ConfigGroupPage group="usenet" title="Usenet / NNTP" Icon={Ic.Server} description="NNTP for seekable streaming (SABnzbd/NZBGet are under Downloads)." setPage={setPage} />;
+    case 'settings-auth': return <ConfigGroupPage group="auth" title="Authentication" Icon={Ic.Users} description="Admin login, API keys, ARR-compat key." setPage={setPage} />;
     case 'settings-sessions':  return <SessionsAdminPage />;
     case 'settings-integrations': return <IntegrationsPage />;
     case 'music':        return (enabledModules||[]).includes('music') ? <MusicPage setPage={setPage} /> : <ModuleDisabled name="Music" setPage={setPage} />;
     case 'books':        return (enabledModules||[]).includes('books') ? <BooksPage setPage={setPage} /> : <ModuleDisabled name="Books" setPage={setPage} />;
     case 'audiobooks':   return (enabledModules||[]).includes('audiobooks') ? <AudiobooksPage setPage={setPage} /> : <ModuleDisabled name="Audiobooks" setPage={setPage} />;
-    case 'calendar':     return <CalendarPage />;
+    case 'calendar':     return <CalendarPage setPage={setPage} />;
     case 'library-player': return <LibraryBrowserPage movies={movies} series={series} music={music} books={books} setMiniPlayer={setMiniPlayer} setPage={setPage} />;
     case 'livetv': return (enabledModules||[]).includes('livetv') ? <LiveTvPage /> : <ModuleDisabled name="Live TV" setPage={setPage} />;
     case 'converter-dashboard': return (enabledModules||[]).includes('converter') || advanced ? <ConverterDashboard setPage={setPage} /> : <ModuleDisabled name="Converter" setPage={setPage} />;
@@ -640,7 +657,7 @@ function App() {
   return (
     <>
     <SplashScreen visible={splash} />
-    <div className="drawer lg:drawer-open min-h-screen mr-shell">
+    <div className="drawer lg:drawer-open min-h-screen mr-shell" data-sidebar="left">
       <input id="mr-drawer" type="checkbox" className="drawer-toggle"
         checked={mobileOpen} onChange={e=>setMobileOpen(e.target.checked)} readOnly />
 
@@ -662,6 +679,7 @@ function App() {
           <ThemeToggle theme={theme} setTheme={setTheme} />
         </div>
         <main className="flex-1 mr-content mos-page">
+          {page === 'dashboard' && <FirstRunTour setPage={setPage} />}
           {setupNeeded && page !== 'setup' && (
             <div className="mx-3 mt-3 alert alert-warning text-sm py-2 flex flex-wrap items-center gap-2">
               <span className="flex-1">Setup is not finished — paths, modules, and admin account may be incomplete.</span>
@@ -695,6 +713,8 @@ function App() {
             />
           </div>
         )}
+        <MusicPlayerBar />
+        <GlobalSearch setPage={setPage} />
         <nav className="mr-bottom-nav lg:hidden" aria-label="Primary">
           {[
             {k:'dashboard', label:'Home', Icon:Ic.Home},
@@ -713,7 +733,7 @@ function App() {
         </nav>
       </div>
 
-      <div className="drawer-side z-30">
+      <div className="drawer-side z-30" style={{gridColumn: 1}}>
         <label htmlFor="mr-drawer" className="drawer-overlay mr-drawer-backdrop" onClick={()=>setMobileOpen(false)} />
         <Sidebar page={page} setPage={p=>{setPage(p);}} counts={counts} onClose={()=>setMobileOpen(false)} advanced={advanced} enabledModules={enabledModules} theme={theme} setTheme={setTheme} signedIn={signedIn} onSignOut={()=>{ setToken(null); setSignedIn(false); }} />
       </div>

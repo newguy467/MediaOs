@@ -26,9 +26,22 @@ body {
 /* Shell */
 .mr-shell {
   min-height: 100%;
-  display: flex;
   background: transparent;
 }
+/* DaisyUI drawer uses CSS grid. Never override with flex or the sidebar
+   (drawer-side) ends up on the RIGHT because content comes first in the DOM. */
+.mr-shell.drawer {
+  display: grid;
+}
+/* Ensure sidebar stays on the left at desktop (mockup parity) */
+.drawer.lg\:drawer-open > .drawer-side {
+  grid-column: 1;
+}
+.drawer.lg\:drawer-open > .drawer-content {
+  grid-column: 2;
+}
+/* Mobile: side is overlay; keep default DaisyUI behavior */
+
 
 .mr-sidebar {
   width: 15.5rem;
@@ -1151,4 +1164,430 @@ html[data-theme="mediaos"] body {
 .mr-row {
   border-radius: 1rem !important;
   background: #1a152e !important;
+}
+
+/* ── Music Player addon ─────────────────────────────────────────────────── */
+
+/* Vertical EQ sliders */
+.eq-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 1.25rem;
+  height: 7.5rem;
+  vertical-align: bottom;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.eq-slider::-webkit-slider-runnable-track {
+  width: 0.375rem;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: currentColor;
+  margin-left: -0.26rem;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+.eq-slider::-moz-range-track {
+  width: 0.375rem;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.eq-slider::-moz-range-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: none;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Lyrics scroll mask */
+.lyrics-scroll {
+  mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
+}
+
+/* Now Playing entrance */
+@keyframes mr-nowplaying-in {
+  from { opacity: 0; transform: translateY(2.5%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* ========== Settings & form typography (consistent scale) ========== */
+/* Hierarchy:
+   Page title   → 1.5rem / 800
+   Section h2   → 0.8125rem uppercase semibold
+   Card title   → 0.875rem medium
+   Body / desc  → 0.8125rem
+   Hint / meta  → 0.75rem
+   Form labels  → 0.8125rem
+   Inputs       → 0.8125rem (mono only for paths/secrets)
+*/
+.mr-page-title {
+  font-size: 1.5rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.2 !important;
+  color: #f3f0ff !important;
+}
+.mr-page-sub {
+  font-size: 0.8125rem !important;
+  opacity: 0.55;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+
+/* Settings hub section headers */
+.space-y-5 .font-semibold.text-sm.tracking-wide.uppercase,
+.settings-section-title {
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  opacity: 0.7;
+}
+
+/* Settings hub cards + config group */
+.card-body .font-medium.text-sm,
+.card-body .font-semibold.text-sm {
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  line-height: 1.3;
+}
+.card-body .text-\[11px\],
+.card-body .text-\[10px\],
+.settings-hint {
+  font-size: 0.75rem !important;
+  opacity: 0.55;
+  line-height: 1.35;
+}
+
+/* Form controls across Settings */
+.form-control .label-text,
+.label .label-text {
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  opacity: 0.9;
+}
+.form-control .input,
+.form-control .select,
+.form-control .textarea,
+.mr-panel .input,
+.mr-panel .select,
+.mr-panel .textarea {
+  font-size: 0.8125rem !important;
+}
+/* Keep mono for secrets/paths but same size */
+.form-control .input.font-mono,
+.mr-panel .input.font-mono {
+  font-size: 0.8125rem !important;
+}
+
+/* Descriptions under section titles */
+.space-y-2 > div > p.text-xs,
+.space-y-5 p.text-xs,
+.card-body > p.text-xs {
+  font-size: 0.75rem !important;
+  line-height: 1.4;
+}
+
+/* Config group section chips (Paths / Naming / Other) */
+.mr-panel h3.text-xs.font-semibold.uppercase {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  opacity: 0.6;
+}
+
+
+/* Hard guarantee: primary nav rail is always LEFT (never drawer-end) */
+.mr-shell.drawer:not(.drawer-end) > .drawer-side {
+  justify-self: start;
+}
+.mr-sidebar {
+  border-right: 1px solid rgba(139, 92, 246, 0.12) !important;
+  border-left: none !important;
+}
+
+/* Desktop shell: fixed left rail + content (matches mockup) */
+@media (min-width: 1024px) {
+  .mr-shell.drawer.lg\:drawer-open {
+    display: grid !important;
+    grid-template-columns: 15rem 1fr !important;
+    grid-template-rows: 1fr;
+  }
+  .mr-shell.drawer.lg\:drawer-open > .drawer-toggle {
+    display: none;
+  }
+  .mr-shell.drawer.lg\:drawer-open > .drawer-side {
+    grid-column: 1 !important;
+    grid-row: 1;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .mr-shell.drawer.lg\:drawer-open > .drawer-content {
+    grid-column: 2 !important;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .mr-shell.drawer.lg\:drawer-open > .drawer-side > .drawer-overlay {
+    display: none !important;
+  }
+}
+
+
+/* ================================================================
+   GLOBAL UI POLISH — match mockup collage (fonts, spacing, rails)
+   ================================================================ */
+
+/* Base body / content breathing room */
+.mr-content,
+main.mr-content,
+.mos-page {
+  padding: 1.15rem 1.35rem 2.5rem !important;
+}
+@media (max-width: 1023px) {
+  .mr-content,
+  main.mr-content,
+  .mos-page {
+    padding: 0.85rem 0.9rem 5.5rem !important;
+  }
+}
+
+/* Unified page title — single source of truth */
+.mr-page-title,
+h1.mr-page-title,
+.mos-page h1.mr-page-title {
+  font-size: 1.5rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.2 !important;
+  color: #f3f0ff !important;
+  margin: 0 0 0.35rem 0 !important;
+}
+.mr-page-sub {
+  font-size: 0.8125rem !important;
+  opacity: 0.55 !important;
+  line-height: 1.4 !important;
+  margin: 0 0 0.75rem 0 !important;
+}
+
+/* Global sidebar (left rail) — mockup parity */
+.mr-sidebar {
+  width: 15rem !important;
+  background: linear-gradient(180deg, #12101f 0%, #0c0a16 100%) !important;
+  border-right: 1px solid rgba(139, 92, 246, 0.14) !important;
+}
+.mr-brand {
+  padding: 1.15rem 1rem 1rem !important;
+  gap: 0.7rem !important;
+}
+.mr-brand-title {
+  font-size: 1.05rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+}
+.mr-nav-item {
+  margin: 0.12rem 0.55rem !important;
+  padding: 0.6rem 0.85rem !important;
+  border-radius: 0.75rem !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+  color: #9b93c0 !important;
+  gap: 0.7rem !important;
+}
+.mr-nav-item:hover {
+  background: rgba(139, 92, 246, 0.1) !important;
+  color: #f3f0ff !important;
+}
+.mr-nav-item.active {
+  background: #8b5cf6 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 6px 18px rgba(139, 92, 246, 0.35) !important;
+}
+.mr-nav-item .nav-icon {
+  width: 1.2rem !important;
+  height: 1.2rem !important;
+  opacity: 0.9 !important;
+}
+.mr-server-card {
+  margin: 0.65rem 0.75rem 1rem !important;
+  padding: 0.85rem 1rem !important;
+  border-radius: 0.9rem !important;
+  background: #1a152e !important;
+  border: 1px solid rgba(139, 92, 246, 0.16) !important;
+}
+
+/* Module inner nav (Movies / TV / Music panels) */
+.mr-module {
+  background: transparent;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+.mr-module-nav {
+  width: 11.25rem !important;
+  background: rgba(16, 14, 28, 0.75) !important;
+  border-right: 1px solid rgba(139, 92, 246, 0.12) !important;
+  padding: 1rem 0.55rem !important;
+}
+.mr-module-nav .mod-title {
+  font-size: 0.7rem !important;
+  letter-spacing: 0.08em !important;
+  color: #9b93c0 !important;
+  padding: 0 0.65rem 0.85rem !important;
+}
+.mr-module-nav button {
+  font-size: 0.85rem !important;
+  padding: 0.5rem 0.7rem !important;
+  border-radius: 0.65rem !important;
+  margin-bottom: 0.12rem !important;
+}
+.mr-module-nav button.active {
+  background: #8b5cf6 !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.3) !important;
+}
+.mr-module-body {
+  padding: 1.1rem 1.35rem 2rem !important;
+}
+
+/* Cards / panels */
+.card,
+.mr-panel,
+.mos-mock-panel .card {
+  background: #16122a !important;
+  border: 1px solid rgba(139, 92, 246, 0.12) !important;
+  border-radius: 1rem !important;
+}
+.card-body {
+  padding: 1rem 1.15rem !important;
+}
+
+/* Poster grid — mockup density */
+.poster-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr)) !important;
+  gap: 1rem !important;
+}
+.mr-tile,
+.media-card,
+.mr-poster {
+  border-radius: 0.9rem !important;
+  border: 1px solid rgba(139, 92, 246, 0.1) !important;
+  background: #1c1733 !important;
+  overflow: hidden !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease !important;
+}
+.mr-tile:hover,
+.media-card:hover,
+.mr-poster:hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(139, 92, 246, 0.4) !important;
+  box-shadow: 0 14px 36px -10px rgba(139, 92, 246, 0.3) !important;
+}
+
+/* Search fields — pill style like mockup */
+.mr-search,
+input.mr-search {
+  background: #1c1733 !important;
+  border: 1px solid rgba(139, 92, 246, 0.2) !important;
+  border-radius: 999px !important;
+  padding: 0.45rem 1rem !important;
+  font-size: 0.85rem !important;
+  color: #f3f0ff !important;
+  min-height: 2rem;
+}
+.input.input-bordered,
+.select.select-bordered {
+  border-radius: 0.75rem !important;
+  background: #1c1733 !important;
+  border-color: rgba(139, 92, 246, 0.2) !important;
+  font-size: 0.8125rem !important;
+}
+
+/* Buttons — consistent heights */
+.btn-sm {
+  min-height: 2rem !important;
+  height: 2rem !important;
+  font-size: 0.8125rem !important;
+  padding-left: 0.85rem !important;
+  padding-right: 0.85rem !important;
+  border-radius: 0.65rem !important;
+}
+.btn-xs {
+  min-height: 1.65rem !important;
+  height: 1.65rem !important;
+  font-size: 0.75rem !important;
+  border-radius: 0.55rem !important;
+}
+.btn-primary {
+  background: #8b5cf6 !important;
+  border-color: #8b5cf6 !important;
+  color: #fff !important;
+}
+
+/* Micro text → standard xs (kill random 10px/11px) */
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.75rem !important;
+  line-height: 1.35 !important;
+}
+
+/* Toolbar alignment */
+.mr-toolbar {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Badges on posters */
+.badge-sm {
+  font-size: 0.65rem !important;
+  height: 1.15rem !important;
+  padding: 0 0.4rem !important;
+}
+
+/* Tables denser & readable */
+.table th {
+  font-size: 0.7rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  color: #9b93c0 !important;
+  background: #12101f !important;
+}
+.table td {
+  font-size: 0.8125rem !important;
+  border-color: rgba(139, 92, 246, 0.08) !important;
+}
+
+/* Alerts */
+.alert {
+  border-radius: 0.75rem !important;
+  font-size: 0.8125rem !important;
+}
+
+/* Progress bars — purple gradient like mockup */
+.progress-primary::-webkit-progress-value,
+.progress.progress-primary::-webkit-progress-value {
+  background: linear-gradient(90deg, #8b5cf6, #c084fc) !important;
+}
+.mr-server-card .bar > span,
+.mr-ep-row .bar > i {
+  background: linear-gradient(90deg, #8b5cf6, #c084fc) !important;
 }

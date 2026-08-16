@@ -1,6 +1,95 @@
 # MediaOS Changelog
 
+## [1.01beta]
 
+### Setup / store polish
+- Path conflict detector (`/api/library/path-conflicts`)
+- Client Apply (`/api/tools/clients/apply`)
+- Quality preset packs HD/4K/Anime (`/api/quality-ui/presets`)
+- Migration wizard UI page
+- First-run tour component
+- Settings field help registry
+
+
+
+### Module Store
+- Hubstarr-style catalog metadata (category, tags, path labels)
+- Conflict detection API on `GET /api/modules`
+- Store UI: search, category filters, path setup warnings, conflict banner
+ — 2026-08-16
+
+### Added
+- Metadata job queue + SSE; *arr migrate preflight/side-by-side
+- Notification center (ntfy, Gotify, history); tracking status API
+- Music missing-tracks / hunt-incomplete; books wanted-hierarchy
+- Kids/viewer/power user presets; games playtime → tracking
+- Score breakdown; path-map in organize; TorBox tests
+
+### Fixed
+- Backup include_db / include_config flags
+- Subtitle profile applied on fetch; stream-first when preferred
+
+### Docs
+- MIGRATION.md, RELEASE_NOTES_1.01beta.md, TODO_NEXT.md
+
+
+## Unreleased (post-1.01beta)
+
+Work completed on the `1.01beta` tag after the rename (Sessions 11–25). Version string is still `1.01beta` until a deliberate bump.
+
+### Added
+- Library tools: duplicates merge, path maps, bulk metadata; backup wizard; E2E nightly; EPG DVR conflict; multi-debrid resolve on grab
+- Scrobble/comics → Tracking writeback; stream-first ranking; games install script hook; Live TV portal health
+- Track… on TV/books/comics/audiobooks/games; EPG programme menu; games install; prefer_stream_on_search; CI e2e-syntax
+- Track… on TV/books/comics/audiobooks/games details; EPG programme action menu; games install endpoint
+- `prefer_stream_on_search` setting; CI e2e-syntax job
+- Unified tracking: bulk upsert, movie detail Track menu, type filters on Tracking page
+- Stream-as-primary styling on interactive results; Live TV EPG Watch + shift-click stream
+- Games launch endpoint (Steam / install path) + Launch button
+- CI coverage floor (5%); expanded Playwright smoke paths
+- Settings hub filter; converter job retry; calendar open-detail; indexers Test all
+- Music smart-list / liked queue-selected; download queue bulk pause/resume
+- Bulk monitor/actions for **books, audiobooks, adult, music, comics (volumes + manga), games, podcasts**
+- Comics **Continue Reading** (`last_read_at`, dashboard widget, layout merge for saved dashboards)
+- Wanted multi-select + **Search selected** (movies, books, audiobooks, adult, episodes, music)
+- Comics **issue** multi-select bulk monitor on detail
+- Podcast **episode** multi-select download
+- Music hierarchy + grid bulk; TV Mass Editor **Season Pass monitor** shortcut
+- Live TV: remember last channel **group**; Now/Next empty tip
+- CI: restored `ci.yml` / `security.yml`, pytest in `ci:local`, coverage artifact + Codecov
+- Playwright optional E2E smokes; `@playwright/test` pinned
+- Tests: API bulk/progress, route-order regression, quality parse fixtures, organize pure helpers, grab dry-run
+- Docs: `CONTRIBUTING.md`, `docs/POLISH_AND_GAPS.md`, CI SQLite note, README E2E blurb
+
+### Fixed
+- FastAPI route ordering: `/bulk` and parity `/workers/search-all` before `{id}` params
+- Movies bulk checkboxes stay visible when selected
+- Quality bulk dropdown hidden when no profiles exist
+- Select-all only when the visible list is non-empty
+
+### Changed
+- Audiobooks denser poster grid; podcasts denser library grid
+- Games library + wanted bulk; releases tab monitor/search polish
+
+---
+
+
+
+## 1.01beta (2026-08-15)
+
+### Changed
+- **Version rename**: `2.0.27-dev` → `1.01beta`, per `RELEASE_NOTES_NEXT.md`/
+  `GITHUB_RELEASE_NEXT.md`. Updated `VERSION`, `package.json`,
+  `package-lock.json`, and `app/version.py`'s `_VERSION_FALLBACK`.
+  `Dockerfile` and `docker-compose.standalone.yml` already used
+  `1.01beta` as their default. `app/main.py`, `dashboard_widgets.py`,
+  `plugins.py`, `system.py`, and `backup.py` already route through the
+  single `get_version()` source (fixed in a prior session), so no
+  other call sites needed touching.
+- `scripts/check_version.py`'s format check was strict semver
+  (`^\d+\.\d+\.\d+`), which `1.01beta` does not match (only one dot).
+  Loosened to `^\d+\.\d+` so it still rejects empty/garbage values but
+  accepts this project's beta-style tag.
 
 ## 2.0.27-dev (2026-08-13)
 

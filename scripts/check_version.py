@@ -18,7 +18,9 @@ def main() -> int:
     if not version:
         print("ERROR: VERSION empty", file=sys.stderr)
         return 1
-    if not re.match(r"^\d+\.\d+\.\d+", version):
+    # Accepts strict semver (1.2.3) as well as this project's beta-style
+    # tags (e.g. "1.01beta") — just requires a leading `<digits>.<digits>`.
+    if not re.match(r"^\d+\.\d+", version):
         print(f"ERROR: VERSION looks invalid: {version!r}", file=sys.stderr)
         return 1
 

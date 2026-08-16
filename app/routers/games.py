@@ -18,6 +18,28 @@ from app.models import Game, Platform, GameRelease
 
 router = APIRouter(prefix="/games", tags=["games"])
 
+@router.get("/install-jobs")
+def list_install_jobs(limit: int = 50, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    from app.models import GameInstallJob
+    rows = db.query(GameInstallJob).order_by(GameInstallJob.id.desc()).limit(limit).all()
+    return {"items": [
+        {"id": r.id, "game_id": r.game_id, "status": r.status, "command": r.command,
+         "log_text": (r.log_text or "")[:2000], "returncode": r.returncode,
+         "created_at": r.created_at.isoformat() if r.created_at else None}
+        for r in rows
+    ]}
+
+
+@router.get("/install-jobs/{job_id}")
+def get_install_job(job_id: int, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    from app.models import GameInstallJob
+    r = db.get(GameInstallJob, job_id)
+    if not r:
+        raise HTTPException(404, "Not found")
+    return {"id": r.id, "game_id": r.game_id, "status": r.status, "command": r.command,
+            "log_text": r.log_text, "returncode": r.returncode}
+
+
 
 class PlatformIn(BaseModel):
     name: str
@@ -110,6 +132,64 @@ def add_game(
     return {"ok": True, "id": g.id, "title": g.title}
 
 
+@router.get("/search")
+def search_games_meta(q: str, limit: int = 20):
+    from app.clients import igdb
+    configured = False
+    try:
+        configured = bool(igdb.configured())
+    except Exception:
+        configured = False
+    results = igdb.search(q, limit=limit) if configured else []
+    return {
+        "results": results or [],
+        "provider": "igdb" if configured else "none",
+        "configured": configured,
+        "message": None
+        if configured
+        else "IGDB not configured — set igdb_client_id + igdb_client_secret (Twitch) in Settings",
+    }
+
+
+@router.get("/wanted")
+def list_wanted_games(db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    rows = db.query(Game).filter(Game.monitored.is_(True), Game.status.in_(["wanted", "missing"])).order_by(Game.id.desc()).limit(100).all()
+    return {
+        "items": [
+            {"id": g.id, "title": g.title, "year": g.year, "status": g.status, "platform_id": g.platform_id}
+            for g in rows
+        ]
+    }
+
+
+# NOTE: "/{game_id}" below is a single dynamic path segment, so any literal
+# single-segment GET route (like "/search" or "/wanted" above) must be
+# registered before it — FastAPI/Starlette match routes in registration
+# order, so a literal route declared after "/{game_id}" would be shadowed
+# (e.g. GET /search would 422 trying to parse "search" as an int game_id).
+
+class GameBulkIn(BaseModel):
+    ids: list[int]
+    monitored: bool | None = None
+
+
+@router.post("/bulk")
+def bulk_games(payload: GameBulkIn, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    """Bulk monitor toggle for games — must sit before /{game_id}."""
+    n = 0
+    for gid in payload.ids:
+        g = db.get(Game, gid)
+        if not g:
+            continue
+        if payload.monitored is not None:
+            g.monitored = payload.monitored
+        db.add(g)
+        n += 1
+    db.commit()
+    return {"ok": True, "updated": n}
+
+
+
 @router.get("/{game_id}")
 def get_game(game_id: int, db: Session = Depends(get_db)):
     g = db.get(Game, game_id)
@@ -133,6 +213,35 @@ def get_game(game_id: int, db: Session = Depends(get_db)):
             for r in releases
         ],
     }
+
+
+
+
+@router.post("/{game_id}/launch")
+def launch_game(game_id: int, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    """Return a launch target: Steam URL, install path, or library path."""
+    g = db.get(Game, game_id)
+    if not g:
+        raise HTTPException(404, "Not found")
+    steam_id = None
+    try:
+        import json
+        ext = json.loads(g.external_ids or "{}")
+        steam_id = ext.get("steam") or ext.get("steam_appid")
+    except Exception:
+        pass
+    if not steam_id and getattr(g, "steam_appid", None):
+        steam_id = g.steam_appid
+    targets = []
+    if steam_id:
+        targets.append({"kind": "steam", "url": f"steam://run/{steam_id}", "label": "Steam"})
+    if g.install_path:
+        targets.append({"kind": "install_path", "path": g.install_path, "label": "Install folder"})
+    if g.path:
+        targets.append({"kind": "library_path", "path": g.path, "label": "Library path"})
+    if not targets:
+        raise HTTPException(404, "No launch target (set Steam id or install path)")
+    return {"ok": True, "game_id": g.id, "title": g.title, "targets": targets, "primary": targets[0]}
 
 
 @router.patch("/{game_id}")
@@ -213,25 +322,6 @@ def seed_platforms(db: Session = Depends(get_db), _=Depends(require_permission("
         added += 1
     db.commit()
     return {"ok": True, "added": added, "total": db.query(Platform).count()}
-
-
-@router.get("/search")
-def search_games_meta(q: str, limit: int = 20):
-    from app.clients import igdb
-    configured = False
-    try:
-        configured = bool(igdb.configured())
-    except Exception:
-        configured = False
-    results = igdb.search(q, limit=limit) if configured else []
-    return {
-        "results": results or [],
-        "provider": "igdb" if configured else "none",
-        "configured": configured,
-        "message": None
-        if configured
-        else "IGDB not configured — set igdb_client_id + igdb_client_secret (Twitch) in Settings",
-    }
 
 
 @router.get("/{game_id}/interactive-search")
@@ -350,10 +440,57 @@ def organize_game(game_id: int, body: dict | None = None, db: Session = Depends(
             raise HTTPException(400, f"organize failed: {e}")
     g.path = str(dest)
     g.install_path = organized or str(dest)
-    g.status = "downloaded"
+    g.status = "installed" if (organized or dest) else "downloaded"
     db.add(g)
     db.commit()
     return {"ok": True, "path": g.path, "install_path": g.install_path, "status": g.status}
+
+
+
+
+@router.post("/{game_id}/install")
+def install_game(game_id: int, body: dict | None = None, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    """Mark install_path and status=installed (optional path override)."""
+    g = db.get(Game, game_id)
+    if not g:
+        raise HTTPException(404, "Not found")
+    body = body or {}
+    if body.get("install_path"):
+        g.install_path = body["install_path"]
+    elif not g.install_path and g.path:
+        g.install_path = g.path
+    if not g.install_path and not g.path:
+        raise HTTPException(400, "No path to install — organize or set install_path first")
+    g.status = "installed"
+    db.add(g)
+    db.commit()
+    script_out = None
+    job_id = None
+    try:
+        from app.config import settings
+        from app.models import GameInstallJob
+        from datetime import datetime, timezone
+        script = (getattr(settings, "games_install_script", None) or "").strip()
+        if script and g.install_path:
+            import shlex, subprocess
+            cmd = script.format(path=g.install_path, title=g.title or "", id=g.id)
+            job = GameInstallJob(game_id=g.id, status="running", command=cmd)
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+            job_id = job.id
+            proc = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=120)
+            log_text = ((proc.stdout or "") + chr(10) + (proc.stderr or ""))[:8000]
+            job.log_text = log_text
+            job.returncode = proc.returncode
+            job.status = "done" if proc.returncode == 0 else "failed"
+            job.finished_at = datetime.now(timezone.utc)
+            db.add(job)
+            db.commit()
+            script_out = {"returncode": proc.returncode, "stdout": (proc.stdout or "")[:500], "stderr": (proc.stderr or "")[:500], "job_id": job_id}
+    except Exception as e:
+        script_out = {"error": str(e), "job_id": job_id}
+    return {"ok": True, "id": g.id, "status": g.status, "install_path": g.install_path, "path": g.path, "script": script_out}
 
 
 @router.post("/{game_id}/complete")
@@ -500,12 +637,47 @@ def grab_game_by_url(game_id: int, body: dict, db: Session = Depends(get_db), _=
         raise HTTPException(400, f"grab failed: {e}")
 
 
-@router.get("/wanted")
-def list_wanted_games(db: Session = Depends(get_db), _=Depends(require_permission("library"))):
-    rows = db.query(Game).filter(Game.monitored.is_(True), Game.status.in_(["wanted", "missing"])).order_by(Game.id.desc()).limit(100).all()
+@router.post("/{game_id}/playtime")
+def add_playtime(game_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    """Increment playtime_minutes and optionally push completion into tracking."""
+    g = db.get(Game, game_id)
+    if not g:
+        raise HTTPException(404, "Game not found")
+    mins = int(body.get("minutes") or body.get("playtime_minutes") or 0)
+    if mins < 0:
+        raise HTTPException(400, "minutes must be >= 0")
+    g.playtime_minutes = int(g.playtime_minutes or 0) + mins
+    if body.get("completion_percent") is not None:
+        g.completion_percent = float(body["completion_percent"])
+    if body.get("launcher"):
+        g.launcher = body["launcher"]
+    if (g.completion_percent or 0) >= 100:
+        g.status = "completed"
+    db.add(g)
+    db.commit()
+    # feed tracking layer when media_item link exists
+    try:
+        if getattr(g, "media_item_id", None):
+            from app.models import TrackedItem
+            from datetime import datetime, timezone
+            tr = db.query(TrackedItem).filter(TrackedItem.media_item_id == g.media_item_id).first()
+            if tr:
+                tr.progress_percent = g.completion_percent or tr.progress_percent
+                if g.status == "completed":
+                    tr.status = "completed"
+                elif (g.playtime_minutes or 0) > 0 and tr.status in ("planned", None, ""):
+                    tr.status = "in_progress"
+                tr.updated_at = datetime.now(timezone.utc)
+                db.add(tr)
+                db.commit()
+    except Exception:
+        pass
     return {
-        "items": [
-            {"id": g.id, "title": g.title, "year": g.year, "status": g.status, "platform_id": g.platform_id}
-            for g in rows
-        ]
+        "ok": True,
+        "id": g.id,
+        "playtime_minutes": g.playtime_minutes,
+        "completion_percent": g.completion_percent,
+        "status": g.status,
+        "launcher": g.launcher,
     }
+

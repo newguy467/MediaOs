@@ -34,6 +34,20 @@ function BookDetailPage({ bookId, onBack, refresh }) {
     api.books.get(bookId).then(setItem).catch(e=>setMsg(String(e.message||e)));
   }, [bookId]);
   useEffect(()=>{ load(); }, [load]);
+  
+  async function setTrackStatus(status) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/tracking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_item_id: bookId, status }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Track failed');
+      setMsg('Tracking: ' + String(status).replace(/_/g, ' '));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
+
   async function autoSearch() {
     setBusy(true); setMsg(null);
     try {
@@ -91,6 +105,15 @@ function BookDetailPage({ bookId, onBack, refresh }) {
           catch(e){ setMsg(String(e.message||e)); }
           setBusy(false);
         }}>{item.monitored?'Unmonitor':'Monitor'}</button>
+        <select className="select select-bordered select-sm" defaultValue="" disabled={busy}
+          onChange={e=>{ if(e.target.value) { setTrackStatus(e.target.value); e.target.value=''; } }} title="Unified tracking">
+          <option value="">Track…</option>
+          <option value="planned">Planned</option>
+          <option value="in_progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="on_hold">On hold</option>
+          <option value="dropped">Dropped</option>
+        </select>
         <button type="button" className="btn btn-sm" disabled={busy} onClick={async()=>{
           setBusy(true);
           try { await api.books.refresh(bookId); load(); setMsg('Refreshed'); }
@@ -117,16 +140,59 @@ function BooksPage({ setPage }) {
   // searchAllMissing defined below
   const [items, setItems] = useState([]);
   const [detailId, setDetailId] = useState(null);
+  // Jump straight to an item's detail view when opened from Global Search
+  // or the dashboard's Continue Watching row.
+  useEffect(() => {
+    const onOpenItem = (e) => {
+      if (!e.detail || !(e.detail.mediaType === 'book')) return;
+      setDetailId(e.detail.id);
+    };
+    window.addEventListener('mediaos-open-item', onOpenItem);
+    return () => window.removeEventListener('mediaos-open-item', onOpenItem);
+  }, []);
   const [nav, setNav] = useState('library');
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState(null);
+  const [selected, setSelected] = useState({});
+  const [qp, setQp] = useState('');
+  const [profiles, setProfiles] = useState([]);
+  const [busy, setBusy] = useState(false);
   const load = () => api.books.list().then(setItems).catch(()=>[]).finally(()=>setLoading(false));
   useEffect(() => { load(); }, []);
+  useEffect(() => { api.settings.profiles().then(setProfiles).catch(()=>{}); }, []);
+  const bookProfiles = profiles.filter(p => p.media_type === 'book');
+  const selectedIds = Object.keys(selected);
   // toolbar uses searchAllMissing for monitored missing books
   if (detailId) return <BookDetailPage bookId={detailId} onBack={()=>{ setDetailId(null); load(); }} refresh={load} />;
+
+  async function bulkMonitor(monitored) {
+    setBusy(true); setMsg(null);
+    try {
+      await api.books.bulk({ ids: selectedIds.map(Number), monitored });
+      setSelected({}); load();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function bulkSearchMissing() {
+    setBusy(true); setMsg(null);
+    try {
+      for (const id of selectedIds) { await api.books.searchNow(Number(id)); }
+      setMsg('Search queued for selected'); load();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
+  async function bulkApplyProfile() {
+    if (!qp) return;
+    setBusy(true); setMsg(null);
+    try {
+      await api.books.bulk({ ids: selectedIds.map(Number), quality_profile: qp });
+      setSelected({}); setQp(''); load();
+    } catch(e) { setMsg(String(e.message||e)); }
+    setBusy(false);
+  }
 
   async function doSearch(e) {
     e && e.preventDefault();
@@ -190,7 +256,7 @@ function BooksPage({ setPage }) {
       </aside>
       <div className="flex-1 min-w-0 space-y-4 md:pl-4">
         <div className="flex flex-wrap items-center gap-2 justify-between">
-          <h1 className="text-xl font-bold tracking-tight">{nav==='library'?'Books':nav==='add'?'Add Book':'Wanted'}</h1>
+          <h1 className="mr-page-title">{nav==='library'?'Books':nav==='add'?'Add Book':'Wanted'}</h1>
           <div className="flex gap-1.5 flex-wrap">
             <form onSubmit={doSearch} className="flex gap-1">
               <label className="input input-bordered input-sm flex items-center gap-2 w-48">
@@ -226,13 +292,47 @@ function BooksPage({ setPage }) {
           </tbody></table>
         )}
         {nav==='library' && (
-          loading ? <span className="loading loading-spinner"/> :
+          loading ? <span className="loading loading-spinner"/> : (
+          <>
+          {selectedIds.length > 0 && (
+            <div className="card bg-base-200 mb-3">
+              <div className="card-body p-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs opacity-60">{selectedIds.length} selected</span>
+                  {list.length > 0 && (
+                  <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>{
+                    const n={};
+                    list.forEach(b=>{ n[b.id]=true; });
+                    setSelected(n);
+                  }}>Select all visible</button>
+                  )}
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(true)}>Monitor selected</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(false)}>Unmonitor selected</button>
+                  <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={bulkSearchMissing}>Search missing</button>
+                  {bookProfiles.length > 0 && (
+              <>
+              <select className="select select-bordered select-xs" value={qp} onChange={e=>setQp(e.target.value)}>
+                    <option value="">Bulk quality…</option>
+                    {bookProfiles.map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+                  </select>
+                  <button type="button" className="btn btn-xs" disabled={busy||!qp} onClick={bulkApplyProfile}>Apply profile</button>
+              </>
+              )}
+                  <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>setSelected({})}>Clear</button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {list.map(b=>{
               const ok = hasFile(b);
               return (
-                <div key={b.id} className="group rounded-lg overflow-hidden bg-base-200 shadow-sm hover:ring-2 hover:ring-primary/40">
-                  <div className="aspect-[2/3] bg-base-300 relative flex items-center justify-center">
+                <div key={b.id} className="group relative rounded-lg overflow-hidden bg-base-200 shadow-sm hover:ring-2 hover:ring-primary/40">
+                  <label className={`absolute top-2 left-2 z-10 transition-opacity ${selected[b.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e=>e.stopPropagation()}>
+                    <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!selected[b.id]}
+                      onChange={e=>{ setSelected(prev=>{ const n={...prev}; if(e.target.checked) n[b.id]=true; else delete n[b.id]; return n; }); }} />
+                  </label>
+                  <div className="aspect-[2/3] bg-base-300 relative flex items-center justify-center cursor-pointer" onClick={()=>setDetailId(b.id)}>
                     {b.poster_path ? <img src={b.poster_path.startsWith('http')?b.poster_path:('https://covers.openlibrary.org/b/id/'+b.poster_path+'-M.jpg')} className="w-full h-full object-cover" alt="" loading="lazy"/> : <Ic.Book />}
                     <div className={"absolute bottom-0 left-0 right-0 h-1.5 "+(ok?'bg-success':b.monitored?'bg-warning':'bg-base-content/20')} />
                     <div className={"absolute bottom-2 left-2 badge badge-sm border-0 text-white "+(ok?'bg-success':'bg-warning')}>{ok?'Have':'Want'}</div>
@@ -249,6 +349,8 @@ function BooksPage({ setPage }) {
               );
             })}
           </div>
+          </>
+          )
         )}
       </div>
     </div>

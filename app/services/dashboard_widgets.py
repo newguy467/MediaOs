@@ -115,9 +115,9 @@ def widget_library_counts(db: Session) -> dict[str, int]:
 
 
 def widget_health() -> dict[str, Any]:
-    import os
+    from app.version import get_version
     return {
-        "version": os.environ.get("APP_VERSION", "1.00beta"),
+        "version": get_version(),
         "status": "ok",
     }
 
@@ -234,6 +234,7 @@ def dashboard_bundle(db: Session) -> dict[str, Any]:
         "health": widget_health(),
         # MediaOS v2 control plane
         "continue_watching": widget_continue_watching(db),
+        "continue_reading": widget_continue_reading(db),
         "recent_scrobbles": widget_recent_scrobbles(db),
         "games_wanted": widget_games_wanted(db),
         "tracking_summary": widget_tracking_summary(db),
@@ -246,25 +247,109 @@ def dashboard_bundle(db: Session) -> dict[str, Any]:
 
 # --- MediaOS v2 expansions (Prismarr density + scrob + games) ---
 
+# Media type -> (page slug, label). Shared shape with app/routers/global_search.py's
+# MODULE_MAP; kept as a separate literal here (dashboard_widgets must not import
+# routers) but the two must be updated together if a module is added.
+CONTINUE_PAGE_MAP = {
+    "movie": "movies",
+    "tv": "tv",
+    "music": "music",
+    "book": "books",
+    "audiobook": "audiobooks",
+    "comic": "comics",
+    "manga": "manga",
+    "adult": "adult",
+}
+
+
 def widget_continue_watching(db: Session, limit: int = 12) -> list[dict]:
-    """Continue Watching / Playing from local scrobbling progress."""
-    from app.models import WatchProgress
+    """Continue Watching / Playing from local scrobbling progress, enriched
+    with title/artwork/media-type so the dashboard can render real cards
+    instead of a bare id."""
+    from app.models import WatchProgress, Game
+
     rows = (
         db.query(WatchProgress)
         .filter(WatchProgress.progress_percent > 0, WatchProgress.progress_percent < 90)
         .order_by(WatchProgress.last_watched_at.desc())
-        .limit(limit)
+        .limit(limit * 2)  # over-fetch: some rows may be orphaned (item deleted)
         .all()
     )
-    out = []
+    out: list[dict] = []
     for p in rows:
+        title = subtitle = poster = media_type = page = None
+        if p.media_item_id:
+            item = db.get(MediaItem, p.media_item_id)
+            if item:
+                title = item.title
+                media_type = item.media_type.value if hasattr(item.media_type, "value") else str(item.media_type)
+                poster = item.poster_path
+                subtitle = item.artist_name if media_type == "music" else (str(item.year) if item.year else None)
+                page = CONTINUE_PAGE_MAP.get(media_type)
+        elif p.game_id:
+            g = db.get(Game, p.game_id)
+            if g:
+                title, media_type, poster, page = g.title, "game", g.poster_path, "games"
+        if not title:
+            continue  # orphaned progress row — underlying item was deleted
         out.append({
             "media_item_id": p.media_item_id,
             "game_id": p.game_id,
+            "title": title,
+            "subtitle": subtitle,
+            "media_type": media_type,
+            "poster_path": poster,
+            "page": page,
             "progress_percent": p.progress_percent,
             "last_watched_at": p.last_watched_at.isoformat() if p.last_watched_at else None,
             "source": p.source,
         })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def widget_continue_reading(db: Session, limit: int = 12) -> list[dict]:
+    """In-progress comic/manga issues ordered by most recently read.
+
+    Requires last_read_at (added in schema 2.0.30). Only issues that have
+    been opened at least once and are not fully read are returned.
+    """
+    from app.models import ComicIssue, MediaItem, MediaType
+
+    rows = (
+        db.query(ComicIssue)
+        .filter(
+            ComicIssue.last_read_at.isnot(None),
+            ComicIssue.is_read.is_(False),
+            ComicIssue.last_page_read.isnot(None),
+            ComicIssue.last_page_read > 0,
+        )
+        .order_by(ComicIssue.last_read_at.desc())
+        .limit(limit * 2)  # oversample in case of orphaned volume rows
+        .all()
+    )
+    out: list[dict] = []
+    for iss in rows:
+        vol = db.get(MediaItem, iss.media_item_id)
+        if not vol or vol.media_type not in (MediaType.comic, MediaType.manga):
+            continue
+        media_type = vol.media_type.value if hasattr(vol.media_type, "value") else str(vol.media_type)
+        page = CONTINUE_PAGE_MAP.get(media_type, "comics")
+        out.append({
+            "issue_id": iss.id,
+            "media_item_id": iss.media_item_id,
+            "title": vol.title,
+            "subtitle": iss.title or (f"#{iss.issue_number}" if iss.issue_number else None),
+            "issue_number": iss.issue_number,
+            "media_type": media_type,
+            "poster_path": iss.poster_path or vol.poster_path,
+            "page": page,
+            "last_page_read": iss.last_page_read,
+            "last_read_at": iss.last_read_at.isoformat() if iss.last_read_at else None,
+        })
+        if len(out) >= limit:
+            break
     return out
 
 

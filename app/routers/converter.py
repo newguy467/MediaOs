@@ -212,6 +212,24 @@ def cancel(job_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(job_id: int, db: Session = Depends(get_db)):
+    """Re-queue a failed or cancelled conversion job."""
+    job = db.get(ConvertJob, job_id)
+    if not job:
+        raise HTTPException(404, "Not found")
+    if job.status not in ("failed", "cancelled", "done"):
+        raise HTTPException(400, f"Cannot retry status={job.status}")
+    job.status = "queued"
+    job.progress = 0
+    if hasattr(job, "message"):
+        job.message = "requeued"
+    db.add(job)
+    db.commit()
+    return {"ok": True, "id": job_id, "status": "queued"}
+
 @router.delete("/jobs/{job_id}", status_code=204)
 def delete_job(job_id: int, db: Session = Depends(get_db)):
     job = db.get(ConvertJob, job_id)

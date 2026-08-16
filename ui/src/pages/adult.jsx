@@ -18,6 +18,8 @@ function AdultPage() {
   const [addTitle, setAddTitle] = useState('');
   const [addYear, setAddYear] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [selected, setSelected] = useState({});
+  const selectedIds = Object.keys(selected);
 
   const loadList = useCallback(async () => {
     try {
@@ -44,6 +46,17 @@ function AdultPage() {
     })();
     return () => { cancelled = true; };
   }, [loadList]);
+
+
+  async function bulkMonitor(monitored) {
+    setBusy(true); setMsg(null);
+    try {
+      await api.adult.bulk({ ids: selectedIds.map(Number), monitored });
+      setSelected({});
+      await loadList();
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  }
 
   const unlock = async (e) => {
     e && e.preventDefault();
@@ -190,17 +203,39 @@ function AdultPage() {
           </form>
         </div>
       )}
+      {selectedIds.length > 0 && (
+        <div className="card bg-base-200 mb-3">
+          <div className="card-body p-3 gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs opacity-60">{selectedIds.length} selected</span>
+              {filtered.length > 0 && (
+                <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>{
+                  const n={}; filtered.forEach(m=>{ n[m.id]=true; }); setSelected(n);
+                }}>Select all visible</button>
+              )}
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(true)}>Monitor</button>
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={()=>bulkMonitor(false)}>Unmonitor</button>
+              <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={()=>setSelected({})}>Clear</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="poster-grid">
         {filtered.map(m => (
-          <PosterTile
-            key={m.id}
-            title={m.title}
-            year={m.year}
-            poster={m.poster_path}
-            status={m.status}
-            monitored={m.monitored}
-            onClick={()=>setDetailId(m.id)}
-          />
+          <div key={m.id} className="relative group">
+            <label className={`absolute top-2 left-2 z-10 transition-opacity ${selected[m.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={e=>e.stopPropagation()}>
+              <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!selected[m.id]}
+                onChange={e=>{ setSelected(prev=>{ const n={...prev}; if(e.target.checked) n[m.id]=true; else delete n[m.id]; return n; }); }} />
+            </label>
+            <PosterTile
+              title={m.title}
+              year={m.year}
+              poster={m.poster_path}
+              status={m.status}
+              monitored={m.monitored}
+              onClick={()=>setDetailId(m.id)}
+            />
+          </div>
         ))}
         {!filtered.length && <p className="opacity-50 text-sm col-span-full">No titles — use Add or enable the Adult module path.</p>}
       </div>

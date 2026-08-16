@@ -78,8 +78,8 @@ def cross_seed_manual(info_hash: str | None = None, path: str | None = None, _: 
 
 @router.get("/library-watch")
 def library_watch_status():
-    from app.services.library_watch import poll_once
-    return poll_once()
+    from app.services.library_watch import status, poll_once
+    return {**status(), "poll": poll_once()}
 
 
 @router.get("/cleanup/status")
@@ -144,3 +144,48 @@ def subtitle_providers_status():
     from app.services.subtitles import provider_status
     return provider_status()
 
+
+@router.get("/subtitle-profiles")
+def subtitle_language_profiles():
+    from app.services.subtitle_profiles import list_profiles, get_default_profile_id, resolve_languages
+    return {
+        "profiles": list_profiles(),
+        "default_profile_id": get_default_profile_id(),
+        "active": resolve_languages(),
+    }
+
+
+@router.put("/subtitle-profiles/default")
+def set_subtitle_default_profile(body: dict):
+    from app.services.subtitle_profiles import set_default_profile_id, resolve_languages, get_profile
+    pid = int(body.get("profile_id") or body.get("id") or 1)
+    get_profile(pid)  # validate exists
+    set_default_profile_id(pid)
+    return {"ok": True, "active": resolve_languages(pid)}
+
+@router.post("/clients/apply")
+def clients_apply(body: dict, _=Depends(require_admin)):
+    """One-shot qB/SAB category + path Apply."""
+    from app.services.client_apply import apply_clients
+    return apply_clients(
+        qbit_url=body.get("qbit_url"),
+        qbit_user=body.get("qbit_user") or body.get("qbit_username"),
+        qbit_pass=body.get("qbit_pass") or body.get("qbit_password"),
+        sab_url=body.get("sab_url") or body.get("sabnzbd_url"),
+        sab_api_key=body.get("sab_api_key") or body.get("sabnzbd_api_key"),
+        categories=body.get("categories"),
+        push_qb_categories=bool(body.get("push_qb_categories", True)),
+    )
+
+
+@router.get("/clients/plan")
+def clients_plan(_=Depends(require_admin)):
+    from app.services.client_apply import planned_categories
+    from app.services.settings_help import CLIENT_HELP
+    return {"categories": planned_categories(), "help": CLIENT_HELP}
+
+
+@router.get("/settings-help")
+def settings_help_all(_=Depends(require_admin)):
+    from app.services.settings_help import PATH_HELP, CLIENT_HELP, QUALITY_HELP, FIELD_HELP
+    return {"paths": PATH_HELP, "clients": CLIENT_HELP, "quality": QUALITY_HELP, "fields": FIELD_HELP}

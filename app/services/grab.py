@@ -17,6 +17,28 @@ import time
 
 log = logging.getLogger(__name__)
 
+def _debrid_unrestrict(magnet_or_url: str) -> str | None:
+    """Try Real-Debrid then shared resolve_stream (TorBox/AllDebrid/…)."""
+    try:
+        from app.clients.realdebrid import rd_client
+        if rd_client.enabled() and str(magnet_or_url).startswith("magnet:"):
+            link = rd_client.best_stream_link(magnet_or_url)
+            if link:
+                return link
+    except Exception:
+        pass
+    try:
+        from app.services.stream_providers import resolve_stream
+        res = resolve_stream(magnet_or_url)
+        if res and getattr(res, "url", None):
+            return res.url
+        if isinstance(res, dict) and res.get("url"):
+            return res["url"]
+    except Exception:
+        pass
+    return None
+
+
 
 
 
@@ -40,20 +62,21 @@ def _movie_strm_path(media_item: MediaItem) -> Path:
 
 
 def _grab_movie_strm(db: Session, media_item: MediaItem, release: dict) -> Download:
-    """Radarr-style strm: prefer Real-Debrid unrestricted link when available."""
+    """Radarr-style strm: prefer debrid unrestricted link when available."""
     url = _release_download_url(release)
     magnet = release.get("magnet") or (url if str(url).startswith("magnet:") else "")
     if magnet:
         try:
-            from app.clients.realdebrid import rd_client
-            if rd_client.enabled():
-                link = rd_client.best_stream_link(magnet)
-                if link:
-                    url = link
+            link = _debrid_unrestrict(magnet)
+            if link:
+                url = link
         except Exception:
             pass
     if not url:
         raise RuntimeError("No download URL for strm mode")
+    dest = _movie_strm_path(media_item)
+    dest.write_text(url.strip() + "\n", encoding="utf-8")
+    media_item.status = ItemStatus.downloaded
     dest = _movie_strm_path(media_item)
     dest.write_text(url.strip() + "\n", encoding="utf-8")
     media_item.status = ItemStatus.downloaded
@@ -337,6 +360,19 @@ def grab_release(db: Session, media_item: MediaItem, release: dict) -> Download:
             db.commit()
             raise RuntimeError(f"Delayed {delay_min}m per delay profile")
     # Optional Radarr-style strm mode (movies only)
+    prefer_stream = bool(getattr(settings, "prefer_stream_on_search", False)) or (
+        (settings.movie_download_mode or "download").lower() == "strm"
+    )
+    if media_item.media_type.value == "movie" and prefer_stream:
+        url = (release.get("stream_url") or release.get("download_url") or "")
+        if url and not str(url).startswith("magnet:"):
+            try:
+                return _grab_movie_strm(db, media_item, release)
+            except Exception:
+                if (settings.movie_download_mode or "download").lower() == "strm":
+                    raise
+                # fall through to torrent when only prefer_stream soft flag
+                pass
     if (
         media_item.media_type.value == "movie"
         and (settings.movie_download_mode or "download").lower() == "strm"

@@ -205,6 +205,23 @@ function IndexersPage() {
     setBusy(false);
   }
 
+
+  async function testAllAdded() {
+    const rows = items || [];
+    if (!rows.length) { setMsg('No indexers to test'); return; }
+    setBusy(true); setMsg(null);
+    let ok = 0, fail = 0;
+    for (const r of rows) {
+      try {
+        const res = await fetch("/api/indexers/" + r.id + "/test-search?query=ubuntu", { method: "POST" }).then(x => x.json());
+        if (res.ok) ok += 1; else fail += 1;
+      } catch { fail += 1; }
+    }
+    setMsg(`Test all: ${ok} ok, ${fail} failed`);
+    loadAdded();
+    setBusy(false);
+  }
+
   async function removeIndexer(id) {
     if (!confirm("Remove this indexer?")) return;
     await fetch("/api/indexers/" + id, { method: "DELETE" });
@@ -305,7 +322,12 @@ function IndexersPage() {
               ))}
             </tbody>
           </table>
-          {!items.length && <p className="text-sm opacity-50 p-4">No indexers yet — use Catalog, Prowlarr, or Jackett tab.</p>}
+          {!items.length && (
+            <div className="p-6 text-center space-y-2">
+              <p className="text-sm opacity-50">No indexers yet — use Catalog, Prowlarr, or Jackett tab to add Torznab / cardigann sources.</p>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setTab("catalog")}>Browse catalog</button>
+            </div>
+          )}
         </div>
       )}
 

@@ -11,6 +11,10 @@ function PodcastsPage({ setMiniPlayer }) {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [checked, setChecked] = useState({}); // bulk selection (ids)
+  const checkedIds = Object.keys(checked);
+  const [epChecked, setEpChecked] = useState({});
+  const epCheckedIds = Object.keys(epChecked);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -27,6 +31,47 @@ function PodcastsPage({ setMiniPlayer }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const bulkMonitor = async (monitored) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/podcasts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: checkedIds.map(Number), monitored }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Bulk failed');
+      setChecked({});
+      load();
+    } catch (e) {
+      setMsg(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const bulkAutoDownload = async (auto_download) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/podcasts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: checkedIds.map(Number), auto_download }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Bulk failed');
+      setChecked({});
+      load();
+    } catch (e) {
+      setMsg(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const selectAllVisible = () => {
+    const n = {};
+    (items || []).forEach((p) => { n[p.id] = true; });
+    setChecked(n);
+  };
+
 
   const search = async () => {
     if (!q.trim()) return;
@@ -100,6 +145,25 @@ function PodcastsPage({ setMiniPlayer }) {
     } finally {
       setBusy(false);
     }
+  };
+
+
+  const bulkDownloadEps = async () => {
+    if (!selected || !epCheckedIds.length) return;
+    setBusy(true); setMsg(null);
+    let n = 0;
+    try {
+      for (const id of epCheckedIds) {
+        const ep = (episodes || []).find(e => String(e.id) === String(id));
+        if (!ep || ep.file_path || ep.status === 'downloaded') continue;
+        const r = await fetch(`/api/podcasts/${selected.id}/episodes/${id}/download`, { method: 'POST' });
+        if (r.ok) n += 1;
+      }
+      setMsg(`Queued download for ${n} episode(s)`);
+      setEpChecked({});
+      await openPodcast(selected);
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
   };
 
   const downloadEp = async (ep) => {
@@ -191,30 +255,63 @@ function PodcastsPage({ setMiniPlayer }) {
 
       {tab === "library" && !loading && (
         <>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {checkedIds.length > 0 && (
+            <div className="card bg-base-200 mb-3">
+              <div className="card-body p-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs opacity-60">{checkedIds.length} selected</span>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(true)}>Monitor</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkMonitor(false)}>Unmonitor</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkAutoDownload(true)}>Auto-DL on</button>
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={() => bulkAutoDownload(false)}>Auto-DL off</button>
+                  <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={() => setChecked({})}>Clear</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {(items || []).length > 0 && (
+            <div className="flex gap-2 mb-2">
+              <button type="button" className="btn btn-xs btn-ghost" onClick={selectAllVisible}>Select all</button>
+              <span className="text-xs opacity-40 self-center">{(items || []).length} feeds</span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {(items || []).map((p) => (
-              <div key={p.id} className="card bg-base-200 shadow-sm">
-                <div className="card-body p-3 flex-row gap-3">
-                  {p.image || p.artwork_url || p.poster_path ? (
-                    <img src={p.image || p.artwork_url || p.poster_path} alt="" className="w-16 h-16 rounded object-cover" />
-                  ) : (
-                    <div className="w-16 h-16 bg-base-300 rounded" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-sm line-clamp-2">{p.title}</div>
-                    <div className="text-xs opacity-50">{p.author || ""}</div>
-                    <div className="text-[10px] opacity-40">{p.episode_count != null ? `${p.episode_count} eps` : ""}</div>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      <button type="button" className="btn btn-xs btn-primary" onClick={() => openPodcast(p)}>
-                        Episodes
-                      </button>
-                      <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={() => refreshFeed(p)}>
-                        Sync
-                      </button>
-                      <button type="button" className="btn btn-xs btn-ghost text-error" disabled={busy} onClick={() => removePodcast(p)}>
-                        Remove
-                      </button>
-                    </div>
+              <div key={p.id} className="card bg-base-200 shadow-sm relative group">
+                <label className={`absolute top-2 left-2 z-10 transition-opacity ${checked[p.id] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="checkbox checkbox-xs checkbox-primary"
+                    checked={!!checked[p.id]}
+                    onChange={(e) => {
+                      setChecked((prev) => {
+                        const n = { ...prev };
+                        if (e.target.checked) n[p.id] = true;
+                        else delete n[p.id];
+                        return n;
+                      });
+                    }}
+                  />
+                </label>
+                <div className="card-body p-2 gap-1">
+                  <div className="aspect-square bg-base-300 rounded overflow-hidden flex items-center justify-center cursor-pointer" onClick={() => openPodcast(p)}>
+                    {p.image || p.artwork_url || p.poster_path ? (
+                      <img src={p.image || p.artwork_url || p.poster_path} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-xs opacity-30">Podcast</span>
+                    )}
+                  </div>
+                  <div className="font-medium text-xs line-clamp-2 min-h-[2rem]">{p.title}</div>
+                  <div className="text-[10px] opacity-50 truncate">{p.author || ""}</div>
+                  <div className="flex flex-wrap gap-1 items-center">
+                    <span className={"badge badge-xs " + (p.monitored ? "badge-success" : "badge-ghost")}>{p.monitored ? "Mon" : "Off"}</span>
+                    {p.auto_download && <span className="badge badge-xs badge-outline">Auto</span>}
+                    {p.episode_count != null && <span className="text-[10px] opacity-40">{p.episode_count} eps</span>}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    <button type="button" className="btn btn-xs btn-primary" onClick={() => openPodcast(p)}>Eps</button>
+                    <button type="button" className="btn btn-xs btn-ghost" disabled={busy} onClick={() => refreshFeed(p)}>Sync</button>
+                    <button type="button" className="btn btn-xs btn-ghost text-error" disabled={busy} onClick={() => removePodcast(p)}>Del</button>
                   </div>
                 </div>
               </div>
@@ -231,7 +328,7 @@ function PodcastsPage({ setMiniPlayer }) {
       {tab === "episodes" && selected && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setTab("library"); setSelected(null); }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setTab("library"); setSelected(null); setEpChecked({}); }}>
               ← Library
             </button>
             <h2 className="font-semibold text-sm flex-1 truncate">{selected.title}</h2>
@@ -240,9 +337,28 @@ function PodcastsPage({ setMiniPlayer }) {
             </button>
           </div>
           {busy && !episodes.length && <SkeletonLoader rows={6} kind="list" />}
+          {epCheckedIds.length > 0 && (
+            <div className="flex gap-2 flex-wrap mb-2">
+              <span className="text-xs opacity-60 self-center">{epCheckedIds.length} selected</span>
+              <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={bulkDownloadEps}>Download selected</button>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={() => setEpChecked({})}>Clear</button>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={() => {
+                const n = {}; (episodes || []).forEach(e => { if (e.audio_url && !e.file_path) n[e.id] = true; });
+                setEpChecked(n);
+              }}>Select downloadable</button>
+            </div>
+          )}
           <ul className="space-y-1">
             {(episodes || []).map((ep) => (
               <li key={ep.id} className="flex gap-2 items-center p-2 rounded bg-base-200 text-sm">
+                <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={!!epChecked[ep.id]}
+                  onChange={e => {
+                    setEpChecked(prev => {
+                      const n = { ...prev };
+                      if (e.target.checked) n[ep.id] = true; else delete n[ep.id];
+                      return n;
+                    });
+                  }} />
                 <div className="flex-1 min-w-0">
                   <div className="truncate font-medium">{ep.title}</div>
                   <div className="text-[10px] opacity-50">

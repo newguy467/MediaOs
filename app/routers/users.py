@@ -98,9 +98,68 @@ def _to_out(user: User) -> dict:
     }
 
 
+
+# Server-side profile presets (kids / restricted / power). UI can offer these
+# when creating or editing users instead of only documenting the tip.
+PROFILE_PRESETS = {
+    "kids": {
+        "label": "Kids / restricted",
+        "description": "Library + player only. No adult, downloads, settings, or requests.",
+        "role": "user",
+        "permissions": [
+            "discover.view",
+            "player.view",
+            "calendar.view",
+            "library.view",
+        ],
+    },
+    "viewer": {
+        "label": "Viewer",
+        "description": "Browse and play; cannot grab or change settings.",
+        "role": "user",
+        "permissions": [
+            "discover.view",
+            "player.view",
+            "calendar.view",
+            "library.view",
+            "queue.view",
+            "requests",
+        ],
+    },
+    "power": {
+        "label": "Power user",
+        "description": "Full library + downloads; no user/system admin.",
+        "role": "user",
+        "permissions": [
+            "discover.view",
+            "player.view",
+            "calendar.view",
+            "library.view",
+            "library.manage",
+            "library.edit",
+            "library",
+            "download",
+            "queue",
+            "queue.view",
+            "queue.manage",
+            "requests",
+            "converter",
+            "converter.view",
+            "converter.manage",
+        ],
+    },
+    "full": {
+        "label": "Full user (role defaults)",
+        "description": "Standard non-admin defaults.",
+        "role": "user",
+        "permissions": None,  # means ROLE_DEFAULTS["user"]
+    },
+}
+
+
 @router.get("/permissions/catalog")
 def permission_catalog(_: str = Depends(require_admin)):
-    return {"permissions": PERMISSION_CATALOG, "role_defaults": ROLE_DEFAULTS}
+    return {"permissions": PERMISSION_CATALOG, "role_defaults": ROLE_DEFAULTS, "presets": PROFILE_PRESETS}
 
 
 @router.get("")
@@ -160,3 +219,55 @@ def delete_user(user_id: int, db: Session = Depends(get_db), _: str = Depends(re
         raise HTTPException(404, "Not found")
     db.delete(user)
     db.commit()
+
+
+@router.get("/presets")
+def list_presets(_: str = Depends(require_admin)):
+    """Server-side kids / restricted / power profile presets."""
+    return {"presets": PROFILE_PRESETS}
+
+
+@router.post("/presets/{preset_id}/apply")
+def apply_preset(preset_id: str, body: dict, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+    """Create or update a user from a named preset (e.g. kids).
+
+    Body: { "username": "...", "password": "...", "user_id": optional existing id }
+    """
+    preset = PROFILE_PRESETS.get(preset_id)
+    if not preset:
+        raise HTTPException(404, f"Unknown preset: {preset_id}")
+    perms = preset.get("permissions")
+    if perms is None:
+        perms = ROLE_DEFAULTS.get(preset.get("role") or "user", ROLE_DEFAULTS["user"])
+    user_id = body.get("user_id")
+    if user_id:
+        user = db.get(User, int(user_id))
+        if not user:
+            raise HTTPException(404, "User not found")
+        user.role = preset.get("role") or user.role
+        user.permissions_json = json.dumps(perms)
+        if body.get("password"):
+            user.password_hash = hash_password(body["password"])
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return _to_out(user)
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username or not password:
+        raise HTTPException(400, "username and password required to create from preset")
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        raise HTTPException(409, "Username taken")
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        role=preset.get("role") or UserRole.user.value,
+        is_active=True,
+        permissions_json=json.dumps(perms),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _to_out(user)
+

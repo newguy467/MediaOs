@@ -21,6 +21,7 @@ from app.auth import (
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import (
+    library_gaps,
     library_tools,
     sse,
     migrate,
@@ -39,6 +40,7 @@ from app.routers import (
     movies,
     adult,
     music,
+    music_smartlists,
     podcasts,
     player,
     converter,
@@ -65,6 +67,7 @@ from app.routers import (
     homelab,
     webhooks,
     imports_tracking,
+    global_search,
 )
 from app.routers import settings as settings_router
 from app.scheduler import start_scheduler
@@ -72,13 +75,14 @@ from app.services.quality.store import seed_default_profiles
 from app.services.converter import seed_default_presets as seed_convert_presets
 
 from app.logging_config import configure_logging, request_id_var
+from app.version import get_version
 configure_logging()
 log = logging.getLogger("mediaos")
 
 
 app = FastAPI(
     title="MediaOS",
-    version=os.environ.get("APP_VERSION", "1.00beta"),
+    version=get_version(),
     description="All-in-one media & games OS — movies, TV, music, books, audiobooks, comics, adult, Live TV, games, scrobbling, tracking",
 )
 
@@ -128,6 +132,7 @@ app.include_router(movies.router, prefix="/api")
 app.include_router(adult.router, prefix="/api")
 app.include_router(tv.router, prefix="/api")
 app.include_router(music.router, prefix="/api")
+app.include_router(music_smartlists.router, prefix="/api")
 app.include_router(books.router, prefix="/api")
 app.include_router(audiobooks.router, prefix="/api")
 app.include_router(calendar.router, prefix="/api")
@@ -150,6 +155,7 @@ app.include_router(settings_router.router, prefix="/api")
 app.include_router(imports.router, prefix="/api")
 app.include_router(livetv.router, prefix="/api")
 app.include_router(library_tools.router, prefix="/api")
+app.include_router(library_gaps.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(podcasts.router, prefix="/api")
 app.include_router(collections.router, prefix="/api")
@@ -166,6 +172,7 @@ app.include_router(games.router, prefix="/api")
 app.include_router(scrobbling.router, prefix="/api")
 app.include_router(tracking.router, prefix="/api")
 app.include_router(homelab.router, prefix="/api")
+app.include_router(global_search.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 app.include_router(imports_tracking.router, prefix="/api")
 
@@ -491,7 +498,7 @@ def on_startup():
                 log.debug("jackett startup sync: %s", je)
     except Exception as _e:
         log.warning("startup bootstrap: %s", _e)
-    log.info("mediaos v%s started", os.environ.get("APP_VERSION", "1.00beta"))
+    log.info("mediaos v%s started", get_version())
 
 
 @app.get("/api/health")
@@ -513,7 +520,7 @@ def health():
     return {
         "status": "ok" if db_ok else "degraded",
         "database": db_ok,
-        "version": os.environ.get("APP_VERSION", "1.00beta"),
+        "version": get_version(),
         "auth_required": _auth_enabled(),
         "flaresolverr": flaresolverr_client.get_status(),
         "vpn": get_vpn_status(),

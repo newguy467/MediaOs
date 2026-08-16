@@ -202,3 +202,35 @@ def set_retention(profile_id: int, body: RetentionIn, db: Session = Depends(get_
     row.keep_n = max(1, min(10, body.keep_n))
     db.commit()
     return {"ok": True, "retention_policy": row.retention_policy, "keep_n": row.keep_n}
+
+@router.get("/presets")
+def list_presets(_perm: list = Depends(require_permission("settings", "library.view"))):
+    """HD / 4K / Anime quality packs — pick one and go."""
+    from app.services.quality.profiles import list_preset_packs
+    from app.services.settings_help import QUALITY_HELP
+    packs = list_preset_packs()
+    for p in packs:
+        p["help"] = QUALITY_HELP.get(p["id"], "")
+    return {"packs": packs}
+
+
+@router.post("/presets/{pack_id}/apply")
+def apply_preset(pack_id: str, db: Session = Depends(get_db), _perm: list = Depends(require_permission("settings"))):
+    """Apply a preset pack as guidance for default movie/tv ranking (stores pack id in AppSetting)."""
+    from app.services.quality.profiles import apply_preset_pack
+    from app.models import AppSetting
+    import json
+    try:
+        result = apply_preset_pack(pack_id)
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(400, str(e))
+    row = db.query(AppSetting).filter(AppSetting.key == "quality_preset_pack").first()
+    payload = json.dumps(result["profile"])
+    if row:
+        row.value = payload
+        db.add(row)
+    else:
+        db.add(AppSetting(key="quality_preset_pack", value=payload))
+    db.commit()
+    return result

@@ -132,6 +132,34 @@ def list_groups(source_id: int | None = None, db: Session = Depends(get_db)):
     return sorted({r[0] or "Other" for r in rows})
 
 
+@router.get("/channels/editor")
+def list_channels_editor(
+    source_id: int | None = None,
+    group: str | None = None,
+    include_disabled: bool = True,
+    limit: int = 2000,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.manage", "settings")),
+):
+    """Full channel list for the editor (includes disabled by default)."""
+    q = db.query(LiveTvChannel)
+    if source_id is not None:
+        q = q.filter(LiveTvChannel.source_id == source_id)
+    if group:
+        q = q.filter(LiveTvChannel.group_title == group)
+    if not include_disabled:
+        q = q.filter(LiveTvChannel.enabled.is_(True))
+    try:
+        rows = q.order_by(LiveTvChannel.sort_order, LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
+    except Exception:
+        rows = q.order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
+    return rows
+
+
+# NOTE: "/channels/{channel_id}" below is a dynamic path segment, so literal
+# routes under the same "/channels" prefix (like "/channels/editor" above)
+# must be registered before it, or FastAPI/Starlette will try to parse the
+# literal segment as channel_id first and 422 instead of matching correctly.
 @router.get("/channels/{channel_id}", response_model=ChannelOut)
 def get_channel(channel_id: int, db: Session = Depends(get_db)):
     ch = db.get(LiveTvChannel, channel_id)
@@ -223,6 +251,38 @@ def stalker_connect(body: StalkerIn, _perm: list = Depends(require_permission("l
         "discovered_macs": macs,
         "genres": genres[:30] if isinstance(genres, list) else genres,
         "channels_sample": channels,
+    }
+
+
+
+
+@router.get("/portal/health")
+def portal_health(db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.view", "settings"))):
+    """Lightweight Live TV health: channel counts, EPG cache age, sample stream URL presence."""
+    from app.models import LiveTvChannel
+    from app.services.livetv import _epg_cache
+    channels = db.query(LiveTvChannel).all() if hasattr(db, "query") else []
+    try:
+        channels = db.query(LiveTvChannel).all()
+    except Exception:
+        channels = []
+    total = len(channels)
+    with_stream = sum(1 for c in channels if getattr(c, "stream_url", None))
+    enabled = sum(1 for c in channels if getattr(c, "enabled", True))
+    epg_at = _epg_cache.get("fetched_at") if isinstance(_epg_cache, dict) else None
+    epg_channels = len((_epg_cache or {}).get("by_tvg") or {}) if isinstance(_epg_cache, dict) else 0
+    return {
+        "ok": total > 0 and with_stream > 0,
+        "channels": total,
+        "enabled": enabled,
+        "with_stream_url": with_stream,
+        "epg_fetched_at": epg_at,
+        "epg_tvg_ids": epg_channels,
+        "hints": [] if total and with_stream else [
+            "Import an M3U or connect a portal",
+            "Map EPG / refresh XMLTV",
+            "Enable channels in the lineup editor",
+        ],
     }
 
 
@@ -852,30 +912,6 @@ def virtual_channel_hls_segment(channel_id: int, segment_name: str):
 class ChannelReorderBody(BaseModel):
     """Ordered list of channel ids — position in list = sort_order."""
     channel_ids: list[int]
-
-
-@router.get("/channels/editor")
-def list_channels_editor(
-    source_id: int | None = None,
-    group: str | None = None,
-    include_disabled: bool = True,
-    limit: int = 2000,
-    db: Session = Depends(get_db),
-    _perm: list = Depends(require_permission("library.manage", "settings")),
-):
-    """Full channel list for the editor (includes disabled by default)."""
-    q = db.query(LiveTvChannel)
-    if source_id is not None:
-        q = q.filter(LiveTvChannel.source_id == source_id)
-    if group:
-        q = q.filter(LiveTvChannel.group_title == group)
-    if not include_disabled:
-        q = q.filter(LiveTvChannel.enabled.is_(True))
-    try:
-        rows = q.order_by(LiveTvChannel.sort_order, LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
-    except Exception:
-        rows = q.order_by(LiveTvChannel.group_title, LiveTvChannel.name).limit(min(limit, 5000)).all()
-    return rows
 
 
 @router.post("/channels/reorder")

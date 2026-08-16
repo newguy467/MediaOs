@@ -38,7 +38,7 @@ Supporting infrastructure — streaming, downloading, VPN, transcoding, persiste
 
 | Service | Image | Role | Port |
 | --- | --- | --- | --- |
-| `mediaos` | `ghcr.io/newguy467/mediaos:1.00beta` | Control plane + UI (the app) | 8787 |
+| `mediaos` | `ghcr.io/newguy467/mediaos:1.01beta` | Control plane + UI (the app) | 8787 |
 | `mediaos-db` | `postgres:16.14-alpine` | Primary database | 5432 |
 | `redis` | `redis:7.4-alpine` | Queues, rate-limit, leader election | 6379 |
 | `jellyfin` | `lscr.io/linuxserver/jellyfin:10.10.3` | Streaming & playback backend | 8096 |

@@ -22,7 +22,7 @@ def _utcnow_slug() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def create_backup(dest_dir: str | Path | None = None) -> dict[str, Any]:
+def create_backup(dest_dir: str | Path | None = None, *, include_db: bool = True, include_config: bool = True, note: str | None = None) -> dict[str, Any]:
     """
     Bundle SQLite DB + .env-style config snapshot + key JSON settings into a zip.
     Returns path and metadata.
@@ -41,23 +41,29 @@ def create_backup(dest_dir: str | Path | None = None) -> dict[str, Any]:
         Path("data/mediaos.db"),
     ]
 
+    if not include_db and not include_config:
+        return {"ok": False, "error": "Nothing to include: enable database and/or config"}
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         meta = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "version": __import__("app.version", fromlist=["get_version"]).get_version(),
+            "include_db": bool(include_db),
+            "include_config": bool(include_config),
+            "note": (note or "").strip() or None,
             "files": [],
         }
-        for c in candidates:
-            if c.exists() and c.is_file():
-                zf.write(c, arcname=f"db/{c.name}")
-                meta["files"].append(f"db/{c.name}")
-                break
-        # optional config files
-        for name in (".env", "config.json", "settings.json"):
-            p = Path(name)
-            if p.exists():
-                zf.write(p, arcname=f"config/{name}")
-                meta["files"].append(f"config/{name}")
+        if include_db:
+            for c in candidates:
+                if c.exists() and c.is_file():
+                    zf.write(c, arcname=f"db/{c.name}")
+                    meta["files"].append(f"db/{c.name}")
+                    break
+        if include_config:
+            for name in (".env", "config.json", "settings.json"):
+                p = Path(name)
+                if p.exists():
+                    zf.write(p, arcname=f"config/{name}")
+                    meta["files"].append(f"config/{name}")
         zf.writestr("backup-meta.json", json.dumps(meta, indent=2))
 
     return {
@@ -66,6 +72,9 @@ def create_backup(dest_dir: str | Path | None = None) -> dict[str, Any]:
         "size_bytes": zip_path.stat().st_size if zip_path.exists() else 0,
         "created_at": meta["created_at"],
         "files": meta["files"],
+        "include_db": bool(include_db),
+        "include_config": bool(include_config),
+        "note": meta.get("note"),
     }
 
 
