@@ -20,11 +20,10 @@ private trackers; use Cardigann here for common public + simple private form log
 from __future__ import annotations
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import yaml
@@ -651,24 +650,48 @@ def search_all_cardigann(
     limit_per: int = 20,
     public_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Fan-out across all loaded definitions."""
+    """Fan-out across all loaded definitions concurrently.
+
+    Each definition's site gets its own small concurrency cap via
+    rate_limit.acquire_host so a slow/private tracker can't be hammered
+    just because several queries land at once; one definition failing
+    never blocks the others.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from urllib.parse import urlparse
     from app.config import settings
+    from app.services import rate_limit
     if not getattr(settings, "cardigann_enabled", True):
         return []
     configs = configs or {}
-    out: list[dict[str, Any]] = []
+    metas = []
     for meta in list_definitions():
         if public_only and meta.get("type") not in ("public", None, "semi-private"):
-            # semi-private without login is allowed through above; anything
-            # else (private) is excluded when public_only is requested
             continue
+        metas.append(meta)
+    if not metas:
+        return []
+
+    def _one(meta):
         def_id = meta["id"]
+        host = urlparse(meta.get("url") or "").netloc or def_id
+        if not rate_limit.acquire_host(host, timeout=15.0):
+            log.debug("Cardigann %s: host busy, skipped", def_id)
+            return []
         try:
             cfg = (configs or {}).get(def_id) or load_def_config(def_id)
-            found = search_definition(def_id, query, config=cfg, limit=limit_per)
-            out.extend(found)
+            return search_definition(def_id, query, config=cfg, limit=limit_per)
         except Exception as e:
             log.debug("Cardigann %s: %s", def_id, e)
+            return []
+        finally:
+            rate_limit.release_host(host)
+
+    out: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=min(16, len(metas))) as pool:
+        futs = [pool.submit(_one, meta) for meta in metas]
+        for fut in as_completed(futs):
+            out.extend(fut.result())
     return out
 
 

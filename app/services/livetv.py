@@ -21,6 +21,11 @@ _EXTINF = re.compile(
 )
 _ATTR = re.compile(r'([\w-]+)="([^"]*)"')
 
+# Marker prefix stored in LiveTvChannel.stream_url for Stalker/MAG channels
+# whose real playback link hasn't been resolved yet (resolved lazily on
+# first play — see resolve_stalker_stream_url()).
+STALKER_PENDING_PREFIX = "stalker-pending://"
+
 
 def _fetch_text(url: str) -> str:
     """Fetch playlist: direct → built-in CF bypass → FlareSolverr."""
@@ -139,6 +144,9 @@ def sync_xtream_source(db: Session, source: LiveTvSource) -> int:
         stream_url = f"{host}/live/{user}/{pw}/{stream_id}.ts"
         name = row.get("name") or f"Channel {stream_id}"
         group = cats.get(str(row.get("category_id") or ""), None)
+        # tv_archive (0/1) + tv_archive_duration (days) flag Xtream catch-up support
+        has_archive = str(row.get("tv_archive") or 0) in ("1", "true", "True")
+        archive_days = int(row.get("tv_archive_duration") or 0) if has_archive else 0
         db.add(
             LiveTvChannel(
                 source_id=source.id,
@@ -148,6 +156,9 @@ def sync_xtream_source(db: Session, source: LiveTvSource) -> int:
                 stream_url=stream_url,
                 tvg_id=str(row.get("epg_channel_id") or "") or None,
                 enabled=True,
+                catchup=has_archive and archive_days > 0,
+                catchup_days=archive_days,
+                external_id=str(stream_id),
             )
         )
         count += 1
@@ -158,10 +169,144 @@ def sync_xtream_source(db: Session, source: LiveTvSource) -> int:
     return count
 
 
+def sync_stalker_source(db: Session, source: LiveTvSource) -> int:
+    """Scan a Stalker/MAG portal: handshake, walk genres, persist channels.
+
+    Live stream links are resolved lazily (on first play) rather than during
+    the scan — Stalker portals issue short-lived, single-use tokens via
+    ``create_link``, so resolving all of them up front is both wasted work
+    (they may expire before ever being played) and slow for large portals
+    (one extra HTTP round-trip per channel). Instead ``stream_url`` stores a
+    ``STALKER_PENDING_PREFIX``-marked placeholder; ``external_id`` stores the
+    raw Stalker ``cmd`` needed to resolve a fresh link at play time via
+    :func:`resolve_stalker_stream_url`.
+    """
+    from app.clients.stalker import StalkerClient
+
+    portal_url = (source.url or source.xtream_host or "").strip()
+    if not portal_url:
+        raise ValueError("Stalker source missing portal URL")
+    mac = source.stalker_mac or None
+    client = StalkerClient(portal_url, mac)
+    client.handshake()
+    if not client.mac:
+        raise RuntimeError("Stalker handshake failed")
+    if mac is None:
+        # persist the (possibly auto-generated) MAC so future syncs reuse it
+        source.stalker_mac = client.mac
+
+    genres = client.get_genres()
+    genre_ids = [g.get("id") for g in genres if isinstance(g, dict) and g.get("id")] or ["*"]
+
+    db.query(LiveTvChannel).filter(LiveTvChannel.source_id == source.id).delete()
+    count = 0
+    seen_cmds: set[str] = set()
+    for genre_id in genre_ids:
+        page = 1
+        while True:
+            try:
+                items = client.get_ordered_list(genre=str(genre_id), page=page)
+            except Exception as exc:  # portal hiccup on one genre/page shouldn't kill the whole scan
+                log.info("Stalker genre %s page %s failed: %s", genre_id, page, exc)
+                break
+            if not items:
+                break
+            for it in items:
+                cmd = it.get("cmd") or ""
+                if not cmd or cmd in seen_cmds:
+                    continue
+                seen_cmds.add(cmd)
+                name = it.get("name") or f"Channel {len(seen_cmds)}"
+                has_archive = str(it.get("tv_archive") or 0) in ("1", "true", "True")
+                archive_days = int(it.get("tv_archive_duration") or 0) if has_archive else 0
+                db.add(
+                    LiveTvChannel(
+                        source_id=source.id,
+                        name=str(name)[:500],
+                        group_title=None,
+                        logo=it.get("logo") or None,
+                        stream_url=STALKER_PENDING_PREFIX + cmd,
+                        tvg_id=str(it.get("xmltv_id") or "") or None,
+                        enabled=True,
+                        catchup=has_archive and archive_days > 0,
+                        catchup_days=archive_days,
+                        external_id=cmd,
+                    )
+                )
+                count += 1
+            if len(items) < 14:  # Stalker portals typically page in chunks of 14
+                break
+            page += 1
+    source.channel_count = count
+    source.last_sync_at = datetime.now(timezone.utc)
+    db.add(source)
+    db.commit()
+    return count
+
+
 def sync_source(db: Session, source: LiveTvSource) -> int:
     if source.kind == "xtream":
         return sync_xtream_source(db, source)
+    if source.kind == "stalker":
+        return sync_stalker_source(db, source)
     return sync_m3u_source(db, source)
+
+
+def resolve_stalker_stream_url(source: LiveTvSource, channel: LiveTvChannel) -> str | None:
+    """Resolve a fresh playback link for a Stalker channel synced lazily.
+
+    Called on-demand (e.g. from the stream proxy) rather than at sync time,
+    since portal-issued links are short-lived/single-use. Returns None if
+    the channel isn't a pending Stalker channel or resolution fails.
+    """
+    if source.kind != "stalker":
+        return None
+    cmd = channel.external_id or ""
+    if not cmd:
+        return None
+    from app.clients.stalker import StalkerClient
+
+    portal_url = (source.url or source.xtream_host or "").strip()
+    if not portal_url:
+        return None
+    client = StalkerClient(portal_url, source.stalker_mac)
+    try:
+        client.handshake()
+        return client.create_link(cmd)
+    except Exception as exc:
+        log.info("Stalker link resolve failed for channel %s: %s", channel.id, exc)
+        return None
+
+
+def catchup_url_for_channel(source: LiveTvSource, channel: LiveTvChannel, start: datetime, end: datetime) -> str | None:
+    """Build a catch-up/timeshift playback URL for a past program, or None if unsupported."""
+    if not channel.catchup:
+        return None
+    duration_min = max(1, int((end - start).total_seconds() // 60))
+    if source.kind == "xtream":
+        host = (source.xtream_host or "").rstrip("/")
+        user = source.xtream_username or ""
+        pw = source.xtream_password or ""
+        stream_id = channel.external_id or ""
+        if not (host and user and stream_id):
+            return None
+        ts = start.strftime("%Y-%m-%d:%H-%M")
+        return f"{host}/timeshift/{user}/{pw}/{duration_min}/{ts}/{stream_id}.ts"
+    if source.kind == "stalker":
+        from app.clients.stalker import StalkerClient
+
+        portal_url = (source.url or source.xtream_host or "").strip()
+        cmd = channel.external_id or ""
+        if not (portal_url and cmd):
+            return None
+        client = StalkerClient(portal_url, source.stalker_mac)
+        client.handshake()
+        try:
+            return client.create_timeshift_link(cmd, start, duration_min)
+        except Exception as exc:
+            log.info("Stalker catch-up link failed for channel %s: %s", channel.id, exc)
+            return None
+    return None
 
 
 # ── EPG (XMLTV) now/next ──────────────────────────────────────────────────
@@ -366,8 +511,23 @@ def run_channel_health_cycle(db: Session) -> dict:
         .all()
     )
     ok = fail = deleted = disabled = 0
+    _stalker_source_cache: dict[int, LiveTvSource] = {}
     for ch in channels:
-        good, err = check_channel_stream(ch.stream_url)
+        probe_url = ch.stream_url
+        if probe_url and probe_url.startswith(STALKER_PENDING_PREFIX):
+            src = _stalker_source_cache.get(ch.source_id)
+            if src is None:
+                src = db.get(LiveTvSource, ch.source_id)
+                if src:
+                    _stalker_source_cache[ch.source_id] = src
+            resolved = resolve_stalker_stream_url(src, ch) if src else None
+            if not resolved:
+                # Couldn't get a token this cycle — don't count it as a hard
+                # failure (portal hiccup), just skip and retry next cycle.
+                ch.last_check_at = now
+                continue
+            probe_url = resolved
+        good, err = check_channel_stream(probe_url)
         ch.last_check_at = now
         if good:
             ch.last_ok_at = now
@@ -541,6 +701,11 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
         tvg = effective_tvg_id(c)
         now_next = epg_now_next(tvg) if tvg else {"now": None, "next": None}
         programmes = []
+        ch_catchup = bool(getattr(c, "catchup", False))
+        # Mirrors the exact window check in the /catchup/{channel_id} endpoint
+        # (router uses the same max(1, catchup_days or 1) floor) so a badge/menu
+        # item shown here never offers a request the backend will then 400 on.
+        oldest_allowed = now - timedelta(days=max(1, getattr(c, "catchup_days", 0) or 1))
         if tvg:
             rows = (_epg_cache.get("by_tvg") or {}).get(tvg) or []
             for row in rows:
@@ -553,12 +718,18 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
                         continue
                     if start_dt > end:
                         continue
+                    catchup_available = bool(
+                        ch_catchup
+                        and start_dt <= now
+                        and start_dt >= oldest_allowed
+                    )
                     programmes.append({
                         "title": row.get("title"),
                         "start": row.get("start"),
                         "stop": row.get("stop"),
                         "start_dt": start_dt.isoformat() if hasattr(start_dt, "isoformat") else start_dt,
                         "stop_dt": stop_dt.isoformat() if stop_dt and hasattr(stop_dt, "isoformat") else stop_dt,
+                        "catchup_available": catchup_available,
                     })
                 except Exception:
                     continue
@@ -571,6 +742,8 @@ def epg_grid(db: Session, *, hours: int = 6, group: str | None = None) -> dict:
             "now": now_next.get("now"),
             "next": now_next.get("next"),
             "programmes": programmes[:120],
+            "catchup": bool(getattr(c, "catchup", False)),
+            "catchup_days": getattr(c, "catchup_days", 0) or 0,
         })
     # Mark programmes that overlap scheduled/active DVR recordings (same channel + time)
     try:

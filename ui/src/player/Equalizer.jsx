@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import engine, { EQ_LABELS, EQ_PRESETS } from "./engine.js";
 
 /* 10-band graphic equalizer panel. */

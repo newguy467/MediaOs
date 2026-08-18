@@ -16,13 +16,12 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from sqlalchemy.orm import Session, joinedload
 
 from app.clients.qbittorrent import qbittorrent_client
 from app.config import settings
-from app.models import Download, Episode, ItemStatus, MediaItem, MediaType
+from app.models import Download, ItemStatus, MediaType
 from app.services.activity import log_activity
 from app.services.blocklist import add_to_blocklist
 

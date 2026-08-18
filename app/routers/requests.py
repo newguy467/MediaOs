@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin, require_auth
+from app.auth import require_auth, require_manager
 from app.database import get_db
 from app.models import MediaRequest, RequestStatus
+from app.services.activity import log_activity
 from app.services.requests import approve_request, deny_request
 
 router = APIRouter(prefix="/requests", tags=["requests"])
@@ -86,6 +87,13 @@ def create_request(
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_activity(
+        db,
+        "request",
+        f"Requested: {row.title}",
+        media_type=row.media_type,
+        media_item_id=row.media_item_id,
+    )
     return row
 
 
@@ -121,13 +129,20 @@ def approve(
     request_id: int,
     payload: ApproveIn = ApproveIn(),
     db: Session = Depends(get_db),
-    admin: Annotated[str, Depends(require_admin)] = "admin",
+    admin: Annotated[str, Depends(require_manager)] = "admin",
 ):
     row = db.get(MediaRequest, request_id)
     if not row:
         raise HTTPException(404, "Not found")
     approve_request(db, row, resolved_by=admin, quality_profile=payload.quality_profile)
     db.refresh(row)
+    log_activity(
+        db,
+        "request_approved",
+        f"Request approved: {row.title}",
+        media_type=row.media_type,
+        media_item_id=row.media_item_id,
+    )
     return row
 
 
@@ -140,12 +155,20 @@ def deny(
     request_id: int,
     payload: DenyIn = DenyIn(),
     db: Session = Depends(get_db),
-    admin: Annotated[str, Depends(require_admin)] = "admin",
+    admin: Annotated[str, Depends(require_manager)] = "admin",
 ):
     row = db.get(MediaRequest, request_id)
     if not row:
         raise HTTPException(404, "Not found")
-    return deny_request(db, row, resolved_by=admin, reason=payload.reason)
+    result = deny_request(db, row, resolved_by=admin, reason=payload.reason)
+    log_activity(
+        db,
+        "request_denied",
+        f"Request denied: {row.title}" + (f" ({payload.reason})" if payload.reason else ""),
+        media_type=row.media_type,
+        media_item_id=row.media_item_id,
+    )
+    return result
 
 
 @router.delete("/{request_id}", status_code=204)

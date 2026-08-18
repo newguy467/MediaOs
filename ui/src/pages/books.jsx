@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo, grabPayload, releaseDownloadUrl } from "../components/media.jsx";
-
+import { useState, useEffect, useCallback } from "react";
+import Ic from "../icons.jsx";
+import { api } from "../api.js";
+import { MediaDetailShell } from "../components/ui.jsx";
+import { InteractiveResultsPanel, grabPayload } from "../components/media.jsx";
 function BooksAuthorsTree() {
   const [authors, setAuthors] = useState([]);
   useEffect(()=>{ fetch('/api/books/library/authors').then(r=>r.json()).then(d=>setAuthors(d.authors||[])).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } }); }, []);

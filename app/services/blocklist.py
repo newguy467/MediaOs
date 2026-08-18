@@ -31,10 +31,4 @@ def add_to_blocklist(
     return row
 
 
-def is_blocklisted(db: Session, release_title: str) -> bool:
-    return (
-        db.query(Blocklist)
-        .filter(Blocklist.release_title == release_title)
-        .first()
-        is not None
-    )
+

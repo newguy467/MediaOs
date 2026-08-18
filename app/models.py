@@ -241,8 +241,14 @@ class QualityProfileRecord(Base):
 
 
 class UserRole(str, enum.Enum):
+    """4-role RBAC. 'user' is kept as a deprecated alias for 'member' —
+    old rows are migrated by schema_migrate 2.0.32, but the value stays
+    valid here so any row schema_migrate hasn't reached yet still resolves."""
     admin = "admin"
-    user = "user"
+    manager = "manager"
+    member = "member"
+    guest = "guest"
+    user = "user"  # deprecated alias for "member"
 
 
 class User(Base):
@@ -253,8 +259,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    role: Mapped[str] = mapped_column(String, default=UserRole.user.value)
-    # JSON list of permission keys. Null = role defaults (admin=all, user=view+request).
+    role: Mapped[str] = mapped_column(String, default=UserRole.member.value)
+    # JSON list of permission keys. Null = role defaults — see
+    # app.routers.users.ROLE_DEFAULTS for the admin/manager/member/guest sets.
     permissions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -270,7 +277,7 @@ class AuthSession(Base):
     access_token: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     refresh_token: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String, default="user")
+    role: Mapped[str] = mapped_column(String, default="member")
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
     ip: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -295,6 +302,7 @@ class LiveTvSource(Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     channel_count: Mapped[int] = mapped_column(Integer, default=0)
     epg_url: Mapped[str | None] = mapped_column(String, nullable=True)  # XMLTV EPG URL
+    stalker_mac: Mapped[str | None] = mapped_column(String, nullable=True)  # Stalker/MAG portal MAC address
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -310,6 +318,10 @@ class LiveTvChannel(Base):
     tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    # Catch-up / timeshift support (Xtream tv_archive, Stalker portal timeshift)
+    catchup: Mapped[bool] = mapped_column(Boolean, default=False)
+    catchup_days: Mapped[int] = mapped_column(Integer, default=0)
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)  # xtream stream_id / stalker cmd
     epg_tvg_id: Mapped[str | None] = mapped_column(String, nullable=True)
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -851,6 +863,7 @@ class Platform(Base):
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     icon_url: Mapped[str | None] = mapped_column(String, nullable=True)
     metadata_provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    emulator_command: Mapped[str | None] = mapped_column(String, nullable=True)  # template: {rom}/{title}/{id}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
@@ -1043,6 +1056,7 @@ class GameInstallJob(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String, default="queued")  # queued|running|done|failed
+    kind: Mapped[str] = mapped_column(String, default="install")  # install|launch
     command: Mapped[str | None] = mapped_column(Text, nullable=True)
     log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     returncode: Mapped[int | None] = mapped_column(Integer, nullable=True)

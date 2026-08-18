@@ -57,6 +57,8 @@ FIELD_HELP: dict[str, str] = {
     "ntfy_token": "Optional ntfy access token.",
     "gotify_url": "Gotify server URL.",
     "gotify_token": "Gotify app token.",
+    "webhook_url": "Generic webhook URL — receives a POSTed JSON body {event, title, message, ts}.",
+    "webhook_headers": 'Optional extra headers for the webhook request, as a JSON object, e.g. {"Authorization": "Bearer xxx"}.',
     "jellyfin_url": "Jellyfin server URL for library refresh.",
     "jellyfin_api_key": "Jellyfin API key.",
     "emby_url": "Emby server URL.",

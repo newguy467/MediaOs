@@ -1,10 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal, LogoMark} from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { api } from "../api.js";
+import { LogoMark } from "../components/ui.jsx";
 function SetupWizardPage({ onDone }) {
   /* Simple first-run: Welcome → Admin → Modules → Paths → Finish (everything else automatic) */
   const STEPS = [

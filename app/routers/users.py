@@ -42,16 +42,35 @@ PERMISSION_CATALOG = [
     {"id": "system.view", "label": "View system dashboard", "group": "Admin"},
 ]
 
+VALID_ROLES = ("admin", "manager", "member", "guest")
+
+# "manager" = full app operator: settings/indexers/library/downloads, but
+# cannot manage other accounts or revoke other sessions (that stays admin-only
+# at the route level — see require_admin call sites in system.py/tools.py/
+# migrate.py/library_tools.py/library_gaps.py/overhaul.py that were converted
+# to require_permission("settings"|"indexers"|"library.manage") so "manager"
+# can actually reach them).
+_MANAGER_PERMS = [p["id"] for p in PERMISSION_CATALOG if p["id"] not in ("users",)]
+
+# "member" = standard household user: browse/play/request/download, no config.
+_MEMBER_PERMS = ["library.view", "discover.view", "player.view", "calendar.view", "download", "queue", "requests"]
+
+# "guest" = view-only: browse and play, cannot grab, queue, or request.
+_GUEST_PERMS = ["library.view", "discover.view", "player.view", "calendar.view"]
+
 ROLE_DEFAULTS = {
     "admin": [p["id"] for p in PERMISSION_CATALOG],
-    "user": ["library.view", "discover.view", "player.view", "calendar.view", "download", "queue", "requests"],
+    "manager": _MANAGER_PERMS,
+    "member": _MEMBER_PERMS,
+    "guest": _GUEST_PERMS,
+    "user": _MEMBER_PERMS,  # deprecated alias for "member"
 }
 
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=6, max_length=128)
-    role: str = UserRole.user.value
+    role: str = UserRole.member.value
     permissions: list[str] | None = None
 
 
@@ -105,18 +124,13 @@ PROFILE_PRESETS = {
     "kids": {
         "label": "Kids / restricted",
         "description": "Library + player only. No adult, downloads, settings, or requests.",
-        "role": "user",
-        "permissions": [
-            "discover.view",
-            "player.view",
-            "calendar.view",
-            "library.view",
-        ],
+        "role": "guest",
+        "permissions": None,  # == ROLE_DEFAULTS["guest"]
     },
     "viewer": {
         "label": "Viewer",
-        "description": "Browse and play; cannot grab or change settings.",
-        "role": "user",
+        "description": "Browse and play, plus requests; cannot grab or change settings.",
+        "role": "guest",
         "permissions": [
             "discover.view",
             "player.view",
@@ -127,32 +141,16 @@ PROFILE_PRESETS = {
         ],
     },
     "power": {
-        "label": "Power user",
-        "description": "Full library + downloads; no user/system admin.",
-        "role": "user",
-        "permissions": [
-            "discover.view",
-            "player.view",
-            "calendar.view",
-            "library.view",
-            "library.manage",
-            "library.edit",
-            "library",
-            "download",
-            "queue",
-            "queue.view",
-            "queue.manage",
-            "requests",
-            "converter",
-            "converter.view",
-            "converter.manage",
-        ],
+        "label": "Power user (manager)",
+        "description": "Full library + downloads + settings/indexers; no user account management.",
+        "role": "manager",
+        "permissions": None,  # == ROLE_DEFAULTS["manager"]
     },
     "full": {
-        "label": "Full user (role defaults)",
-        "description": "Standard non-admin defaults.",
-        "role": "user",
-        "permissions": None,  # means ROLE_DEFAULTS["user"]
+        "label": "Standard member (role defaults)",
+        "description": "Browse, request, download — no config access.",
+        "role": "member",
+        "permissions": None,  # == ROLE_DEFAULTS["member"]
     },
 }
 
@@ -170,8 +168,8 @@ def list_users(db: Session = Depends(get_db), _: str = Depends(require_admin)):
 
 @router.post("")
 def create_user(payload: UserCreate, db: Session = Depends(get_db), _: str = Depends(require_admin)):
-    if payload.role not in (UserRole.admin.value, UserRole.user.value):
-        raise HTTPException(400, "role must be admin or user")
+    if payload.role not in VALID_ROLES:
+        raise HTTPException(400, f"role must be one of: {', '.join(VALID_ROLES)}")
     existing = db.query(User).filter(User.username == payload.username).first()
     if existing:
         raise HTTPException(409, "Username taken")
@@ -199,8 +197,8 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
     if payload.password is not None:
         user.password_hash = hash_password(payload.password)
     if payload.role is not None:
-        if payload.role not in (UserRole.admin.value, UserRole.user.value):
-            raise HTTPException(400, "invalid role")
+        if payload.role not in VALID_ROLES:
+            raise HTTPException(400, f"role must be one of: {', '.join(VALID_ROLES)}")
         user.role = payload.role
     if payload.is_active is not None:
         user.is_active = payload.is_active
@@ -262,7 +260,7 @@ def apply_preset(preset_id: str, body: dict, db: Session = Depends(get_db), _: s
     user = User(
         username=username,
         password_hash=hash_password(password),
-        role=preset.get("role") or UserRole.user.value,
+        role=preset.get("role") or UserRole.member.value,
         is_active=True,
         permissions_json=json.dumps(perms),
     )

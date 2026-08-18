@@ -1,7 +1,3 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { LibraryModuleShell, TeachEmpty, PageChrome } from "../components/ui.jsx";
-
-
 function PluginsPage({ setPage }) {
   return (
     <div className="space-y-4 max-w-xl">

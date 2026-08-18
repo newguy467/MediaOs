@@ -27,7 +27,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     CARDIGANN_DEFINITIONS_PATH=/app/definitions
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates ffmpeg gosu \
+      curl ca-certificates ffmpeg gosu postgresql-client smartmontools \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir "yt-dlp==${YTDLP_VERSION}" \
     && yt-dlp --version
@@ -38,7 +38,6 @@ COPY ai ./ai
 COPY scripts ./scripts
 COPY definitions ./definitions
 COPY docs ./docs
-COPY data ./data
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 # Full Vite output (index, hashed assets, logos from ui/public)

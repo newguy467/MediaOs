@@ -1,15 +1,14 @@
 name: CI
-# Optional nightly: schedule + PLAYWRIGHT_BASE_URL for live E2E
 
 on:
   push:
-    branches: [main, master, develop, "feature/**"]
+    branches: [main]
   pull_request:
-  workflow_dispatch:
+    branches: [main]
 
 jobs:
-  static:
-    name: Static checks
+  static-checks:
+    name: Static checks (version, UI, lazy exports)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,127 +18,63 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Version consistency
-        run: python3 scripts/check_version.py
-      - name: UI static (icons / api imports)
-        run: python3 scripts/check_ui_static.py
-      - name: Lazy export check
-        run: node scripts/check_lazy_exports.mjs
-      - name: Changelog dry-run
-        run: python3 scripts/generate_changelog.py --note "ci" --version "$(cat VERSION)" || true
+      - run: python3 scripts/check_version.py
+      - run: python3 scripts/check_ui_static.py
+      - run: node scripts/check_lazy_exports.mjs
 
   pytest:
-    name: Pytest
+    name: pytest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run tests
+      - name: Run test suite
         env:
+          DATABASE_URL: "sqlite:////tmp/mediaos-ci.db"
           AUTH_REQUIRE: "false"
-          DATABASE_URL: "sqlite:///./data/ci-mediaos.db"
-        run: python -m pytest -q --tb=short --cov=app --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=5
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: ignore
-      - name: Codecov
-        uses: codecov/codecov-action@v4
-        continue-on-error: true
-        with:
-          files: coverage.xml
-          fail_ci_if_error: false
+        run: python3 -m pytest -q
 
-  alembic:
-    name: Alembic round-trip
+  alembic-roundtrip:
+    name: Alembic upgrade/downgrade/upgrade
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
-      - name: Upgrade / downgrade / upgrade
+      - name: Real migration round-trip against SQLite
         env:
-          DATABASE_URL: "sqlite:///./ci-migrate.db"
+          DATABASE_URL: "sqlite:////tmp/mediaos-alembic-ci.db"
         run: |
+          rm -f /tmp/mediaos-alembic-ci.db
           alembic upgrade head
-          alembic downgrade -1 || true
+          alembic downgrade base
           alembic upgrade head
+          echo "Alembic round-trip OK"
 
-  ui-build:
-    name: UI build
+  vite-build:
+    name: vite build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install and build
-        working-directory: .
+          cache: "npm"
+      - run: npm ci --no-fund --no-audit
+      - run: npm run build
+      - name: Verify build output
         run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-          npm run build
-        continue-on-error: false
-
-  success:
-    name: CI success
-    needs: [static, pytest, alembic, ui-build]
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "All CI jobs passed"
-
-  e2e:
-    name: E2E (optional)
-    runs-on: ubuntu-latest
-    # Only runs when a live base URL is provided (e.g. staging). Never blocks main CI.
-    if: ${{ vars.PLAYWRIGHT_BASE_URL != '' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install Playwright
-        run: |
-          npm install -D @playwright/test
-          npx playwright install --with-deps chromium
-      - name: Run smoke E2E
-        env:
-          PLAYWRIGHT_BASE_URL: ${{ vars.PLAYWRIGHT_BASE_URL }}
-        run: npx playwright test
-
-  e2e-syntax:
-    name: E2E pack present
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check Playwright pack
-        run: |
-          test -f playwright.config.js
-          test -f e2e/smoke.spec.js
-          grep -q PLAYWRIGHT_BASE_URL e2e/smoke.spec.js
-
-  compose-validate:
-    name: Compose file validate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: docker compose config
-        run: |
-          if [ -f docker-compose.yml ]; then docker compose -f docker-compose.yml config -q || true; fi
-          if [ -f docker-compose.standalone.yml ]; then docker compose -f docker-compose.standalone.yml config -q || true; fi
+          test -f app/static/index.html
+          test -d app/static/assets
+          echo "Vite build OK: $(ls app/static/assets | wc -l) assets"

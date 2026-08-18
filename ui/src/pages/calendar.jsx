@@ -1,10 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { api } from "../api.js";
 function CalendarPage({ setPage }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -67,9 +62,9 @@ function CalendarPage({ setPage }) {
           <button type="button" className="btn btn-sm join-item" onClick={()=>setCursor(new Date(year, month+1, 1))}>›</button>
         </div>
         <div className="join">
-          <button type="button" className={"btn btn-xs join-item "+(filter==='all'?'btn-primary':'')} onClick={()=>setFilter('all')}>All</button>
-          <button type="button" className={"btn btn-xs join-item "+(filter==='episode'?'btn-primary':'')} onClick={()=>setFilter('episode')}>TV</button>
-          <button type="button" className={"btn btn-xs join-item "+(filter==='movie'?'btn-primary':'')} onClick={()=>setFilter('movie')}>Movies</button>
+          <button type="button" className={"btn btn-sm join-item "+(filter==='all'?'btn-primary':'')} onClick={()=>setFilter('all')}>All</button>
+          <button type="button" className={"btn btn-sm join-item "+(filter==='episode'?'btn-primary':'')} onClick={()=>setFilter('episode')}>TV</button>
+          <button type="button" className={"btn btn-sm join-item "+(filter==='movie'?'btn-primary':'')} onClick={()=>setFilter('movie')}>Movies</button>
         </div>
       </div>
 

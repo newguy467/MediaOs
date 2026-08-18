@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import Ic from "../icons.jsx";
 import useMusicPlayer from "./useMusicPlayer.js";
 import engine from "./engine.js";
@@ -82,22 +82,22 @@ export default function MusicPlayerBar() {
 
           {/* transport */}
           <div className="flex items-center gap-0.5 sm:gap-1 mx-auto sm:mx-0">
-            <button type="button" className={"btn btn-ghost btn-xs sm:btn-sm btn-circle " + (p.shuffle ? "text-primary" : "")} onClick={() => store.toggleShuffle()} title="Shuffle">
+            <button type="button" className={"btn btn-ghost btn-xs btn-circle " + (p.shuffle ? "text-primary" : "")} onClick={() => store.toggleShuffle()} title="Shuffle">
               <span className="w-4 h-4"><Ic.Shuffle /></span>
             </button>
             <button type="button" className="btn btn-ghost btn-sm btn-circle" onClick={() => store.prev()} title="Previous">
               <span className="w-5 h-5"><Ic.SkipBack /></span>
             </button>
-            <button type="button" className="btn btn-primary btn-sm btn-circle" onClick={() => store.toggle()} title={p.playing ? "Pause" : "Play"}>
-              <span className="w-5 h-5">{p.playing ? <Ic.Pause /> : <Ic.Play />}</span>
+            <button type="button" className="btn btn-primary btn-sm btn-circle !w-9 !h-9" onClick={() => store.toggle()} title={p.playing ? "Pause" : "Play"}>
+              <span className="w-6 h-6">{p.playing ? <Ic.Pause /> : <Ic.Play />}</span>
             </button>
             <button type="button" className="btn btn-ghost btn-sm btn-circle" onClick={() => store.next()} title="Next">
               <span className="w-5 h-5"><Ic.SkipForward /></span>
             </button>
-            <button type="button" className={"btn btn-ghost btn-xs sm:btn-sm btn-circle " + (p.repeat !== "off" ? "text-primary" : "")} onClick={() => store.cycleRepeat()} title={"Repeat: " + p.repeat}>
+            <button type="button" className={"btn btn-ghost btn-xs btn-circle " + (p.repeat !== "off" ? "text-primary" : "")} onClick={() => store.cycleRepeat()} title={"Repeat: " + p.repeat}>
               <span className="w-4 h-4">{p.repeat === "one" ? <Ic.RepeatOne /> : <Ic.Repeat />}</span>
             </button>
-            <button type="button" className={"btn btn-ghost btn-xs sm:btn-sm btn-circle " + (p.radioEnabled ? "text-primary" : "")} onClick={() => store.toggleRadio()} title={"Radio mode: " + (p.radioEnabled ? "on — keeps playing similar tracks" : "off")}>
+            <button type="button" className={"btn btn-ghost btn-xs btn-circle " + (p.radioEnabled ? "text-primary" : "")} onClick={() => store.toggleRadio()} title={"Radio mode: " + (p.radioEnabled ? "on — keeps playing similar tracks" : "off")}>
               <span className="w-4 h-4"><Ic.Radio /></span>
             </button>
           </div>

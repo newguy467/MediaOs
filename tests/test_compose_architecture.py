@@ -123,6 +123,12 @@ class TestVPNKillSwitch:
         )
         assert "gluetun" in str(env.get("VPN_GLUETUN_URL", ""))
 
+    def test_qbittorrent_has_healthcheck_and_resource_limits(self, compose_data):
+        qbit = compose_data["services"]["qbittorrent"]
+        assert "healthcheck" in qbit, "qBittorrent must have a healthcheck"
+        assert "mem_limit" in qbit and "cpus" in qbit, "qBittorrent must have resource limits"
+        assert qbit.get("security_opt") == ["no-new-privileges:true"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Path consistency (hardlinks)

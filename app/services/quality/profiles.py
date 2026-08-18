@@ -331,6 +331,7 @@ def score_release(
                     rejection_reason=f"rejected by format: {cf.name}",
                     matched_formats=[cf.name],
                     parsed=parsed,
+                    breakdown={"total": score, "rejected": "custom_format", "format": cf.name},
                 )
             score += cf.score
             matched.append(cf.name)
@@ -343,6 +344,7 @@ def score_release(
                 rejection_reason=f"missing required format: {cf.name}",
                 matched_formats=matched,
                 parsed=parsed,
+                breakdown={"total": score, "rejected": "missing_required_format", "format": cf.name, "matched_formats": matched},
             )
 
     return ScoreResult(
@@ -533,28 +535,6 @@ def resolution_rank(label: str | None) -> int:
         if k in s:
             return v
     return 0
-
-
-def meets_cutoff(release_quality: str | None, profile: QualityProfile | None) -> bool:
-    """True if release resolution is at or above profile cutoff."""
-    if not profile or not profile.cutoff:
-        return True
-    return resolution_rank(release_quality) >= resolution_rank(profile.cutoff)
-
-
-def is_upgrade(
-    existing_quality: str | None,
-    candidate_quality: str | None,
-    profile: QualityProfile | None = None,
-) -> bool:
-    """Radarr-style: candidate is an upgrade if better resolution than existing,
-    and (if profile set) candidate still meets cutoff preference direction.
-    """
-    if not candidate_quality:
-        return False
-    if not existing_quality:
-        return True
-    return resolution_rank(candidate_quality) > resolution_rank(existing_quality)
 
 
 def default_adult_profile() -> QualityProfile:

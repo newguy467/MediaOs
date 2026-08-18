@@ -47,10 +47,6 @@ def get_redis():
             return None
 
 
-def redis_enabled() -> bool:
-    return get_redis() is not None
-
-
 def reset_for_tests() -> None:
     """Clear cached client (unit tests)."""
     global _client, _failed

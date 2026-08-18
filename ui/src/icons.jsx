@@ -1,5 +1,3 @@
-import React from "react";
-
 /* ── Icons (inline SVG, Lucide style) ───────────────────────────────────── */
 const P = { viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:'1.6', strokeLinecap:'round', strokeLinejoin:'round', width: '1em', height: '1em', className: 'w-4 h-4 flex-shrink-0' };
 const Ic = {

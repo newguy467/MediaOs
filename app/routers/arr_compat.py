@@ -42,7 +42,7 @@ def require_arr_key(
 
 def _movie_resource(item: MediaItem) -> dict:
     has_file = bool(item.file_path) and item.status == ItemStatus.downloaded
-    tmdb_id = item.external_id if (item.external_source in (None, "tmdb", "") or not item.external_source) else item.external_id
+    tmdb_id = item.external_id if (item.external_source in (None, "tmdb", "") or not item.external_source) else 0
     return {
         "id": item.id,
         "title": item.title,
@@ -130,7 +130,7 @@ def _series_resource(item: MediaItem) -> dict:
         "qualityProfileId": 1,
         "languageProfileId": 1,
         "seriesType": "standard",
-        "tvdbId": item.external_id if (item.external_source in (None, "tvdb", "") or not item.external_source) else item.external_id,
+        "tvdbId": item.external_id if (item.external_source in (None, "tvdb", "") or not item.external_source) else 0,
         "images": [
             {
                 "coverType": "poster",
@@ -253,6 +253,11 @@ async def command(request: Request, _: bool = Depends(require_arr_key), db: Sess
                 continue
             if item and item.media_type == MediaType.movie:
                 rel = find_best_movie_release(item, db=db)
+                if rel:
+                    try:
+                        grab_release(db, item, rel)
+                    except Exception:
+                        pass
             elif item and item.media_type == MediaType.adult:
                 rel = find_best_adult_release(item, db=db)
                 if rel:

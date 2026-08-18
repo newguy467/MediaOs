@@ -121,7 +121,6 @@ def ensure_running(db, channel) -> dict:
     """Idempotent: start if not running, restart if it's died, restart on the
     periodic schedule so newly-generated content gets picked up."""
     from app.config import settings
-    from app.models import LiveTvVirtualChannel as VC
 
     restart_hours = float(getattr(settings, "virtualtv_stream_restart_hours", 4.0) or 4.0)
     running = is_running(channel.id)

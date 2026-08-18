@@ -1,10 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { api, TMDB } from "../api.js";
 function GuidedFirstRun({ setPage }) {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('movies');
@@ -71,6 +66,59 @@ function GuidedFirstRun({ setPage }) {
   );
 }
 
+function fmtBytes(n) {
+  if (n == null) return '—';
+  const units = ['B','KiB','MiB','GiB','TiB','PiB'];
+  let u = 0, v = n;
+  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+  return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`;
+}
+
+function StorageWidget({ setPage }) {
+  const [data, setData] = useState(null);
+  const [msg, setMsg] = useState(null);
+  useEffect(() => {
+    fetch('/api/storage/summary').then(r=>r.json()).then(setData).catch(e=>setMsg(String(e.message||e)));
+  }, []);
+  const folders = data?.folders || [];
+  return (
+    <div className="card bg-base-200 border border-base-content/5">
+      <div className="card-body p-4 gap-2">
+        <div className="flex justify-between items-center">
+          <h2 className="font-semibold text-sm">Storage</h2>
+          <button type="button" className="btn btn-xs btn-ghost" onClick={()=>setPage&&setPage('backup')}>Manage</button>
+        </div>
+        {msg && <p className="text-xs opacity-50">Storage stats unavailable ({msg})</p>}
+        {!data && !msg && <span className="loading loading-spinner loading-xs"/>}
+        {data && !folders.length && <p className="text-xs opacity-50">No library folders mounted yet</p>}
+        <div className="space-y-2">
+          {folders.map(f => {
+            const pct = f.total ? Math.round((f.used / f.total) * 100) : 0;
+            const warn = pct >= 90;
+            return (
+              <div key={f.id} className="text-xs">
+                <div className="flex justify-between items-baseline gap-2">
+                  <span className="font-medium truncate">{f.label}</span>
+                  <span className="opacity-50 truncate">{f.path}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <progress
+                    className={"progress w-full h-2 " + (warn ? "progress-error" : "progress-primary")}
+                    value={pct} max="100"
+                  />
+                  <span className="tabular-nums opacity-70 shrink-0 w-32 text-right">
+                    {fmtBytes(f.used)} / {fmtBytes(f.total)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GlossaryPage() {
   const [terms, setTerms] = useState([]);
   useEffect(()=>{ fetch('/api/setup/glossary').then(r=>r.json()).then(d=>setTerms(d.terms||[])).catch(e => { try { setMsg(String(e.message||e)); } catch(_) { console.warn(e); } }); }, []);
@@ -101,6 +149,7 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
     { id: 'wanted', enabled: true },
     { id: 'recent', enabled: true },
     { id: 'activity', enabled: true },
+    { id: 'storage', enabled: true },
     { id: 'health', enabled: true },
     { id: 'nowplaying', enabled: true },
     { id: 'dvr', enabled: true },
@@ -307,6 +356,10 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
       ),
     },
 
+    storage: {
+      label: 'Storage',
+      render: () => <StorageWidget setPage={setPage} />,
+    },
     health: {
       label: 'System health',
       render: () => (
@@ -508,7 +561,8 @@ function DashboardPage({ movies, series, music=[], books=[], audiobooks=[], setP
 
 
 
-function OverhaulDashboardPage({ setPage }) {
+function OverhaulDashboardPage({ setPage, enabledModules }) {
+  const em = enabledModules || ['movies', 'tv'];
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState(null);
   useEffect(() => {

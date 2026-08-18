@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { LibraryModuleShell, TeachEmpty, SkeletonLoader, PosterTile } from "../components/ui.jsx";
 import { InteractiveResultsPanel, grabPayload } from "../components/media.jsx";
 

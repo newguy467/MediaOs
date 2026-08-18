@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.clients.sabnzbd import sabnzbd_client
 from app.clients.nzbget import nzbget_client
 from app.clients.qbittorrent import qbittorrent_client
-from app.services.hooks import notify_grab, notify_event
+from app.services.hooks import notify_grab
 from app.config import settings
 from app.models import Download, Episode, ItemStatus, MediaItem
 from app.services.activity import log_activity

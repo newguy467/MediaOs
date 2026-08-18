@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { PageChrome } from "../components/ui.jsx";
-
+import { useState, useEffect } from "react";
 function VpnSettingsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

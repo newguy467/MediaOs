@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import require_permission
 from app.config import settings
 from app.database import get_db
 from app.services.jdupes import scan_duplicates
@@ -61,7 +61,7 @@ class JdupesIn(BaseModel):
 
 
 @router.post("/jdupes/scan")
-def jdupes_scan(payload: JdupesIn, _: str = Depends(require_admin)):
+def jdupes_scan(payload: JdupesIn, _: str = Depends(require_permission("settings"))):
     paths = payload.paths or [
         settings.movies_library_path,
         settings.tv_library_path,
@@ -71,7 +71,7 @@ def jdupes_scan(payload: JdupesIn, _: str = Depends(require_admin)):
 
 
 @router.post("/cross-seed/notify")
-def cross_seed_manual(info_hash: str | None = None, path: str | None = None, _: str = Depends(require_admin)):
+def cross_seed_manual(info_hash: str | None = None, path: str | None = None, _: str = Depends(require_permission("settings"))):
     ok = notify_cross_seed(info_hash=info_hash, path=path)
     return {"ok": ok}
 
@@ -103,7 +103,7 @@ def cleanup_status():
 
 
 @router.post("/cleanup/run")
-def cleanup_run(_: str = Depends(require_admin)):
+def cleanup_run(_: str = Depends(require_permission("settings"))):
     """Run one Cleanuparr-style queue + orphan cleaner tick."""
     from app.database import SessionLocal
     from app.services.cleanup import run_cleanup_cycle
@@ -116,7 +116,7 @@ def cleanup_run(_: str = Depends(require_admin)):
 
 
 @router.post("/cleanup/queue")
-def cleanup_queue_only(_: str = Depends(require_admin)):
+def cleanup_queue_only(_: str = Depends(require_permission("settings"))):
     from app.database import SessionLocal
     from app.services.cleanup import run_queue_cleaner
 
@@ -164,7 +164,7 @@ def set_subtitle_default_profile(body: dict):
     return {"ok": True, "active": resolve_languages(pid)}
 
 @router.post("/clients/apply")
-def clients_apply(body: dict, _=Depends(require_admin)):
+def clients_apply(body: dict, _=Depends(require_permission("settings"))):
     """One-shot qB/SAB category + path Apply."""
     from app.services.client_apply import apply_clients
     return apply_clients(
@@ -179,13 +179,13 @@ def clients_apply(body: dict, _=Depends(require_admin)):
 
 
 @router.get("/clients/plan")
-def clients_plan(_=Depends(require_admin)):
+def clients_plan(_=Depends(require_permission("settings"))):
     from app.services.client_apply import planned_categories
     from app.services.settings_help import CLIENT_HELP
     return {"categories": planned_categories(), "help": CLIENT_HELP}
 
 
 @router.get("/settings-help")
-def settings_help_all(_=Depends(require_admin)):
+def settings_help_all(_=Depends(require_permission("settings"))):
     from app.services.settings_help import PATH_HELP, CLIENT_HELP, QUALITY_HELP, FIELD_HELP
     return {"paths": PATH_HELP, "clients": CLIENT_HELP, "quality": QUALITY_HELP, "fields": FIELD_HELP}

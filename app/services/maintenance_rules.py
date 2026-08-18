@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import AppSetting, ItemStatus, MediaItem, MediaType
+from app.models import AppSetting, MediaItem
 
 log = logging.getLogger("mediaos.maintenance_rules")
 

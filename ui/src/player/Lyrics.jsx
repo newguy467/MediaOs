@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useMusicPlayer from "./useMusicPlayer.js";
 
 /* Parse LRC format → [{time, text}] sorted by time. */

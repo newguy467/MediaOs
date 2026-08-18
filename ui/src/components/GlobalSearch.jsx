@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api, TMDB } from "../api.js";
 import Ic from "../icons.jsx";
 

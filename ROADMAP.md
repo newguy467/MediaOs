@@ -23,7 +23,15 @@ Priority: Make Movies + TV better than Sonarr + Radarr + Prismarr combined.
 - [x] Prismarr-density dashboard & calendar — continue_watching / scrobbles / games / tracking widgets added
   - Control strip, multi-widget layout, dense month grid
   - Now-playing (Plex/Tautulli/Jellyfin) + queue + activity + calendar in one view
-- [ ] Stream-as-primary everywhere (Cinephage level)
+- [ ] Stream-as-primary everywhere (Cinephage level) — **mostly done, parent
+      left unchecked pending a full audit**: distinct "Stream" button next to
+      Grab confirmed in both `movies.jsx` and `tv.jsx`; `.strm` generation
+      confirmed (`app/services/stream_mode.py`, `organize.py` sidecar write);
+      debrid stream resolution confirmed (`stream_providers.resolve_stream`,
+      multi-provider); usenet seekable streaming also exists
+      (`app/services/usenet_stream.py`). Not verified: whether "everywhere"
+      (every detail view / interactive search row) actually has the button,
+      or just the two pages checked.
   - “Stream” button next to Grab in detail views + interactive search
   - Improved .strm generation + library placement
   - Debrid + Usenet stream paths polished
@@ -64,7 +72,10 @@ New first-class module.
 - [x] Wanted / Monitored / Library states
 - [x] Automated search + grab via indexers / download clients (same pipeline)
 - [ ] Installation path / emulator / launcher hooks (optional)
-- [ ] Completion tracking + playtime (feeds into Tracking layer)
+- [x] Completion tracking + playtime (feeds into Tracking layer) — confirmed:
+      `Game.playtime_minutes` column, `POST /api/games/{id}/playtime`
+      increments it and pushes completion into the tracking layer when
+      playtime > 0 (`app/routers/games.py`).
 - [ ] Module Store opt-in (off by default so Movies/TV stay clean)
 
 ## Phase 5 — Music & Comics Depth
@@ -101,10 +112,24 @@ New first-class module.
 
 ## Phase 8 — Cross-cutting Quality of Life
 
-- [ ] Multi-user RBAC (viewer / request-only / power / admin)
+- [ ] Multi-user RBAC (viewer / request-only / power / admin) — **partial**:
+      permission-scoped presets exist and are enforced server-side
+      (`PROFILE_PRESETS` = kids/viewer/power_user in `app/routers/users.py`,
+      each with its own permission list), but the underlying `role` column
+      only has two literal values (`admin`, `user`) — the four-role model
+      the roadmap describes isn't a first-class `role` value, it's
+      permission-list granularity layered on top of `user`. Left unchecked;
+      worth deciding whether that distinction matters before closing this.
 - [x] Backup create/list API (UI thin)
 - [x] Health trends snapshot API (indexer success, disk, stalled downloads)
-- [ ] Notification center (Discord, Telegram, ntfy, Gotify, webhooks) with actions
+- [ ] Notification center (Discord, Telegram, ntfy, Gotify, webhooks) with
+      actions — **partial**: Discord, Telegram, ntfy, and Gotify are all
+      implemented with real send functions and a settings-driven
+      enabled/disabled state (`app/services/notifications.py`), plus a
+      `GET /notifications/history` endpoint. Not confirmed: a generic
+      `webhooks` channel (only the four named providers exist), and
+      whether notifications support "actions" (e.g. approve/dismiss from
+      the notification itself) beyond the history log.
 - [x] Plugin registry stub (future community modules)
 - [ ] Mobile / PWA improvements
 

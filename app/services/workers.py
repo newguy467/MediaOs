@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from app.services.sse import publish as sse_publish
 
 
 # MediaOs-style worker kinds

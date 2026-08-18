@@ -438,8 +438,14 @@ def on_startup():
         mig = run_schema_migrations(engine)
         if mig.get("applied"):
             log.info("schema migrations applied: %s", [a["version"] for a in mig["applied"]])
-    except Exception as exc:
-        log.warning("schema migrate: %s", exc)
+    except Exception:
+        # A failed schema migration is not safe to treat as a warning.
+        # Continuing would let the API start against a partially upgraded
+        # database and turn a deterministic startup problem into scattered
+        # runtime failures. Fail startup so Docker/systemd can restart and
+        # surface the migration error clearly.
+        log.exception("schema migration failed; refusing to start with an unverified database schema")
+        raise
     # Legacy ensure (kept for safety on very old DBs)
     try:
         _ensure_download_cleanup_columns()

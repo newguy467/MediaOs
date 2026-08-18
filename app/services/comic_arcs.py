@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import ComicPullList, ComicStoryArc, ComicStoryArcIssue, MediaItem, MediaType
+from app.models import ComicPullList, ComicStoryArc, ComicStoryArcIssue
 
 log = logging.getLogger("mediaos.comic_arcs")
 

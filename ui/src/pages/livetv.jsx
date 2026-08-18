@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { getAdvanced } from "../storage.js";
+import { api } from "../api.js";
+import { HlsVideo } from "../components/media.jsx";
 function EpgTimeline() {
   const [grid, setGrid] = useState(null);
   const [hours, setHours] = useState(4);
@@ -193,6 +190,23 @@ const recordProg = async (ch, prog, allowConflict=false) => {
           onMouseLeave={()=>setEpgMenu(null)}>
           <div className="px-2 py-1 font-medium max-w-[12rem] truncate">{epgMenu.prog?.title || 'Programme'}</div>
           <button type="button" className="btn btn-xs btn-accent justify-start" onClick={()=>{ streamChannel(epgMenu.ch); setEpgMenu(null); }}>Watch channel</button>
+          {epgMenu.prog?.catchup_available && (
+            <button type="button" className="btn btn-xs justify-start" onClick={async()=>{
+              const p = epgMenu.prog, ch = epgMenu.ch;
+              setEpgMenu(null);
+              try {
+                const qs = new URLSearchParams({ start: p.start_dt, end: p.stop_dt });
+                const r = await fetch(`/api/livetv/catchup/${ch.id}?${qs}`).then(x=>x.json());
+                if (r.url) {
+                  window.dispatchEvent(new CustomEvent('mediaos-play-live', { detail: { channelId: ch.id, name: `${ch.name} — ${p.title||'Catch-up'}`, url: r.url } }));
+                  window.open(r.url, '_blank', 'noopener');
+                  setMsg('Catch-up: ' + (p.title || ch.name));
+                } else {
+                  setMsg(r.detail || 'Catch-up unavailable');
+                }
+              } catch(e) { setMsg(String(e.message||e)); }
+            }}>Watch catch-up</button>
+          )}
           <button type="button" className="btn btn-xs justify-start" onClick={()=>{ recordProg(epgMenu.ch, epgMenu.prog); setEpgMenu(null); }}>Record</button>
           <button type="button" className="btn btn-xs justify-start" onClick={()=>{ setMode('rules'); setEpgMenu(null); }}>Series rules…</button>
           <button type="button" className="btn btn-xs btn-ghost justify-start" onClick={()=>setEpgMenu(null)}>Cancel</button>
@@ -250,6 +264,7 @@ const recordProg = async (ch, prog, allowConflict=false) => {
                   >
                     <div className="text-[10px] font-medium truncate leading-tight pt-0.5">{prog.title||'Programme'}</div>
                     {prog._conflict && <span className="badge badge-error badge-xs">conflict</span>}
+                    {prog.catchup_available && <span className="badge badge-info badge-xs" title="Catch-up available for this programme">catch-up</span>}
                     <div className="text-[9px] opacity-60 truncate">Rec</div>
                   </div>
                 ))}
@@ -407,6 +422,7 @@ function LiveTvPage() {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [kind, setKind] = useState('m3u');
+  const [stalkerMac, setStalkerMac] = useState('');
   const [msg, setMsg] = useState(null);
   const [playing, setPlaying] = useState(null);
   const [lineup, setLineup] = useState(null);
@@ -650,14 +666,21 @@ function LiveTvPage() {
                 <select className="select select-bordered select-sm" value={kind} onChange={e=>setKind(e.target.value)}>
                   <option value="m3u">M3U</option>
                   <option value="xtream">Xtream</option>
+                  <option value="stalker">Stalker / MAG Portal</option>
                 </select>
                 <input className="input input-bordered input-sm" placeholder="Name" value={name} onChange={e=>setName(e.target.value)} />
-                <input className="input input-bordered input-sm flex-1 min-w-[16rem]" placeholder="URL / host" value={url} onChange={e=>setUrl(e.target.value)} />
+                <input className="input input-bordered input-sm flex-1 min-w-[16rem]" placeholder={kind==='stalker' ? 'Portal URL (e.g. http://host:port/c/)' : 'URL / host'} value={url} onChange={e=>setUrl(e.target.value)} />
+                {kind==='stalker' && (
+                  <input className="input input-bordered input-sm w-40" placeholder="MAC (optional)" value={stalkerMac} onChange={e=>setStalkerMac(e.target.value)} />
+                )}
                 <button type="button" className="btn btn-sm btn-primary" onClick={async()=>{
-                  await api.livetv.addSource({name: name||kind.toUpperCase(), kind, url});
-                  setName(''); setUrl(''); load();
+                  const payload = {name: name||kind.toUpperCase(), kind, url};
+                  if (kind==='stalker' && stalkerMac) payload.stalker_mac = stalkerMac;
+                  await api.livetv.addSource(payload);
+                  setName(''); setUrl(''); setStalkerMac(''); load();
                 }}>Add</button>
               </div>
+              {kind==='stalker' && <p className="text-xs opacity-60">Scans the portal's genre list and resolves each channel's playback link. Leave MAC blank to auto-generate one on first sync.</p>}
             </div>
           </div>
           <div className="space-y-2">
@@ -666,6 +689,7 @@ function LiveTvPage() {
               <div key={s.id} className="flex items-center gap-2 text-sm flex-wrap">
                 <span className="font-medium">{s.name}</span>
                 <span className="badge badge-xs">{s.kind}</span>
+                {s.kind==='stalker' && s.stalker_mac && <span className="opacity-50 text-xs">MAC {s.stalker_mac}</span>}
                 <span className="opacity-50">{s.channel_count} ch</span>
                 <button type="button" className="btn btn-xs" onClick={async()=>{ setMsg('Syncing…'); const r=await api.livetv.sync(s.id); setMsg(`Synced ${r.synced}`); load(); }}>Sync</button>
               </div>
@@ -716,7 +740,12 @@ function LiveTvPage() {
                         ? <img src={c.logo} alt="" className="w-8 h-8 rounded object-contain bg-base-300" onError={e=>{ e.currentTarget.style.display='none'; }} />
                         : <div className="w-8 h-8 rounded bg-base-300" />}
                     </td>
-                    <td className="font-medium">{c.name}</td>
+                    <td className="font-medium">
+                      {c.name}
+                      {c.catchup && (
+                        <span className="badge badge-xs badge-info ml-1" title={`Catch-up available (${c.catchup_days||0}d window)`}>catch-up</span>
+                      )}
+                    </td>
                     <td className="opacity-60">{c.group_title||c.group||'—'}</td>
                     <td className="whitespace-nowrap">
                       <button type="button" className="btn btn-xs" title="Move up" onClick={()=>moveChannel(c.id,-1)}>↑</button>
@@ -732,7 +761,7 @@ function LiveTvPage() {
                           setMsg('Mapped '+c.name+' → '+s.tvg_id);
                         } catch(e){ setMsg(String(e.message||e)); }
                       }}>Map EPG</button>
-                      <a className="btn btn-xs btn-ghost" href={c.stream_url} target="_blank" rel="noreferrer">Open</a>
+                      <a className="btn btn-xs btn-ghost" href={`/api/livetv/stream/${c.id}`} target="_blank" rel="noreferrer">Open</a>
                     </td>
                   </tr>
                 ))}

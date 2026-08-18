@@ -1,10 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import {api, TMDB, adultFetch, getAdultUnlock} from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { api, TMDB, getAdultUnlock } from "../api.js";
+import { LibraryLegend, StatusBadgeStack, libraryStatuses } from "../components/ui.jsx";
 function DiscoverPage({ movies, series, music = [], refreshMovies, refreshSeries, enabledModules = [], setPage }) {
 
   const [adultQ, setAdultQ] = useState('');

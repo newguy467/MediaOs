@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { LibraryModuleShell, PosterTile, TeachEmpty } from "../components/ui.jsx";
 
 export function LibraryBrowserPage({ movies = [], series = [], music = [], books = [], setMiniPlayer, setPage }) {

@@ -1,10 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo } from "../components/media.jsx";
-
+import { useState, useEffect } from "react";
+import { api } from "../api.js";
 function WantedPage() {
   const [data, setData] = useState({ movies:[], episodes:[], music:[], books:[], audiobooks:[], adult:[], counts:{} });
   const [tab, setTab] = useState('movies');
@@ -63,6 +58,7 @@ function WantedPage() {
     { key:'books', label:'Books ('+(c.books||0)+')' },
     { key:'audiobooks', label:'Audiobooks ('+(c.audiobooks||0)+')' },
     { key:'adult', label:'Adult ('+(c.adult||0)+')' },
+    { key:'import-tools', label:'Import tools' },
   ];
   return (
     <div className="space-y-6 max-w-5xl">
@@ -74,7 +70,7 @@ function WantedPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn btn-sm btn-ghost" onClick={load} disabled={!!busy}>Refresh</button>
-          <button type="button" className="btn btn-sm btn-primary" disabled={!!busy} onClick={()=>searchAuto(tab==='episodes'?'tv':tab)}>
+          <button type="button" className="btn btn-sm btn-primary" disabled={!!busy || tab==='import-tools'} onClick={()=>searchAuto(tab==='episodes'?'tv':tab)}>
             {busy&&String(busy).startsWith('auto')?'Searching…':'Auto-search tab'}
           </button>
           <button type="button" className="btn btn-sm btn-secondary" disabled={!!busy} onClick={()=>searchAuto('all')}>Auto-search all</button>
@@ -104,7 +100,13 @@ function WantedPage() {
       <div className="tabs tabs-boxed w-fit flex-wrap">
         {tabs.map(t=>(<a key={t.key} className={'tab '+(tab===t.key?'tab-active':'')} onClick={()=>setTab(t.key)}>{t.label}</a>))}
       </div>
-      {loading ? <span className="loading loading-spinner text-primary"/> : (
+      {tab==='import-tools' ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <TrashImportPanel />
+          <ArrDbMigratePanel />
+          <ArrMigratePanel />
+        </div>
+      ) : loading ? <span className="loading loading-spinner text-primary"/> : (
         <div className="mr-panel overflow-x-auto">
           {tab==='movies' && <table className="table table-sm"><thead><tr><th className="w-8"></th><th>Title</th><th>Year</th><th>Status</th><th>Last search</th><th></th></tr></thead><tbody>
             {(data.movies||[]).length===0?<tr><td colSpan={5} className="opacity-40">No missing movies</td></tr>:
@@ -139,18 +141,23 @@ function WantedPage() {
 
 
 function TrashImportPanel() {
-  const [url, setUrl] = useState('');
+  const [raw, setRaw] = useState('');
   const [name, setName] = useState('TRaSH Imported');
   const [mediaType, setMediaType] = useState('movie');
   const [msg, setMsg] = useState('');
-  const [presets, setPresets] = useState(null);
-  useEffect(()=>{ fetch('/api/migrate/trash/presets').then(r=>r.json()).then(setPresets).catch(e => { console.warn(e); if (typeof setMsg === 'function') setMsg(String(e.message || e)); }); }, []);
   async function run() {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      setMsg('Not valid JSON: ' + String(e.message || e));
+      return;
+    }
     setMsg('Importing…');
     try {
       const r = await fetch('/api/migrate/trash', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ url, profile_name: name, media_type: mediaType, replace_formats: true })
+        body: JSON.stringify({ data: parsed, profile_name: name, media_type: mediaType, replace_formats: true })
       }).then(x=>x.json());
       setMsg(r.ok ? `Imported ${r.custom_formats} formats → profile "${r.profile_name}"` : (r.detail || r.error || 'failed'));
     } catch(e){ setMsg(String(e.message||e)); }
@@ -158,21 +165,15 @@ function TrashImportPanel() {
   return (
     <div className="card mr-panel border-0"><div className="card-body gap-2 text-sm">
       <h2 className="font-semibold">TRaSH Guides import</h2>
-      <p className="text-xs opacity-60">Import custom formats JSON (URL or paste TRaSH export) into a quality profile.</p>
-      {presets && (
-        <div className="flex flex-wrap gap-1">
-          <button type="button" className="btn btn-xs" onClick={()=>setUrl(presets.movie_hd_bluray_web||'')}>Preset: Movie HD</button>
-          <button type="button" className="btn btn-xs" onClick={()=>setUrl(presets.tv_hd_bluray_web||'')}>Preset: TV HD</button>
-        </div>
-      )}
-      <input className="input input-bordered input-sm w-full" placeholder="https://…/custom-formats.json" value={url} onChange={e=>setUrl(e.target.value)} />
+      <p className="text-xs opacity-60">Paste a TRaSH custom-formats JSON export below to import it into a quality profile. (Import by URL isn't supported server-side — fetch the JSON yourself first, e.g. from the TRaSH Guides repo, then paste it here.)</p>
+      <textarea className="textarea textarea-bordered textarea-sm w-full font-mono" rows={6} placeholder="{ ...custom formats JSON... }" value={raw} onChange={e=>setRaw(e.target.value)} />
       <div className="flex gap-2 flex-wrap">
         <input className="input input-bordered input-sm" value={name} onChange={e=>setName(e.target.value)} placeholder="Profile name" />
         <select className="select select-bordered select-sm" value={mediaType} onChange={e=>setMediaType(e.target.value)}>
           <option value="movie">movie</option>
           <option value="tv">tv</option>
         </select>
-        <button type="button" className="btn btn-sm btn-primary" onClick={run}>Import</button>
+        <button type="button" className="btn btn-sm btn-primary" disabled={!raw.trim()} onClick={run}>Import</button>
       </div>
       {msg && <p className="text-xs opacity-70">{msg}</p>}
     </div></div>

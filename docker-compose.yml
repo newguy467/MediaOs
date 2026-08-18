@@ -109,7 +109,10 @@ services:
       # WireGuard credentials (used when VPN_TYPE=wireguard)
       - WIREGUARD_PRIVATE_KEY=${VPN_WIREGUARD_PRIVATE_KEY:-}
       - WIREGUARD_ADDRESSES=${VPN_WIREGUARD_ADDRESSES:-}
-      - WIREGUARD_PUBKEY=${VPN_WIREGUARD_PUBLIC_KEY:-}
+      - WIREGUARD_PUBLIC_KEY=${VPN_WIREGUARD_PUBLIC_KEY:-}
+      - WIREGUARD_PRESHARED_KEY=${VPN_WIREGUARD_PRESHARED_KEY:-}
+      - WIREGUARD_ENDPOINT_IP=${VPN_WIREGUARD_ENDPOINT_IP:-}
+      - WIREGUARD_ENDPOINT_PORT=${VPN_WIREGUARD_ENDPOINT_PORT:-51820}
       # OpenVPN credentials (used when VPN_TYPE=openvpn)
       - OPENVPN_USER=${VPN_USERNAME:-}
       - OPENVPN_PASSWORD=${VPN_PASSWORD:-}
@@ -125,9 +128,13 @@ services:
       - VPN_PORT_FORWARDING=${VPN_PORT_FORWARDING:-false}
       - VPN_PORT_FORWARDING_PROVIDER=${VPN_SERVICE_PROVIDER:-}
     ports:
-      # qBittorrent WebUI is accessed through Gluetun's network namespace
-      - "${QBIT_HOST_PORT:-8080}:8080"
-      # qBittorrent torrent ports (TCP + UDP)
+      # qBittorrent WebUI is accessed through Gluetun's network namespace.
+      # Loopback-only by default — it's a download client with often-weak
+      # default auth and has no reason to be LAN-reachable out of the box.
+      # Bind to 0.0.0.0 (or set QBIT_HOST_BIND) if you want LAN access.
+      - "${QBIT_HOST_BIND:-127.0.0.1}:${QBIT_HOST_PORT:-8080}:8080"
+      # Torrent ports must stay reachable for peer connections (incoming
+      # swarm traffic), so these are not loopback-restricted.
       - "${QBIT_TORRENT_PORT:-6881}:6881"
       - "${QBIT_TORRENT_PORT:-6881}:6881/udp"
     volumes:
@@ -162,11 +169,22 @@ services:
       - PGID=${PGID:-1000}
       - TZ=${TZ:-UTC}
       - WEBUI_PORT=8080
+      - TORRENTING_PORT=${QBIT_TORRENT_PORT:-6881}
     volumes:
       - qb_config:/config
       # Same downloads path as MediaOS for consistent hardlink paths
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${QBIT_MEMORY_LIMIT:-1g}
+    cpus: ${QBIT_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -199,6 +217,10 @@ services:
       - ${MANGA_PATH:-./data/manga}:/manga
       - ${YOUTUBE_PATH:-./data/youtube}:/youtube
     ports:
+      # Intentionally LAN-exposed by default — this is a UI you're meant to
+      # open from other devices (phone, TV, browser). AUTH_REQUIRE defaults
+      # to true on the MediaOS control plane; see SECURITY.md for internet
+      # exposure guidance.
       - "${JELLYFIN_HOST_PORT:-8096}:8096"
       # Auto-discovery (optional, can be removed for headless)
       - "1900:1900/udp"
@@ -238,7 +260,7 @@ services:
       gluetun:
         condition: service_healthy
       qbittorrent:
-        condition: service_started
+        condition: service_healthy
       jellyfin:
         condition: service_started
     env_file: .env
@@ -269,6 +291,9 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
     ports:
+      # Intentionally LAN-exposed by default — this is the control-plane UI
+      # you're meant to open from other devices. AUTH_REQUIRE defaults to
+      # true. See SECURITY.md before exposing this to the internet.
       - "${MEDIAOS_HOST_PORT:-8787}:8000"
     volumes:
       # Library mounts — identical paths inside container as Jellyfin/qBittorrent
@@ -293,6 +318,30 @@ services:
       - ${P_TV_HOST_PATH:-./data/tv}:/data/local-p-tvshows
       - ${D_MOVIES_HOST_PATH:-./data/movies-d}:/data/local-d-movies
       - ${D_TV_HOST_PATH:-./data/tv-d}:/data/local-d-tvshows
+      # Optional: read-only host /proc and /sys for the System Monitor page's
+      # CPU/memory/temperature stats. Off by default — even read-only, this
+      # exposes the *host's* full process list (other containers' PIDs and
+      # command lines) to MediaOS, which is a real information-disclosure
+      # tradeoff distinct from (and lower-risk than) the SMART device access
+      # below. Uncomment to get true host-level numbers instead of MediaOS's
+      # own container/cgroup view:
+      # - /proc:/host/proc:ro
+      # - /sys:/host/sys:ro
+    # Optional: raw device access for the System Monitor page's SMART panel.
+    # Off by default — granting a container direct block-device access is a
+    # real privilege increase, so it's opt-in only. To enable:
+    #   1. Uncomment the devices you want to monitor below
+    #   2. Uncomment cap_add below (smartctl's ATA passthrough needs
+    #      CAP_SYS_RAWIO even with device read access — without it you'll
+    #      get a "permission denied" reason in the SMART panel)
+    #   3. Set SMART_DEVICES in .env to the same paths (comma-separated)
+    # All three are required together; the panel shows "unavailable" until
+    # they are.
+    # devices:
+    #   - "/dev/sda:/dev/sda:r"
+    #   - "/dev/sdb:/dev/sdb:r"
+    # cap_add:
+    #   - SYS_RAWIO
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -342,7 +391,9 @@ services:
       - ${MUSIC_PATH:-./data/music}:/music
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
     ports:
-      - "${TDARR_HOST_PORT:-8265}:8265"
+      # Internal tooling, not something you browse to day-to-day — loopback
+      # by default. Set TDARR_HOST_BIND=0.0.0.0 for LAN access.
+      - "${TDARR_HOST_BIND:-127.0.0.1}:${TDARR_HOST_PORT:-8265}:8265"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -368,7 +419,9 @@ services:
     volumes:
       - iptv_org_epg_data:/epg/public
     ports:
-      - "${EPG_HOST_PORT:-3099}:3000"
+      # Internal tooling, not something you browse to day-to-day — loopback
+      # by default. Set EPG_HOST_BIND=0.0.0.0 for LAN access.
+      - "${EPG_HOST_BIND:-127.0.0.1}:${EPG_HOST_PORT:-3099}:3000"
     restart: unless-stopped
     profiles: ["full", "epg"]
     security_opt:
@@ -389,7 +442,9 @@ services:
     environment:
       LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
     ports:
-      - "${FLARESOLVERR_HOST_PORT:-8191}:8191"
+      # Internal tooling, not something you browse to day-to-day — loopback
+      # by default. Set FLARESOLVERR_HOST_BIND=0.0.0.0 for LAN access.
+      - "${FLARESOLVERR_HOST_BIND:-127.0.0.1}:${FLARESOLVERR_HOST_PORT:-8191}:8191"
     restart: unless-stopped
     profiles: ["full", "flaresolverr"]
     security_opt:

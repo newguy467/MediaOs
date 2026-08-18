@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch, getAdultUnlock, setAdultUnlock } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo, grabPayload, releaseDownloadUrl } from "../components/media.jsx";
-
+import { useState, useEffect, useCallback } from "react";
+import Ic from "../icons.jsx";
+import { api, getAdultUnlock, setAdultUnlock } from "../api.js";
+import { PosterTile, LibraryModuleShell, MediaDetailShell } from "../components/ui.jsx";
+import { InteractiveResultsTable, grabPayload } from "../components/media.jsx";
+import ConfigGroupPage from "./settings-config-group.jsx";
 function AdultPage() {
   const [locked, setLocked] = useState(true);
   const [pass, setPass] = useState('');

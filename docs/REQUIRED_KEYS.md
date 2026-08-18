@@ -40,4 +40,5 @@ Without these, Games search returns no results and a clear “not configured” 
 
 ## Notifications
 
-Apprise / Discord / Telegram fields in Settings when you want push alerts.
+Apprise / Discord / Telegram / ntfy / Gotify / generic webhook fields in
+Settings when you want push alerts.

@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
-
+import { useState, useEffect, useMemo } from "react";
 function ModuleStorePage({ enabledModules, setEnabledModules, setPage }) {
   const [tab, setTab] = useState("modules"); // modules | marketplace | installed | github
   const [catalog, setCatalog] = useState([]);

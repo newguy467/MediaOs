@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from app.auth import require_admin, require_permission
+from app.auth import require_permission
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -177,8 +177,27 @@ def storage_stats():
     return library_storage()
 
 
+@router.get("/storage/summary")
+def storage_summary():
+    """Fast per-folder disk usage for the dashboard Storage widget (no file walk)."""
+    from app.services.storage import disk_usage_overview
+    return disk_usage_overview()
+
+
+@router.get("/monitor")
+def system_monitor(db: Session = Depends(get_db)):
+    """System Monitor page: library counts + storage folders + host CPU/mem/SMART."""
+    from app.services.storage import disk_usage_overview
+    from app.services.host_monitor import library_counts, host_monitor
+    return {
+        "library": library_counts(db),
+        "storage": disk_usage_overview(),
+        "host": host_monitor(),
+    }
+
+
 @router.delete("/blocklist/{item_id}")
-def delete_blocklist(item_id: int, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def delete_blocklist(item_id: int, db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     row = db.get(Blocklist, item_id)
     if not row:
         from fastapi import HTTPException
@@ -189,14 +208,14 @@ def delete_blocklist(item_id: int, db: Session = Depends(get_db), _: str = Depen
 
 
 @router.get("/logs")
-def list_logs(_: str = Depends(require_admin)):
+def list_logs(_: str = Depends(require_permission("settings"))):
     """List available log files under the log directory."""
     from app.logging_config import list_log_files, log_dir
     return {"dir": str(log_dir()), "files": list_log_files()}
 
 
 @router.get("/logs/tail")
-def tail_logs(file: str = "mediaos.log", lines: int = 200, level: str | None = None, _: str = Depends(require_admin)):
+def tail_logs(file: str = "mediaos.log", lines: int = 200, level: str | None = None, _: str = Depends(require_permission("settings"))):
     """Tail a log file for the debug UI."""
     from app.logging_config import tail_log
     lines = max(10, min(lines, 2000))
@@ -204,13 +223,13 @@ def tail_logs(file: str = "mediaos.log", lines: int = 200, level: str | None = N
 
 
 @router.get("/logs/search")
-def search_logs(q: str, file: str = "mediaos.log", limit: int = 100, _: str = Depends(require_admin)):
+def search_logs(q: str, file: str = "mediaos.log", limit: int = 100, _: str = Depends(require_permission("settings"))):
     from app.logging_config import search_log
     return search_log(file, query=q, limit=max(1, min(limit, 500)))
 
 
 @router.post("/logs/level")
-def set_log_level(level: str = "INFO", _: str = Depends(require_admin)):
+def set_log_level(level: str = "INFO", _: str = Depends(require_permission("settings"))):
     """Runtime log level change for mediaos.* loggers."""
     import logging
     lv = getattr(logging, level.upper(), None)
@@ -262,7 +281,7 @@ def homelab_links_get(db: Session = Depends(get_db)):
 
 
 @router.put("/homelab-links")
-def homelab_links_put(body: HomelabLinksBody, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def homelab_links_put(body: HomelabLinksBody, db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     from app.services.homelab_links import save_links
     saved = save_links(db, body.links)
     return {"links": saved, "ok": True}
@@ -314,7 +333,7 @@ def diagnostics(db: Session = Depends(get_db)):
 
 
 @router.post("/backup/restore")
-def restore_backup_endpoint(body: dict, _: list = Depends(require_admin)):
+def restore_backup_endpoint(body: dict, _: list = Depends(require_permission("settings"))):
     from fastapi import HTTPException
     from app.services.backup import restore_backup
     path = body.get("path") or body.get("zip_path")
@@ -329,13 +348,18 @@ def restore_backup_endpoint(body: dict, _: list = Depends(require_admin)):
 
 
 @router.post("/backup")
-def create_backup_ep(_: str = Depends(require_admin)):
+def create_backup_ep(body: dict | None = None, _: str = Depends(require_permission("settings"))):
     from app.services.backup import create_backup
-    return create_backup()
+    body = body or {}
+    return create_backup(
+        include_db=bool(body.get("include_db", True)),
+        include_config=bool(body.get("include_config", True)),
+        note=body.get("note"),
+    )
 
 
 @router.get("/backup")
-def list_backups_ep(_: str = Depends(require_admin)):
+def list_backups_ep(_: str = Depends(require_permission("settings"))):
     from app.services.backup import list_backups
     return {"items": list_backups()}
 
@@ -350,7 +374,7 @@ def health_trends_ep(db: Session = Depends(get_db)):
 
 
 @router.post("/health-trends/persist")
-def health_trends_persist(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def health_trends_persist(db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     from app.services.health_trends import persist
     persist(db)
     return {"ok": True}
@@ -374,25 +398,25 @@ def dashboard_dense(db: Session = Depends(get_db), _=Depends(require_permission(
     return dashboard_bundle(db)
 
 @router.get("/notifications/channels")
-def notification_channels(_: str = Depends(require_admin)):
+def notification_channels(_: str = Depends(require_permission("settings"))):
     from app.services.notifications import channels_status
     return {"channels": channels_status()}
 
 
 @router.get("/notifications/history")
-def notification_history(limit: int = 50, _: str = Depends(require_admin)):
+def notification_history(limit: int = 50, _: str = Depends(require_permission("settings"))):
     from app.services.notifications import history
     return {"items": history(limit)}
 
 
 @router.post("/notifications/test")
-def notification_test(_: str = Depends(require_admin)):
+def notification_test(_: str = Depends(require_permission("settings"))):
     from app.services.notifications import test_all
     return test_all()
 
 
 @router.post("/notifications/send")
-def notification_send(body: dict, _: str = Depends(require_admin)):
+def notification_send(body: dict, _: str = Depends(require_permission("settings"))):
     from app.services.notifications import send
     return send(
         body.get("message") or "MediaOS ping",

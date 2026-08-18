@@ -1,7 +1,6 @@
 """Detect shared / conflicting library and download paths (Hubstarr-style footgun guard)."""
 from __future__ import annotations
 
-from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy.orm import Session

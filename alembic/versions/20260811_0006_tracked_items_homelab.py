@@ -3,6 +3,13 @@
 Combines the 2.0.19 tracked_items column fix with the 2.0.20 homelab/tracking
 history tables so both land under a single revision after 20260810_0005.
 
+Note: tracked_items also carries `media_type`, `title`, `tags`, and
+`created_at` from 20260810_0005's create_table — none of these are declared
+on the TrackedItem model (app/models.py). Same situation as game_releases'
+extra columns fixed up in 20260811_0007: no code reads them, so this
+migration leaves them in place rather than dropping columns from a table
+that may already have rows.
+
 Revision ID: 20260811_0006
 Revises: 20260810_0005
 Create Date: 2026-08-11

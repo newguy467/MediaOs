@@ -17,6 +17,29 @@ Do **not** expose port 8787 directly to the public internet without:
 - `AUTH_REQUIRE=true` and strong admin credentials
 - Network-level allowlists or VPN (e.g. Gluetun profile)
 
+### Default port bindings
+
+`docker-compose.yml` splits its port defaults by exposure risk:
+
+| Service | Default bind | Why |
+|---|---|---|
+| MediaOS (8787), Jellyfin (8096) | `0.0.0.0` (LAN) | The UIs you're meant to open from other devices; `AUTH_REQUIRE=true` by default |
+| qBittorrent WebUI (8080) | `127.0.0.1` (loopback) | Weak default auth, no need for LAN reach out of the box |
+| Tdarr (8265), EPG sidecar (3099), FlareSolverr (8191) | `127.0.0.1` (loopback) | Internal tooling, not browsed to directly |
+
+To open a loopback-only service to your LAN, set its `*_HOST_BIND` variable in `.env` to `0.0.0.0` (e.g. `QBIT_HOST_BIND=0.0.0.0`).
+
+### System Monitor page — optional host-level access
+
+The System Monitor page's CPU/memory/temperature and SMART sections work out of the box using only the MediaOS container's own view (no extra access), but that means CPU/memory reflect the container's cgroup, not the host, and there's no temperature or disk-health data. Both can be upgraded, and both are off by default because each is a real, distinct privilege tradeoff — see the commented blocks under the `mediaos` service in `docker-compose.yml`:
+
+| Feature | What it needs | What it exposes |
+|---|---|---|
+| Host-level CPU/memory/temperature | Read-only bind mounts of host `/proc` and `/sys` | The host's full process list (other containers' PIDs and command lines) becomes readable from inside MediaOS |
+| SMART (disk health) | `devices:` entries for the target disks + `cap_add: [SYS_RAWIO]` + `SMART_DEVICES` in `.env` | Direct read access to the raw block device from inside the container |
+
+Enable either independently of the other.
+
 ## Hardening in 2.0.11-dev
 
 1. **npm supply chain** — lockfile only against `https://registry.npmjs.org`; `.npmrc` pin; CI rejects IP/HTTP resolved URLs.

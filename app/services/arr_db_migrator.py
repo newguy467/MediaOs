@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any
-from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 

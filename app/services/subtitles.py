@@ -104,16 +104,6 @@ class SubdlStyleProvider:
             return None
 
 
-class OpenSubtitlesLegacyProvider:
-    """Fallback title search via opensubtitles if API key missing but client still tries."""
-    name = "opensubtitles_legacy"
-
-    def fetch(self, video_path, *, languages, hearing_impaired, tmdb_id=None, parent_tmdb_id=None, season=None, episode=None, title_query=None):
-        # Reuse main client when key present; else no-op
-        if not settings.opensubtitles_api_key:
-            return None
-        return None  # primary provider already covers this
-
 class OpenSubtitlesProvider:
     name = "opensubtitles"
 

@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { PageChrome } from "../components/ui.jsx";
-import Ic from "../icons.jsx";
+import { useState, useEffect } from "react";
 import { api } from "../api.js";
 
 function SubtitlesSettingsPage({ setPage }) {

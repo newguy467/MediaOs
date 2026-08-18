@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo, grabPayload, releaseDownloadUrl } from "../components/media.jsx";
+import React, { useState, useEffect, useCallback } from "react";
+import Ic from "../icons.jsx";
+import { api } from "../api.js";
+import { MediaDetailShell } from "../components/ui.jsx";
+import { InteractiveResultsPanel, grabPayload } from "../components/media.jsx";
 import musicStore from "../player/store.js";
 import useMusicPlayer from "../player/useMusicPlayer.js";
 
@@ -55,6 +54,8 @@ function MusicPage({ setPage }) {
   }, []);
   const [expanded, setExpanded] = useState({});
   const [incomplete, setIncomplete] = useState([]);
+  const [huntMode, setHuntMode] = useState(false);
+  const [searchingAlbumId, setSearchingAlbumId] = useState(null);
   const [q, setQ] = useState('');
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -69,9 +70,12 @@ function MusicPage({ setPage }) {
   useEffect(()=>{ load(); }, []);
   useEffect(()=>{
     if (view === 'incomplete') {
-      fetch('/api/music/incomplete').then(r=>r.json()).then(setIncomplete).catch(()=>setIncomplete([]));
+      const url = huntMode ? '/api/music/hunt-incomplete?limit=100' : '/api/music/incomplete';
+      fetch(url).then(r=>r.json())
+        .then(d => setIncomplete(huntMode ? (d.items || []) : (Array.isArray(d) ? d : [])))
+        .catch(()=>setIncomplete([]));
     }
-  }, [view]);
+  }, [view, huntMode]);
 
   if (detailId) return <MusicDetailPage id={detailId} onBack={()=>{ setDetailId(null); load(); }} />;
 
@@ -98,6 +102,18 @@ function MusicPage({ setPage }) {
       load();
     } catch(e) { setMsg(String(e.message||e)); }
     setBusy(false);
+  }
+
+  async function searchMissingForAlbum(albumId) {
+    setSearchingAlbumId(albumId); setMsg(null);
+    try {
+      const r = await fetch(`/api/music/album/${albumId}/search-missing`, { method: 'POST' });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(j.detail || 'Search failed');
+      const found = (j.searched || []).length;
+      setMsg(`Searched ${found} of ${j.missing_count ?? found} missing track(s) — ${j.percent ?? '?'}% complete`);
+    } catch(e) { setMsg(String(e.message||e)); }
+    finally { setSearchingAlbumId(null); }
   }
 
   const filteredTree = (tree||[]).filter(a => {
@@ -248,6 +264,12 @@ function MusicPage({ setPage }) {
 
       {view === 'incomplete' && (
         <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="label cursor-pointer gap-2 py-0">
+              <span className="text-xs opacity-60">Priority order (lowest completeness first)</span>
+              <input type="checkbox" className="toggle toggle-xs" checked={huntMode} onChange={e=>setHuntMode(e.target.checked)} />
+            </label>
+          </div>
           {(incomplete||[]).map(c=>(
             <div key={c.album_id} className="card bg-base-200 border border-warning/20">
               <div className="card-body p-3 gap-2">
@@ -256,7 +278,13 @@ function MusicPage({ setPage }) {
                     <div className="font-medium text-sm">{c.title}</div>
                     <div className="text-xs opacity-50">{c.artist}</div>
                   </div>
-                  <button type="button" className="btn btn-xs btn-primary" onClick={()=>setDetailId(c.album_id)}>Open</button>
+                  <div className="flex gap-1 shrink-0">
+                    <button type="button" className="btn btn-xs btn-secondary" disabled={searchingAlbumId===c.album_id}
+                      onClick={()=>searchMissingForAlbum(c.album_id)}>
+                      {searchingAlbumId===c.album_id ? 'Searching…' : 'Search missing'}
+                    </button>
+                    <button type="button" className="btn btn-xs btn-primary" onClick={()=>setDetailId(c.album_id)}>Open</button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <progress className="progress progress-warning w-full" value={c.percent||0} max="100"></progress>

@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import Episode, MediaItem, MediaType, ItemStatus
+from app.models import Episode, MediaItem, MediaType
 
 
 def list_anime_series(db: Session, limit: int = 100) -> list[dict[str, Any]]:

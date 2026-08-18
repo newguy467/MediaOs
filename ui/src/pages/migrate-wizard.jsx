@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-
+import { useState } from "react";
 /** P5 Migration wizard — validate then import from *arr (Hubstarr stacks welcome). */
 function MigrateWizardPage({ setPage }) {
   const [kind, setKind] = useState("radarr");

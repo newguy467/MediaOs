@@ -280,7 +280,8 @@ def _map_path(db, path: Path | str, media_type: str | None = None) -> Path:
             mt = media_type.value if hasattr(media_type, "value") else str(media_type)
         mapped = apply_path_map(db, raw, mt)
         return Path(mapped)
-    except Exception:
+    except Exception as exc:
+        log.debug("Path map failed for %s: %s", raw, exc)
         return Path(raw)
 
 def _place_file(src: Path, dest_path: Path, *, replace: bool = True) -> str:
@@ -431,8 +432,8 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         content_path = _map_path(db, content_path, getattr(item, "media_type", None))
         try:
             unpack_path(content_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Unpack step skipped for %s: %s", content_path, exc)
         video_file = _find_video_file(content_path)
         if not video_file:
             log.warning(
@@ -486,14 +487,14 @@ def process_completed_movie_downloads(db: Session) -> list[MediaItem]:
         _cleanup_torrent(download, content_path, placed=placed)
         try:
             notify_cross_seed(info_hash=download.torrent_hash, path=str(dest_path))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Cross-seed notification skipped for %s: %s", dest_path, exc)
         try:
             from app.services.hooks import after_organize
 
             after_organize(db, item, dest_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("after_organize hook skipped for %s: %s", dest_path, exc)
     db.commit()
     return organized
 
@@ -520,8 +521,8 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
         content_path = _map_path(db, content_path, "tv")
         try:
             unpack_path(content_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Unpack step skipped for %s: %s", content_path, exc)
         episode = download.episode
         series = download.media_item
         if not episode or not series:
@@ -688,8 +689,8 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                     from app.services.hooks import after_organize_series
 
                     after_organize_series(db, series)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("after_organize_series hook skipped for %s: %s", series.title, exc)
         else:
             # Single episode
             video_file = max(videos, key=lambda p: p.stat().st_size)
@@ -728,12 +729,12 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
                 from app.services.hooks import after_organize_episode
 
                 after_organize_episode(db, series, episode, dest_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("after_organize_episode hook skipped for %s: %s", dest_path, exc)
             try:
                 notify_cross_seed(info_hash=download.torrent_hash, path=str(dest_path))
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Cross-seed notification skipped for %s: %s", dest_path, exc)
 
     db.commit()
     
@@ -744,8 +745,8 @@ def process_completed_tv_downloads(db: Session) -> list[Episode]:  # unpack + cr
         for sid in series_ids:
             if sid:
                 sync_series_tracking(db, sid)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Tracking sync skipped after TV organize: %s", exc)
     return organized
 
 
@@ -881,8 +882,8 @@ def process_completed_book_downloads(db: Session) -> list[MediaItem]:
             from app.services.hooks import after_organize
 
             after_organize(db, item, Path(item.file_path))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("after_organize hook skipped for %s: %s", dest_path, exc)
     db.commit()
     return organized
 
@@ -1067,8 +1068,8 @@ def process_completed_comic_downloads(db: Session) -> list[MediaItem]:
         content_path = _map_path(db, content_path, "tv")
         try:
             unpack_path(content_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Unpack step skipped for %s: %s", content_path, exc)
         files = _files_with_ext(content_path, COMIC_EXTENSIONS)
         if not files:
             if content_path.is_file():

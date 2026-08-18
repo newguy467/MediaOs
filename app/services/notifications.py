@@ -1,9 +1,9 @@
 """Notification center — Discord, Telegram, Apprise, ntfy, Gotify + history."""
 from __future__ import annotations
 
+import json
 import logging
 import threading
-import time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -41,6 +41,7 @@ def channels_status() -> list[dict[str, Any]]:
         {"id": "apprise", "enabled": bool(getattr(settings, "apprise_url", "")), "label": "Apprise"},
         {"id": "ntfy", "enabled": bool(getattr(settings, "ntfy_url", "") or getattr(settings, "ntfy_topic", "")), "label": "ntfy"},
         {"id": "gotify", "enabled": bool(getattr(settings, "gotify_url", "") and getattr(settings, "gotify_token", "")), "label": "Gotify"},
+        {"id": "webhook", "enabled": bool(getattr(settings, "webhook_url", "")), "label": "Generic webhook"},
     ]
 
 
@@ -124,7 +125,28 @@ def _gotify(message: str, title: str) -> None:
         _record("gotify", title, message, False, str(e))
 
 
-def send(message: str, *, title: str = "MediaOS", channels: list[str] | None = None) -> dict[str, Any]:
+def _webhook(message: str, title: str, event: str) -> None:
+    url = (getattr(settings, "webhook_url", "") or "").strip()
+    if not url:
+        return
+    headers = {"Content-Type": "application/json"}
+    raw_headers = (getattr(settings, "webhook_headers", "") or "").strip()
+    if raw_headers:
+        try:
+            extra = json.loads(raw_headers)
+            if isinstance(extra, dict):
+                headers.update({str(k): str(v) for k, v in extra.items()})
+        except (json.JSONDecodeError, TypeError):
+            log.warning("webhook_headers is not valid JSON — sending without extra headers")
+    payload = {"event": event, "title": title, "message": message, "ts": _utcnow()}
+    try:
+        r = httpx.post(url, json=payload, headers=headers, timeout=10.0)
+        _record("webhook", title, message, r.status_code < 400, None if r.status_code < 400 else f"HTTP {r.status_code}")
+    except Exception as e:
+        _record("webhook", title, message, False, str(e))
+
+
+def send(message: str, *, title: str = "MediaOS", channels: list[str] | None = None, event: str = "notification") -> dict[str, Any]:
     """Fan-out notification. channels=None → all configured."""
     want = set(channels) if channels else None
     if want is None or "discord" in want:
@@ -137,6 +159,8 @@ def send(message: str, *, title: str = "MediaOS", channels: list[str] | None = N
         _ntfy(message, title)
     if want is None or "gotify" in want:
         _gotify(message, title)
+    if want is None or "webhook" in want:
+        _webhook(message, title, event)
     return {"ok": True, "title": title, "channels": channels_status(), "history_head": history(5)}
 
 

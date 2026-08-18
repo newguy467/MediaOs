@@ -23,8 +23,8 @@ def list_install_jobs(limit: int = 50, db: Session = Depends(get_db), _=Depends(
     from app.models import GameInstallJob
     rows = db.query(GameInstallJob).order_by(GameInstallJob.id.desc()).limit(limit).all()
     return {"items": [
-        {"id": r.id, "game_id": r.game_id, "status": r.status, "command": r.command,
-         "log_text": (r.log_text or "")[:2000], "returncode": r.returncode,
+        {"id": r.id, "game_id": r.game_id, "status": r.status, "kind": r.kind or "install",
+         "command": r.command, "log_text": (r.log_text or "")[:2000], "returncode": r.returncode,
          "created_at": r.created_at.isoformat() if r.created_at else None}
         for r in rows
     ]}
@@ -36,8 +36,8 @@ def get_install_job(job_id: int, db: Session = Depends(get_db), _=Depends(requir
     r = db.get(GameInstallJob, job_id)
     if not r:
         raise HTTPException(404, "Not found")
-    return {"id": r.id, "game_id": r.game_id, "status": r.status, "command": r.command,
-            "log_text": r.log_text, "returncode": r.returncode}
+    return {"id": r.id, "game_id": r.game_id, "status": r.status, "kind": r.kind or "install",
+            "command": r.command, "log_text": r.log_text, "returncode": r.returncode}
 
 
 
@@ -46,6 +46,14 @@ class PlatformIn(BaseModel):
     slug: str
     icon_url: Optional[str] = None
     metadata_provider: Optional[str] = None
+    emulator_command: Optional[str] = None
+
+
+class PlatformUpdate(BaseModel):
+    name: Optional[str] = None
+    icon_url: Optional[str] = None
+    metadata_provider: Optional[str] = None
+    emulator_command: Optional[str] = None
 
 
 class GameIn(BaseModel):
@@ -219,7 +227,7 @@ def get_game(game_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{game_id}/launch")
 def launch_game(game_id: int, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
-    """Return a launch target: Steam URL, install path, or library path."""
+    """Return launch targets: Steam URL, emulator (if configured), install path, or library path."""
     g = db.get(Game, game_id)
     if not g:
         raise HTTPException(404, "Not found")
@@ -235,13 +243,45 @@ def launch_game(game_id: int, db: Session = Depends(get_db), _=Depends(require_p
     targets = []
     if steam_id:
         targets.append({"kind": "steam", "url": f"steam://run/{steam_id}", "label": "Steam"})
+    if g.platform_id:
+        from app.services.emulator import get_emulator_target
+        platform = db.get(Platform, g.platform_id)
+        emulator_target = get_emulator_target(g, platform)
+        if emulator_target:
+            targets.append(emulator_target)
     if g.install_path:
         targets.append({"kind": "install_path", "path": g.install_path, "label": "Install folder"})
     if g.path:
         targets.append({"kind": "library_path", "path": g.path, "label": "Library path"})
     if not targets:
-        raise HTTPException(404, "No launch target (set Steam id or install path)")
+        raise HTTPException(404, "No launch target (set Steam id, emulator, or install path)")
     return {"ok": True, "game_id": g.id, "title": g.title, "targets": targets, "primary": targets[0]}
+
+
+@router.post("/{game_id}/launch/emulator")
+def launch_game_emulator(game_id: int, db: Session = Depends(get_db), _=Depends(require_permission("library"))):
+    """Actually run the game's platform emulator_command as a background job."""
+    from app.services.emulator import EmulatorConfigError, launch_via_emulator
+
+    g = db.get(Game, game_id)
+    if not g:
+        raise HTTPException(404, "Game not found")
+    if not g.platform_id:
+        raise HTTPException(400, "Game has no platform set")
+    platform = db.get(Platform, g.platform_id)
+    if not platform:
+        raise HTTPException(404, "Platform not found")
+    try:
+        job = launch_via_emulator(db, g, platform)
+    except EmulatorConfigError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "ok": True,
+        "job_id": job.id,
+        "game_id": g.id,
+        "status": job.status,
+        "command": job.command,
+    }
 
 
 @router.patch("/{game_id}")
@@ -277,7 +317,16 @@ def delete_game(
 @router.get("/platforms/list")
 def list_platforms(db: Session = Depends(get_db)):
     rows = db.query(Platform).order_by(Platform.name).all()
-    return [{"id": p.id, "name": p.name, "slug": p.slug, "icon_url": p.icon_url} for p in rows]
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "slug": p.slug,
+            "icon_url": p.icon_url,
+            "emulator_command": p.emulator_command,
+        }
+        for p in rows
+    ]
 
 
 @router.post("/platforms")
@@ -286,11 +335,47 @@ def add_platform(
     db: Session = Depends(get_db),
     _=Depends(require_permission("settings")),
 ):
-    p = Platform(name=body.name, slug=body.slug, icon_url=body.icon_url, metadata_provider=body.metadata_provider)
+    p = Platform(
+        name=body.name,
+        slug=body.slug,
+        icon_url=body.icon_url,
+        metadata_provider=body.metadata_provider,
+        emulator_command=body.emulator_command,
+    )
     db.add(p)
     db.commit()
     db.refresh(p)
     return {"ok": True, "id": p.id}
+
+
+@router.patch("/platforms/{platform_id}")
+def update_platform(
+    platform_id: int,
+    body: PlatformUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_permission("settings")),
+):
+    p = db.get(Platform, platform_id)
+    if not p:
+        raise HTTPException(404, "Platform not found")
+    if body.name is not None:
+        p.name = body.name
+    if body.icon_url is not None:
+        p.icon_url = body.icon_url
+    if body.metadata_provider is not None:
+        p.metadata_provider = body.metadata_provider
+    if body.emulator_command is not None:
+        p.emulator_command = body.emulator_command
+    db.add(p)
+    db.commit()
+    return {
+        "ok": True,
+        "id": p.id,
+        "name": p.name,
+        "icon_url": p.icon_url,
+        "metadata_provider": p.metadata_provider,
+        "emulator_command": p.emulator_command,
+    }
 
 
 # --- Questarr-depth: IGDB search, platform seed, search-grab ---

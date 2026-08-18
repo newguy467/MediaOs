@@ -21,3 +21,4 @@ mutagen==1.47.0
 python-multipart==0.0.12  # required by FastAPI's UploadFile (track artwork upload)
 PyMuPDF==1.24.10  # PDF page rendering for the in-app comic reader (app/services/comic_reader.py)
 redis>=5.0.0  # optional multi-worker; set REDIS_URL
+psutil>=5.9.0  # System Monitor page: container CPU/memory (see app/services/host_monitor.py)

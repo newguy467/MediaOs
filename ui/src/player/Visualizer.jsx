@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import engine from "./engine.js";
 
 /* Canvas spectrum visualizer — 48 bars, log-bucket mapping, DaisyUI theme gradient. */

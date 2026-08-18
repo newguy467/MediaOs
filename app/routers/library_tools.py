@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin, require_permission
+from app.auth import require_permission
 from app.database import get_db
 from app.models import Episode, MediaItem, MediaType
 from app.services import naming as naming_svc
@@ -59,7 +59,7 @@ def _episode_target(series: MediaItem, ep: Episode) -> tuple[Path, Path] | None:
 
 
 @router.post("/rename/preview")
-def rename_preview(payload: RenamePreview, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def rename_preview(payload: RenamePreview, db: Session = Depends(get_db), _: str = Depends(require_permission("library.manage"))):
     item = db.get(MediaItem, payload.item_id)
     if not item:
         raise HTTPException(404, "Not found")
@@ -83,7 +83,7 @@ def rename_preview(payload: RenamePreview, db: Session = Depends(get_db), _: str
 
 
 @router.post("/rename/apply")
-def rename_apply(payload: RenameApply, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def rename_apply(payload: RenameApply, db: Session = Depends(get_db), _: str = Depends(require_permission("library.manage"))):
     item = db.get(MediaItem, payload.item_id)
     if not item:
         raise HTTPException(404, "Not found")

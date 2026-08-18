@@ -68,11 +68,11 @@ def _apprise_notify(message: str) -> None:
         log.warning("Apprise notify failed: %s", exc)
 
 
-def notify(message: str, *, title: str = "mediaos") -> None:
+def notify(message: str, *, title: str = "mediaos", event: str = "notification") -> None:
     """Fan-out to all configured notification channels."""
     try:
         from app.services.notifications import send as _center_send
-        _center_send(message, title=title)
+        _center_send(message, title=title, event=event)
         return
     except Exception:
         pass
@@ -182,7 +182,7 @@ def notify_event(event: str, message: str, *, title: str | None = None) -> None:
         "subtitle": "Subtitles",
         "convert": "Converter",
     }.get(event, event.replace("_", " ").title())
-    notify(message, title=label)
+    notify(message, title=label, event=event)
 
 
 def notify_grab(title: str, indexer: str | None = None) -> None:
@@ -194,18 +194,6 @@ def notify_grab(title: str, indexer: str | None = None) -> None:
         pass
     idx = f" via {indexer}" if indexer else ""
     notify_event("grab", f"{title}{idx}", title="Grabbed")
-
-
-def notify_failure(message: str) -> None:
-    notify_event("failure", message, title="Failure")
-
-
-def notify_request(message: str) -> None:
-    notify_event("request", message, title="Request")
-
-
-def notify_upgrade(message: str) -> None:
-    notify_event("upgrade", message, title="Upgrade")
 
 
 def after_organize_series(db: Session, series: MediaItem) -> None:

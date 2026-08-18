@@ -3,7 +3,7 @@
  * Minimal floating assistant that talks to /api/ai/chat
  * Read-only by default — any proposed fix requires typing "yes"
  */
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { getToken } from "./storage.js";
 
 const authHeaders = () => {

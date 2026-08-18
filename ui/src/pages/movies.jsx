@@ -1,10 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
-import { api, TMDB, adultFetch } from "../api.js";
-import { PageChrome, PosterTile, LibraryModuleShell, MediaDetailShell, LibraryLegend, LibraryHeader, MediaCard, StatusBadgeStack, libraryStatuses, CollectionProgressWidget, TeachEmpty, AddModal, SkeletonLoader } from "../components/ui.jsx";
-import { InteractiveResultsPanel, InteractiveResultsTable, MediaPlayer, HlsVideo, grabPayload, releaseDownloadUrl } from "../components/media.jsx";
-
+import React, { useState, useEffect, useCallback } from "react";
+import { api } from "../api.js";
+import { PosterTile, LibraryModuleShell, SkeletonLoader } from "../components/ui.jsx";
+import { InteractiveResultsPanel, grabPayload } from "../components/media.jsx";
 function MoviesPage({ movies, refreshMovies, setMiniPlayer, setPage, libLoading=false }) {
   const [detailId, setDetailId] = useState(null);
   // Jump straight to an item's detail view when opened from Global Search

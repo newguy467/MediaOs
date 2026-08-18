@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Episode, ItemStatus, MediaItem, MediaType
 from app.services.activity import log_activity
-from app.services.organize import VIDEO_EXTENSIONS, _find_video_file, _folder_name, _sanitize
+from app.services.organize import _find_video_file, _folder_name, _sanitize
 from app.services.quality.parser import parse_release_title
 
 log = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission, require_admin
+from app.auth import require_permission
 from app.database import get_db
 from app.models import MediaItem, PathMap
 from app.services import library_gaps as lg
@@ -112,7 +112,7 @@ class PathMapIn(BaseModel):
 
 
 @router.post("/path-maps")
-def create_path_map(body: PathMapIn, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_path_map(body: PathMapIn, db: Session = Depends(get_db), _=Depends(require_permission("settings"))):
     row = PathMap(
         name=body.name,
         container_prefix=body.container_prefix,

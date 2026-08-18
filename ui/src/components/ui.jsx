@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
+import { useState, useEffect } from "react";
+import Ic from "../icons.jsx";
 import { api, TMDB } from "../api.js";
+import { THEME_GROUPS, nextTheme } from "../theme.js";
 
 function libraryStatuses(item, { isTv = false } = {}) {
   const chips = [];
@@ -97,7 +97,7 @@ function LibraryLegend({ showSeries = true, showTv = true }) {
 }
 
 
-function LogoMark({ className = "", size = 32, full = false, tint = false }) {
+function LogoMark({ className = "", size = 32, full = false, tint = false, rgb = false }) {
   const src = full ? "/logo-full.png" : "/logo-icon.png";
   // Random accent color each full page load (red/yellow/blue/green/…)
   const hue = (typeof window !== "undefined" && window.__mosLogoHue != null)
@@ -120,7 +120,7 @@ function LogoMark({ className = "", size = 32, full = false, tint = false }) {
       alt="MediaOS"
       width={full ? Math.round(size * 2.4) : size}
       height={size}
-      className={"logo-mark " + className}
+      className={"logo-mark" + (rgb ? " logo-mark--rgb" : "") + " " + className}
       style={style}
       draggable={false}
       onError={(e) => { if (!full && e.currentTarget.src.indexOf("logo-full") < 0) e.currentTarget.src = "/logo-full.png"; }}
@@ -179,7 +179,7 @@ function PageChrome({ children, title }) {
       {/* Mobile-only brand strip — desktop mockup keeps logo only in left sidebar */}
       <div className="mos-top-logo-bar flex lg:hidden items-center gap-2.5 mb-3 sticky top-0 z-20 py-2 -mt-1 px-1 bg-base-100/95 backdrop-blur-md border-b border-base-content/10">
         <div className="w-8 h-8 flex items-center justify-center shrink-0 rounded-xl bg-primary/10 ring-1 ring-primary/20">
-          <LogoMark size={26} />
+          <LogoMark size={26} rgb />
         </div>
         <div className="font-bold tracking-tight text-sm">
           <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">MediaOS</span>
@@ -197,11 +197,10 @@ function PageChrome({ children, title }) {
 function SplashScreen({ visible }) {
   if (!visible) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-base-100 transition-opacity duration-500"
-      style={{ background: "radial-gradient(ellipse at center, #2a1540 0%, #0b0914 70%)" }}>
+    <div className="mr-splash fixed inset-0 z-[100] flex flex-col items-center justify-center bg-base-100 transition-opacity duration-500">
       <div className="flex flex-col items-center gap-6">
-        <div className="flex items-center justify-center drop-shadow-[0_0_32px_rgba(139,92,246,0.5)]">
-          <LogoMark size={72} full className="!rounded-none !w-auto" />
+        <div className="mr-splash-logo flex items-center justify-center">
+          <LogoMark size={72} full className="rounded-none w-auto" />
         </div>
         <div className="text-xs uppercase tracking-[0.3em] opacity-50">Loading library</div>
         <progress className="progress progress-primary w-44" />
@@ -210,17 +209,6 @@ function SplashScreen({ visible }) {
   );
 }
 
-
-
-/* ── Themes (exact list from MediaOs) ──────────────────────────────────── */
-const THEMES = [
-  'mediaos','dark','night','dracula','synthwave','cyberpunk','abyss',
-  'luxury','dim','black','forest','halloween','nord','business',
-  'coffee','winter','sunset','aqua','garden','lofi','pastel','fantasy',
-  'wireframe','cmyk','autumn','acid','lemonade','retro','valentine',
-  'bumblebee','caramellatte','silk',
-  'light','cupcake','corporate','emerald'
-];
 
 
 
@@ -598,86 +586,70 @@ function SkeletonLoader({ rows = 6, kind = "grid" }) {
 }
 
 
-function isDarkTheme(t) {
-  return !['light', 'cupcake', 'corporate', 'emerald', 'lofi', 'pastel', 'lemonade', 'bumblebee', 'caramellatte', 'silk', 'wireframe', 'cmyk'].includes(String(t || ''));
-}
 
 function ThemeToggle({ theme, setTheme, className = "" }) {
-  const dark = isDarkTheme(theme);
+  const next = nextTheme(theme);
   return (
     <button
       type="button"
       className={"btn btn-ghost btn-sm btn-circle " + className}
-      title={dark ? "Switch to light mode" : "Switch to dark mode"}
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      onClick={() => setTheme(dark ? "light" : "mediaos")}
+      title={`Next theme: ${next}`}
+      aria-label={`Change theme. Current: ${theme}. Next: ${next}`}
+      onClick={() => setTheme(next)}
     >
-      {dark ? (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-        </svg>
-      ) : (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-      )}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5" aria-hidden="true">
+        <path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z" />
+        <path d="M19 3v4M17 5h4" />
+      </svg>
     </button>
   );
 }
 
 function ThemesPage({ currentTheme, setTheme }) {
-  const dark = isDarkTheme(currentTheme);
-  const groups = [
-    { label: "MediaOS", themes: ["mediaos"] },
-    { label: "Dark (Cinephage set)", themes: ["dark", "night", "dracula", "synthwave", "cyberpunk", "abyss", "luxury", "dim", "black", "forest", "halloween", "nord", "business", "coffee", "winter", "aqua"] },
-    { label: "Colorful", themes: ["sunset", "garden", "lofi", "pastel", "fantasy", "retro", "valentine", "bumblebee", "autumn", "acid", "lemonade", "cmyk", "caramellatte", "silk", "wireframe"] },
-    { label: "Light", themes: ["light", "cupcake", "corporate", "emerald"] },
-  ];
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-4xl">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="mr-page-title flex-1">Themes</h1>
-        <div className="flex items-center gap-2 rounded-full border border-base-content/10 bg-base-200 px-3 py-1.5">
-          <span className="text-xs opacity-60">Light</span>
-          <input
-            type="checkbox"
-            className="toggle toggle-primary toggle-sm"
-            checked={dark}
-            onChange={(e) => setTheme(e.target.checked ? "mediaos" : "light")}
-            aria-label="Dark mode"
-          />
-          <span className="text-xs opacity-60">Dark</span>
-        </div>
-        <ThemeToggle theme={currentTheme} setTheme={setTheme} />
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => setTheme(nextTheme(currentTheme))}>
+          Next preset
+        </button>
       </div>
-      <p className="text-sm opacity-60">
-        Current: <span className="font-semibold text-primary">{currentTheme}</span>
-        {" "}· Toggle dark mode or pick a DaisyUI theme below. Preference is saved in this browser.
-      </p>
-      {groups.map((g) => (
-        <div key={g.label} className="space-y-2">
-          <h2 className="text-xs uppercase tracking-wider opacity-50 font-semibold">{g.label}</h2>
-          <div className="flex flex-wrap gap-2">
-            {g.themes.map((t) => (
+
+      <div className="card border border-primary/20 bg-base-200">
+        <div className="card-body py-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="w-4 h-4 rounded-full bg-primary shadow-[0_0_16px] shadow-primary/40" aria-hidden="true" />
+            <span className="text-sm">Current preset: <strong className="text-primary">{currentTheme}</strong></span>
+            <span className="text-xs opacity-60">All presets keep the same MediaOS layout; only the palette changes.</span>
+          </div>
+        </div>
+      </div>
+
+      {THEME_GROUPS.map((group) => (
+        <section key={group.label} className="space-y-2">
+          <h2 className="text-xs uppercase tracking-wider opacity-60 font-semibold">{group.label}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {group.themes.map((theme) => (
               <button
-                key={t}
+                key={theme}
                 type="button"
-                className={"btn btn-sm " + (currentTheme === t ? "btn-primary" : "btn-outline")}
-                onClick={() => setTheme(t)}
+                className={"theme-preset btn btn-sm justify-start " + (currentTheme === theme ? "btn-primary" : "btn-outline")}
+                onClick={() => setTheme(theme)}
+                aria-pressed={currentTheme === theme}
               >
-                {t}
+                <span className="theme-preset-dot" aria-hidden="true" />
+                <span className="truncate">{theme}</span>
               </button>
             ))}
           </div>
-        </div>
+        </section>
       ))}
     </div>
   );
 }
 
 export {
-  SkeletonLoader, ThemesPage, ThemeToggle, isDarkTheme, libraryStatuses, StatusBadgeStack, ringClassFromChips, LibraryLegend, LogoMark, PageChrome,
+  SkeletonLoader, ThemesPage, ThemeToggle, libraryStatuses, StatusBadgeStack, ringClassFromChips, LibraryLegend, LogoMark, PageChrome,
   SplashScreen, CollectionProgressWidget, MediaDetailShell,
   StatsGrid, AddModal, LibraryModuleShell, PosterTile, MediaCard, LibraryHeader, TeachEmpty,
 };

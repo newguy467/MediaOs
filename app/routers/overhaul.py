@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_permission, require_admin
+from app.auth import require_permission
 from app.database import get_db
 from app.models import (
     ExternalArrInstance,
@@ -88,7 +88,7 @@ def add_stream(body: StreamIn, db: Session = Depends(get_db), _: list = Depends(
 # ── TRaSH import (Recyclarr-inspired) ───────────────────────────────────────
 
 @router.post("/trash/import")
-def trash_import(payload: dict, _: str = Depends(require_admin)):
+def trash_import(payload: dict, _: str = Depends(require_permission("settings"))):
     from app.services.trash_import import import_trash_payload
     return import_trash_payload(payload)
 
@@ -153,7 +153,7 @@ class ArrInstanceIn(BaseModel):
 
 
 @router.get("/arr-instances")
-def arr_instances(db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def arr_instances(db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     rows = db.query(ExternalArrInstance).all()
     return [
         {"id": r.id, "name": r.name, "kind": r.kind, "base_url": r.base_url, "enabled": r.enabled}
@@ -162,7 +162,7 @@ def arr_instances(db: Session = Depends(get_db), _: str = Depends(require_admin)
 
 
 @router.post("/arr-instances")
-def arr_instances_add(body: ArrInstanceIn, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def arr_instances_add(body: ArrInstanceIn, db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     row = ExternalArrInstance(
         name=body.name,
         kind=body.kind.lower(),
@@ -177,7 +177,7 @@ def arr_instances_add(body: ArrInstanceIn, db: Session = Depends(get_db), _: str
 
 
 @router.get("/arr-instances/{instance_id}/calendar")
-def arr_instance_calendar(instance_id: int, db: Session = Depends(get_db), _: str = Depends(require_admin)):
+def arr_instance_calendar(instance_id: int, db: Session = Depends(get_db), _: str = Depends(require_permission("settings"))):
     """Proxy calendar from external Sonarr/Radarr (best-effort)."""
     import httpx
     row = db.get(ExternalArrInstance, instance_id)
@@ -193,7 +193,7 @@ def arr_instance_calendar(instance_id: int, db: Session = Depends(get_db), _: st
 
 
 @router.post("/trash/fetch")
-def trash_fetch_now(url: str | None = None, _: str = Depends(require_admin)):
+def trash_fetch_now(url: str | None = None, _: str = Depends(require_permission("settings"))):
     from app.services.trash_guide_fetch import fetch_and_apply
     return fetch_and_apply(url=url)
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { LibraryModuleShell, PosterTile, TeachEmpty, SkeletonLoader } from "../components/ui.jsx";
 
 export default function GamesPage({ setPage }) {
@@ -15,6 +15,9 @@ export default function GamesPage({ setPage }) {
   const [selectedId, setSelectedId] = useState(null);
   const [checked, setChecked] = useState({});
   const checkedIds = Object.keys(checked);
+  const [platforms, setPlatforms] = useState([]);
+  const [platformDrafts, setPlatformDrafts] = useState({});
+  const [savingPlatformId, setSavingPlatformId] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -32,6 +35,28 @@ export default function GamesPage({ setPage }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadPlatforms = useCallback(() => {
+    fetch("/api/games/platforms/list")
+      .then(r => { if (!r.ok) throw new Error("Failed to load platforms"); return r.json(); })
+      .then(rows => setPlatforms(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadPlatforms(); }, [loadPlatforms]);
+
+  // Seed a draft per platform for the emulator-command input, without
+  // clobbering text the user is actively editing on a refresh.
+  useEffect(() => {
+    setPlatformDrafts(prev => {
+      const next = { ...prev };
+      let changed = false;
+      platforms.forEach(p => {
+        if (!(p.id in next)) { next[p.id] = p.emulator_command || ""; changed = true; }
+      });
+      return changed ? next : prev;
+    });
+  }, [platforms]);
 
   const bulkMonitor = async (monitored) => {
     setBusy(true); setMsg(null);
@@ -130,6 +155,8 @@ export default function GamesPage({ setPage }) {
       if (primary && primary.url) {
         window.location.href = primary.url;
         setMsg('Launching via ' + (primary.label || primary.kind));
+      } else if (primary && primary.kind === 'emulator') {
+        setMsg((primary.label || 'Emulator configured') + ' — use the "Launch via emulator" button below to run it.');
       } else if (primary && primary.path) {
         setMsg('Install path: ' + primary.path + ' (open on the host)');
       } else {
@@ -137,6 +164,34 @@ export default function GamesPage({ setPage }) {
       }
     } catch (e) { setMsg(String(e.message || e)); }
     finally { setBusy(false); }
+  };
+
+  const launchEmulator = async (gameId) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch('/api/games/' + gameId + '/launch/emulator', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'Emulator launch failed');
+      setMsg('Emulator launch queued — job #' + j.job_id + ' (' + j.status + ')');
+      loadInstallJobs();
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
+
+  const savePlatformEmulatorCommand = async (platformId, command) => {
+    setSavingPlatformId(platformId); setMsg(null);
+    try {
+      const r = await fetch('/api/games/platforms/' + platformId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emulator_command: command }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'Save failed');
+      setPlatforms(prev => prev.map(p => p.id === platformId ? { ...p, emulator_command: j.emulator_command } : p));
+      setMsg('Saved emulator command for ' + (j.name || 'platform'));
+    } catch (e) { setMsg(String(e.message || e)); }
+    finally { setSavingPlatformId(null); }
   };
 
   const searchReleases = async (gameId) => {
@@ -179,6 +234,7 @@ export default function GamesPage({ setPage }) {
         { id: "wanted", label: "Wanted" },
         { id: "search", label: "Search" },
         { id: "releases", label: "Releases" },
+        { id: "platforms", label: "Platforms" },
       ]}
       tools={<>
         <input className="mr-search" placeholder="Search IGDB / Steam…" value={q}
@@ -194,6 +250,7 @@ export default function GamesPage({ setPage }) {
           {installJobs.slice(0,8).map(j=>(
             <div key={j.id} className="text-xs font-mono">
               #{j.id} game={j.game_id} <span className="badge badge-xs">{j.status}</span>
+              {j.kind && j.kind !== 'install' && <span className="badge badge-xs badge-ghost ml-1">{j.kind}</span>}
               <pre className="text-[10px] opacity-60 max-h-20 overflow-auto whitespace-pre-wrap">{(j.log_text||'').slice(0,400)}</pre>
             </div>
           ))}
@@ -335,6 +392,17 @@ export default function GamesPage({ setPage }) {
                 if (g) await toggleGameMonitor(g);
               }}>Toggle monitored</button>
               <button type="button" className="btn btn-xs btn-accent" disabled={busy || !selectedId} onClick={() => launchGame(selectedId)}>Launch</button>
+              {(() => {
+                const selGame = (games || []).find(x => x.id === selectedId) || (wanted || []).find(x => x.id === selectedId);
+                const selPlatform = selGame ? platforms.find(p => p.id === selGame.platform_id) : null;
+                if (!selPlatform || !(selPlatform.emulator_command || '').trim()) return null;
+                return (
+                  <button type="button" className="btn btn-xs btn-accent" disabled={busy || !selectedId}
+                    onClick={() => launchEmulator(selectedId)}>
+                    Launch via {selPlatform.name} emulator
+                  </button>
+                );
+              })()}
               <button type="button" className="btn btn-xs" disabled={busy || !selectedId} onClick={async ()=>{
                 setBusy(true); setMsg(null);
                 try {
@@ -381,6 +449,59 @@ export default function GamesPage({ setPage }) {
               <p>Select a game from Library or Wanted and run Search releases.</p>
             </TeachEmpty>
           )}
+        </div>
+      </div>
+      )}
+
+      {tab === "platforms" && (
+        <div className="space-y-2">
+          <p className="text-xs opacity-60">
+            Optional per-platform emulator launch command. Placeholders: <code>{"{rom}"}</code> (install/library path, auto-quoted),{" "}
+            <code>{"{title}"}</code>, <code>{"{id}"}</code>. Leave blank to disable emulator launch for a platform.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="table table-sm">
+              <thead><tr><th>Platform</th><th>Emulator command</th><th></th></tr></thead>
+              <tbody>
+                {(platforms || []).map(p => (
+                  <tr key={p.id}>
+                    <td className="text-sm whitespace-nowrap">{p.name}</td>
+                    <td>
+                      <input
+                        className="input input-bordered input-xs w-full font-mono"
+                        placeholder="e.g. retroarch -L /cores/snes9x_libretro.so {rom}"
+                        value={platformDrafts[p.id] ?? ""}
+                        onChange={e => setPlatformDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-primary"
+                        disabled={savingPlatformId === p.id}
+                        onClick={() => savePlatformEmulatorCommand(p.id, platformDrafts[p.id] ?? "")}
+                      >
+                        {savingPlatformId === p.id ? "Saving…" : "Save"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!platforms.length && (
+              <TeachEmpty title="No platforms yet" actionLabel="Seed defaults" onAction={async () => {
+                setBusy(true); setMsg(null);
+                try {
+                  const r = await fetch("/api/games/platforms/seed", { method: "POST" });
+                  if (!r.ok) throw new Error("Seed failed");
+                  loadPlatforms();
+                } catch (e) { setMsg(String(e.message || e)); }
+                finally { setBusy(false); }
+              }}>
+                <p>Seed the default platform list (PC, Steam, GOG, consoles), then set an emulator command per platform here.</p>
+              </TeachEmpty>
+            )}
+          </div>
         </div>
       )}
     </LibraryModuleShell>

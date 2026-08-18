@@ -66,6 +66,11 @@ Work completed on the `1.01beta` tag after the rename (Sessions 11–25). Versio
 - Movies bulk checkboxes stay visible when selected
 - Quality bulk dropdown hidden when no profiles exist
 - Select-all only when the visible list is non-empty
+- Missing `.env.example` (launch-blocker); Dockerfile `COPY data ./data` with no `data/` dir
+- Backup silently empty on Postgres (the default DB); wrong fallback path meant even SQLite backups weren't in a mounted volume; backup UI toggles were ignored by the API
+- `docker-compose.vpn.example.yml` `.env` var naming (broke required-var checks); `standalone.yml` undeclared `ollama_data` volume
+- RBAC: `get_current_permissions()` ignored role defaults for users without an explicit `permissions_json`, silently downgrading manager/guest to member-level access
+- `test_rbac.py` targeted a nonexistent route (masked the RBAC bug above); cross-test DB pollution in `test_livetv_stalker_catchup.py`
 
 ### Changed
 - Audiobooks denser poster grid; podcasts denser library grid

@@ -2,30 +2,68 @@ name: Security
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+    branches: [main]
   schedule:
+    # Weekly, Monday 06:00 UTC — catches new advisories against pinned deps
+    # even when nothing in the repo has changed.
     - cron: "0 6 * * 1"
-  workflow_dispatch:
 
+# Gate on critical/high severity; moderate and below are reported for review
+# but don't fail the build. See per-job notes below for how each tool
+# implements (or falls short of) that split.
 jobs:
-  lockfile-hygiene:
-    name: Lockfile / audit
+  pip-audit:
+    name: pip-audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Full advisory report (all severities, non-blocking)
+        continue-on-error: true
+        run: pip-audit --desc
+      - name: Gate on known-fixable vulnerabilities
+        # CAVEAT: pip-audit has no native --min-severity / severity gate (the
+        # flag doesn't exist upstream: https://github.com/pypa/pip-audit/issues/654).
+        # OSV/PyPA advisories also don't carry a consistent CVSS severity field
+        # to filter on, so a true "fail only on critical/high" gate isn't
+        # available for this tool the way it is for npm below. As the closest
+        # honest substitute we gate on vulnerabilities that have a known fix
+        # available (pip-audit's own documented pattern for a non-blanket
+        # gate) — unfixable findings are surfaced above but don't block CI.
+        # If exact critical/high-only gating is required, it needs a custom
+        # OSV-severity lookup script; flag if that's wanted.
+        run: |
+          FIXABLE=$(pip-audit --format=json 2>/dev/null | \
+            python -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for dep in d.get('dependencies', []) for v in dep.get('vulns', []) if v.get('fix_versions')))")
+          echo "Fixable vulnerabilities found: $FIXABLE"
+          if [ "$FIXABLE" -gt 0 ]; then
+            echo "::error::$FIXABLE vulnerabilities with an available fix — see full report above."
+            exit 1
+          fi
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: pip-audit
-        run: |
-          python -m pip install --upgrade pip pip-audit
-          pip install -r requirements.txt
-          pip-audit -r requirements.txt || true
-      - name: npm audit
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
-          npm audit --omit=dev || true
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+      - name: Full advisory report (moderate+, non-blocking)
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+      - name: Gate on high/critical severity
+        run: npm audit --audit-level=high

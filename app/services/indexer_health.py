@@ -14,7 +14,6 @@ log = logging.getLogger(__name__)
 
 def run_indexer_health_cycle(db: Session) -> dict:
     """Test enabled indexers; record last_ok/last_error; disable after N consecutive fails."""
-    from app.routers.indexers import test_indexer_search  # careful circular
     # Inline test instead
     from app.clients.torznab import torznab_client
     from app.services import cardigann as cardigann_svc

@@ -2,14 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { withRouter, usePageRoute } from "./routes.jsx";
 import "./styles.css";
-import Ic, { Icons, P } from "./icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "./storage.js";
+import Ic, { Icons } from "./icons.jsx";
+import { getToken, setToken, getAdvanced } from "./storage.js";
 import AiChatPanel from "./AiChatPanel.jsx";
-import { api, TMDB } from "./api.js";
-import {
-  PageChrome, SplashScreen, LogoMark, CollectionProgressWidget, ThemesPage, ThemeToggle,
-  StatsGrid, LibraryLegend,
-} from "./components/ui.jsx";
+import { api } from "./api.js";
+import { PageChrome, SplashScreen, LogoMark, CollectionProgressWidget, ThemesPage, ThemeToggle } from "./components/ui.jsx";
+import { getStoredTheme, applyTheme, normalizeTheme } from "./theme.js";
 import { MediaPlayer } from "./components/media.jsx";
 import MusicPlayerBar from "./player/MusicPlayerBar.jsx";
 import GlobalSearch from "./components/GlobalSearch.jsx";
@@ -76,21 +74,11 @@ const GamesPage = React.lazy(() => import("./pages/games.jsx"));
 const ScrobblingPage = React.lazy(() => import("./pages/scrobbling.jsx"));
 const TrackingPage = React.lazy(() => import("./pages/tracking.jsx"));
 const AboutPage = React.lazy(() => import("./pages/about.jsx"));
+const SystemMonitorPage = React.lazy(() => import("./pages/monitor.jsx"));
 const BackupPage = React.lazy(() => import("./pages/backup.jsx"));
 const PluginsPage = React.lazy(() => import("./pages/plugins.jsx"));
 const WidgetLayoutPage = React.lazy(() => import("./pages/widgets.jsx"));
 const ExternalArrPage = React.lazy(() => import("./pages/external-arr.jsx"));
-
-function applyTheme(t) {
-  const name = t || 'mediaos';
-  document.documentElement.setAttribute('data-theme', name);
-  try { localStorage.setItem('mediaos-theme', name); } catch (_) {}
-  // Keep body class in sync for any CSS that keys off it
-  document.body && document.body.setAttribute('data-theme', name);
-}
-function storedTheme() {
-  return localStorage.getItem('mediaos-theme') || 'mediaos' || 'mediaos';
-}
 
 /* Icons imported from ./icons.jsx as Ic */
 
@@ -139,6 +127,7 @@ function Sidebar({ page, setPage, counts, onClose, advanced, enabledModules, the
     { key: 'scrobbling', label: 'History', Icon: Ic.Activity, mod: 'scrobbling' },
     { key: 'tracking', label: 'Tracking', Icon: Ic.List, mod: 'tracking' },
     { key: 'backup', label: 'Backup', Icon: Ic.Server, mod: null },
+    { key: 'monitor', label: 'System Monitor', Icon: Ic.Gauge, mod: null },
     { key: 'plugins', label: 'Plugins', Icon: Ic.Box, mod: null },
     { key: 'widget-layout', label: 'Widgets', Icon: Ic.Home, mod: null },
     { key: 'external-arr', label: 'External *arr', Icon: Ic.Server, mod: null },
@@ -269,12 +258,13 @@ function ModuleDisabled({ name, setPage }) {
 
 function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], refreshMovies, refreshSeries, setPage, theme, setTheme, setMiniPlayer, enabledModules=['movies','tv','music','books','audiobooks','comics','homelab'], setEnabledModules, advanced, setAdvanced, libLoading=false }) {
   switch(page) {
-    case 'widgets': return <OverhaulDashboardPage setPage={setPage} />;
+    case 'widgets': return <OverhaulDashboardPage setPage={setPage} enabledModules={enabledModules} />;
     case 'homelab': return (enabledModules||[]).includes('homelab') ? <HomelabLinksPage /> : <ModuleDisabled name="Homelab" setPage={setPage} />;
     case 'games': return (enabledModules||[]).includes('games') ? <GamesPage setPage={setPage} /> : <ModuleDisabled name="Games" setPage={setPage} />;
     case 'scrobbling': return (enabledModules||[]).includes('scrobbling') ? <ScrobblingPage /> : <ModuleDisabled name="History / Scrobbling" setPage={setPage} />;
     case 'tracking': return (enabledModules||[]).includes('tracking') ? <TrackingPage /> : <ModuleDisabled name="Tracking" setPage={setPage} />;
     case 'about': return <AboutPage />;
+    case 'monitor': return <SystemMonitorPage setPage={setPage} />;
     case 'backup': return <BackupPage />;
     case 'plugins': return <PluginsPage setPage={setPage} />;
     case 'widget-layout': return <WidgetLayoutPage />;
@@ -313,6 +303,7 @@ function PageContent({ page, movies, series, music=[], books=[], audiobooks=[], 
     case 'settings-vpn':     return <VpnSettingsPage />;
     case 'settings-youtube': return <ConfigGroupPage group="youtube" title="YouTube / Login" Icon={Ic.Compass} description="Creator downloads, cookies login for age-restricted content, and SponsorBlock ad/sponsor removal. Changes apply immediately." setPage={setPage} />;
     case 'settings-themes': return <ThemesPage currentTheme={theme} setTheme={setTheme} />;
+    case 'indexers':           return <IndexersPage />;
     case 'settings-indexers':  return <IndexersPage />;
     case 'settings-downloads': return <ConfigGroupPage group="downloads" title="Download Clients" Icon={Ic.Download} description="qBittorrent, SABnzbd, NZBGet — changes apply immediately, no restart." setPage={setPage} />;
     case 'settings-library':   return <ConfigGroupPage group="library" title="Library Storage" Icon={Ic.Folder} description="Library and downloads paths — changes apply immediately, no restart." setPage={setPage} />;
@@ -564,6 +555,7 @@ function App() {
       requests: 'Requests', adult: 'Adult', homelab: 'Homelab', login: 'Sign in',
       setup: 'Setup', about: 'About', modules: 'Module Store', scrobbling: 'History',
       tracking: 'Tracking', converter: 'Converter', 'settings-hub': 'Settings',
+      monitor: 'System Monitor',
     };
     const key = String(page || 'dashboard');
     const label = MAP[key] || key.replace(/^settings-?/, 'Settings · ').replace(/-/g, ' ');
@@ -588,7 +580,7 @@ function App() {
     }).catch(()=>{});
   }, []);
 
-  const [theme, setThemeState] = useState(storedTheme());
+  const [theme, setThemeState] = useState(getStoredTheme());
   useEffect(() => { applyTheme(theme); }, [theme]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [movies, setMovies] = useState([]);
@@ -602,7 +594,7 @@ function App() {
   const [setupChecked, setSetupChecked] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
 
-  function setTheme(t) { setThemeState(t); applyTheme(t); }
+  function setTheme(t) { const next = normalizeTheme(t); setThemeState(next); applyTheme(next); }
 
   const refreshMovies = useCallback(async()=>{
     try { setMovies(await api.movies.list()); } catch(e){}
@@ -751,7 +743,7 @@ export function mount(el) {
 }
 
 if (typeof document !== "undefined") {
-  try { document.documentElement.setAttribute('data-theme', localStorage.getItem('mediaos-theme') || 'mediaos'); } catch (e) {}
+  applyTheme(getStoredTheme());
 
   const root = document.getElementById("root");
   if (root) mount(root);

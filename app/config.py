@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     books_library_path: str = "/books"
     audiobooks_library_path: str = "/audiobooks"
 
+    # Optional: comma-separated block devices (e.g. "/dev/sda,/dev/sdb") for the
+    # System Monitor page's SMART panel. Empty by default — SMART needs the
+    # smartmontools binary (in image) AND raw device access, which this
+    # container does not have unless you add the commented device mappings in
+    # docker-compose.yml. Leaving this unset just hides the SMART rows.
+    smart_devices: str = ""
+
     search_interval_minutes: int = 15  # tighter continuous feel
     min_seeders: int = 3
 
@@ -116,6 +123,8 @@ class Settings(BaseSettings):
     ntfy_token: str = ""
     gotify_url: str = ""
     gotify_token: str = ""
+    webhook_url: str = ""
+    webhook_headers: str = ""
 
     # Jellyfin library refresh
     jellyfin_url: str = "http://jellyfin:8096"

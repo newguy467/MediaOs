@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-
+import { useState, useEffect } from "react";
 function BackupPage() {
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -24,7 +23,9 @@ function BackupPage() {
       if (r.status === 404) {
         r = await fetch('/api/backup', { method:'POST' }).then(async res => ({ ok: res.ok, body: await res.json().catch(()=>({})) }));
       }
-      setMsg(r.body?.path || r.body?.ok ? `Created ${r.body.path || 'backup'}` : JSON.stringify(r.body));
+      const warn = (r.body?.warnings || []).join('; ');
+      const base = r.body?.path || r.body?.ok ? `Created ${r.body.path || 'backup'}` : JSON.stringify(r.body);
+      setMsg(warn ? `${base} — WARNING: ${warn}` : base);
       load();
     } catch(e) { setMsg(String(e)); }
     setBusy(false);

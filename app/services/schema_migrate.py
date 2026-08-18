@@ -1,10 +1,13 @@
 """Versioned soft schema migrations for MediaOS v2.
 
-AUTHORITATIVE at runtime (main.py). Alembic mirrors these columns for CI and is idempotent.
-
-Replaces growing ad-hoc ALTER lists in on_startup with a tracked, idempotent
-migration runner. create_all still handles brand-new tables; these statements
-cover additive column changes for upgrades from older DBs.
+Alembic (alembic/versions/, run first in main.py's on_startup and fatal on
+failure) is the single authoritative schema manager. This module is a
+secondary, idempotent safety net that runs after Alembic: it replaces the
+growing ad-hoc ALTER lists that used to live in on_startup with a tracked
+runner, catching additive columns on upgrades from older DBs that predate
+their corresponding Alembic revision. create_all still handles brand-new
+tables. Every statement here must stay safe to re-run, since Alembic may
+already have applied the same column by the time this runs.
 """
 from __future__ import annotations
 
@@ -115,6 +118,36 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
         "most recently read issue",
         [
             "ALTER TABLE comic_issues ADD COLUMN last_read_at TIMESTAMP",
+        ],
+    ),
+    (
+        "2.0.31",
+        "Live TV Stalker portal MAC on sources + catch-up/timeshift fields "
+        "on channels (catchup, catchup_days, external_id)",
+        [
+            "ALTER TABLE livetv_sources ADD COLUMN stalker_mac VARCHAR",
+            "ALTER TABLE livetv_channels ADD COLUMN catchup BOOLEAN DEFAULT 0",
+            "ALTER TABLE livetv_channels ADD COLUMN catchup_days INTEGER DEFAULT 0",
+            "ALTER TABLE livetv_channels ADD COLUMN external_id VARCHAR",
+        ],
+    ),
+    (
+        "2.0.32",
+        "4-role RBAC: rename legacy 'user' role to 'member' (admin/manager/"
+        "member/guest). Idempotent — a rerun matches zero rows.",
+        [
+            "UPDATE users SET role = 'member' WHERE role = 'user'",
+            "UPDATE auth_sessions SET role = 'member' WHERE role = 'user'",
+        ],
+    ),
+    (
+        "2.0.33",
+        "Games emulator launch: Platform.emulator_command template plus "
+        "GameInstallJob.kind (install|launch) so an emulator run gets its "
+        "own job row distinct from a regular install",
+        [
+            "ALTER TABLE platforms ADD COLUMN emulator_command VARCHAR",
+            "ALTER TABLE game_install_jobs ADD COLUMN kind VARCHAR DEFAULT 'install'",
         ],
     ),
 ]

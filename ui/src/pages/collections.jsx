@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-
+import { useState, useEffect } from "react";
 function CollectionsPage() {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState("");

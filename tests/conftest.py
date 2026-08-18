@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 # Use /tmp to avoid sandbox disk I/O quirks on the workspace volume.
-_db = Path("/tmp/mediaos-test.db")
+_db = Path(f"/tmp/mediaos-test-{os.getpid()}.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_db}"
 os.environ.setdefault("AUTH_REQUIRE", "false")
 
@@ -24,11 +24,10 @@ def app():
     from app import main as main_mod
 
     Base.metadata.create_all(bind=engine)
-    try:
-        from app.services.schema_migrate import run_schema_migrations
-        run_schema_migrations(engine)
-    except Exception:
-        pass
+    from app.services.schema_migrate import run_schema_migrations
+    # Migration failures must fail the test session instead of being silently
+    # swallowed and producing misleading "no such table" errors later.
+    run_schema_migrations(engine)
     return main_mod.app
 
 

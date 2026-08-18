@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import logging
 
 from app.auth import require_permission
@@ -16,11 +16,12 @@ router = APIRouter(prefix="/livetv", tags=["livetv"])
 
 class SourceCreate(BaseModel):
     name: str
-    kind: str = "m3u"  # m3u | xtream
-    url: str | None = None
+    kind: str = "m3u"  # m3u | xtream | stalker
+    url: str | None = None  # m3u playlist URL, or Stalker portal URL
     xtream_host: str | None = None
     xtream_username: str | None = None
     xtream_password: str | None = None
+    stalker_mac: str | None = None  # optional; auto-generated on first sync if omitted
     enabled: bool = True
     epg_url: str | None = None
 
@@ -31,6 +32,7 @@ class SourceOut(BaseModel):
     kind: str
     url: str | None
     xtream_host: str | None
+    stalker_mac: str | None = None
     enabled: bool
     channel_count: int
     last_sync_at: datetime | None
@@ -50,6 +52,8 @@ class ChannelOut(BaseModel):
     tvg_id: str | None
     enabled: bool
     sort_order: int = 0
+    catchup: bool = False
+    catchup_days: int = 0
 
     class Config:
         from_attributes = True
@@ -62,8 +66,10 @@ def list_sources(db: Session = Depends(get_db)):
 
 @router.post("/sources", response_model=SourceOut)
 def add_source(payload: SourceCreate, db: Session = Depends(get_db), _perm: list = Depends(require_permission("library.manage", "settings"))):
-    if payload.kind not in ("m3u", "xtream"):
-        raise HTTPException(400, "kind must be m3u or xtream")
+    if payload.kind not in ("m3u", "xtream", "stalker"):
+        raise HTTPException(400, "kind must be m3u, xtream, or stalker")
+    if payload.kind == "stalker" and not (payload.url or payload.xtream_host):
+        raise HTTPException(400, "stalker source requires a portal url")
     src = LiveTvSource(
         name=payload.name,
         kind=payload.kind,
@@ -71,6 +77,7 @@ def add_source(payload: SourceCreate, db: Session = Depends(get_db), _perm: list
         xtream_host=payload.xtream_host,
         xtream_username=payload.xtream_username,
         xtream_password=payload.xtream_password,
+        stalker_mac=payload.stalker_mac,
         enabled=payload.enabled,
         epg_url=getattr(payload, "epg_url", None),
     )
@@ -482,6 +489,7 @@ def proxy_channel_stream(channel_id: int, request: Request, db: Session = Depend
     """Proxy live stream — used by in-app player and Jellyfin M3U tuner."""
     from fastapi.responses import StreamingResponse, RedirectResponse
     import httpx
+    from app.services.livetv import STALKER_PENDING_PREFIX, resolve_stalker_stream_url
 
     ch = db.get(LiveTvChannel, channel_id)
     if not ch or not ch.enabled:
@@ -489,6 +497,13 @@ def proxy_channel_stream(channel_id: int, request: Request, db: Session = Depend
     url = (ch.stream_url or "").strip()
     if not url:
         raise HTTPException(404, "No stream URL")
+
+    if url.startswith(STALKER_PENDING_PREFIX):
+        src = db.get(LiveTvSource, ch.source_id)
+        resolved = resolve_stalker_stream_url(src, ch) if src else None
+        if not resolved:
+            raise HTTPException(502, "Could not resolve Stalker stream link")
+        url = resolved
 
     # HLS playlists: redirect so clients follow upstream
     if ".m3u8" in url.lower() or url.lower().endswith(".m3u"):
@@ -511,6 +526,41 @@ def proxy_channel_stream(channel_id: int, request: Request, db: Session = Depend
     if url.endswith(".mp4"):
         media = "video/mp4"
     return StreamingResponse(gen(), media_type=media, headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/catchup/{channel_id}")
+def catchup_stream_url(
+    channel_id: int,
+    start: datetime,
+    end: datetime,
+    db: Session = Depends(get_db),
+    _perm: list = Depends(require_permission("library.view", "settings")),
+):
+    """Resolve a catch-up/timeshift playback URL for a past program on a channel."""
+    from app.services.livetv import catchup_url_for_channel
+
+    ch = db.get(LiveTvChannel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Channel not found")
+    if not ch.catchup:
+        raise HTTPException(400, "Channel does not support catch-up")
+    src = db.get(LiveTvSource, ch.source_id)
+    if not src:
+        raise HTTPException(404, "Source not found")
+    now = datetime.now(timezone.utc)
+    start_utc = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
+    end_utc = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
+    if end_utc <= start_utc:
+        raise HTTPException(400, "end must be after start")
+    oldest_allowed = now - timedelta(days=max(1, ch.catchup_days or 1))
+    if start_utc < oldest_allowed:
+        raise HTTPException(400, f"Requested time is outside the {ch.catchup_days}-day catch-up window")
+    if start_utc > now:
+        raise HTTPException(400, "Cannot request catch-up for the future")
+    url = catchup_url_for_channel(src, ch, start_utc, end_utc)
+    if not url:
+        raise HTTPException(502, "Could not resolve catch-up URL")
+    return {"url": url, "channel_id": channel_id, "start": start_utc.isoformat(), "end": end_utc.isoformat()}
 
 
 @router.get("/jellyfin-setup")

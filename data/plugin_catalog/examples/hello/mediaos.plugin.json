@@ -1,9 +1,0 @@
-{
-  "id": "community.example-hello",
-  "name": "Example Hello Plugin",
-  "version": "1.0.0",
-  "description": "Minimal sample plugin for developers.",
-  "author": "MediaOS",
-  "category": "examples",
-  "entry": "plugin.py"
-}

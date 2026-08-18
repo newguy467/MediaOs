@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import random
 import re
-from typing import Any
+from datetime import datetime
 from urllib.parse import urljoin
 
 import httpx
@@ -83,6 +83,25 @@ class StalkerClient:
 
     def create_link(self, cmd: str) -> str | None:
         data = self._api(type="itv", action="create_link", cmd=cmd, JsHttpRequest="1-xml")
+        js = data.get("js") or {}
+        link = js.get("cmd") or js.get("url")
+        if link and link.startswith("ffmpeg "):
+            link = link.split(" ", 1)[-1]
+        return link
+
+    def create_timeshift_link(self, cmd: str, start: datetime, duration_min: int) -> str | None:
+        """Resolve a catch-up/timeshift playback URL for a past program.
+
+        Stalker/MAG portals expose this via the same create_link action but
+        with a start timestamp + duration appended to the stream cmd.
+        """
+        ts_cmd = f"{cmd}&start={start.strftime('%Y-%m-%d:%H-%M')}&duration={duration_min}"
+        data = self._api(
+            type="itv",
+            action="create_link",
+            cmd=ts_cmd,
+            JsHttpRequest="1-xml",
+        )
         js = data.get("js") or {}
         link = js.get("cmd") or js.get("url")
         if link and link.startswith("ffmpeg "):

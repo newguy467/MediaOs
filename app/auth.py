@@ -283,6 +283,15 @@ def require_admin(role: Annotated[str | None, Depends(get_current_role)] = None)
     return role or "admin"
 
 
+def require_manager(role: Annotated[str | None, Depends(get_current_role)] = None) -> str:
+    """Admin or manager. For operator-tier actions (approve/deny requests,
+    etc.) that need a role string, not the permission list require_permission
+    returns."""
+    if role not in ("admin", "manager"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or manager required")
+    return role or "admin"
+
+
 # Permission keys (must match app.routers.users.PERMISSION_CATALOG ids)
 def get_current_permissions(
     role: Annotated[str | None, Depends(get_current_role)] = None,
@@ -306,6 +315,7 @@ def get_current_permissions(
         try:
             from app.database import SessionLocal
             from app.models import User
+            from app.routers.users import ROLE_DEFAULTS
             import json
             db = SessionLocal()
             try:
@@ -316,11 +326,19 @@ def get_current_permissions(
                         return [str(x) for x in data]
                 if u and u.role == "admin":
                     return ["*"]
+                if u:
+                    # No per-user permissions_json override: use this
+                    # user's actual role defaults (manager/guest/etc.)
+                    # instead of always falling through to the member-only
+                    # list below — see ROLE_DEFAULTS in app.routers.users.
+                    return list(ROLE_DEFAULTS.get(u.role, ROLE_DEFAULTS["member"]))
             finally:
                 db.close()
         except Exception:
             pass
-    # Default user grants
+    # Reached only when no DB user row could be resolved at all (e.g. a
+    # still-valid token for a since-deleted user, or a DB error above) —
+    # a safe minimal default, not a per-role decision.
     return ["library.view", "discover.view", "player.view", "calendar.view", "download", "queue", "requests"]
 
 

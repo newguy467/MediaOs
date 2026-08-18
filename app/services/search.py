@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
+
 from sqlalchemy.orm import Session
 
 from app.clients.prowlarr import (
@@ -11,6 +14,7 @@ from app.clients.prowlarr import (
 )
 from app.config import settings
 from app.models import Blocklist, Episode, MediaItem
+from app.services import rate_limit
 from app.services.quality import rank_releases
 from app.services.quality.store import get_default_profile, get_profile_by_name
 from app.services.release_enrichment import enrich_many as _enrich_many, rank_releases_stream_first
@@ -22,7 +26,13 @@ import logging
 log = logging.getLogger("mediaos.search")
 
 def _search_builtin_indexers(query: str, category: int | None, db: Session | None) -> list[dict]:
-    """Fan-out to configured Torznab indexers when present."""
+    """Fan-out to configured Torznab indexers concurrently.
+
+    Each indexer's own host gets a small concurrency cap (rate_limit.acquire_host,
+    default 2 in-flight) so a slow/private tracker can't be hammered just because
+    several queries land at once; a per-indexer failure is isolated and never
+    blocks the others.
+    """
     if db is None:
         return []
     try:
@@ -36,9 +46,15 @@ def _search_builtin_indexers(query: str, category: int | None, db: Session | Non
         .order_by(Indexer.priority)
         .all()
     )
-    results: list[dict] = []
+    if not rows:
+        return []
     cat = str(category) if category else None
-    for ix in rows:
+
+    def _one(ix) -> list[dict]:
+        host = urlparse(ix.url).netloc or ix.url
+        if not rate_limit.acquire_host(host, timeout=15.0):
+            log.warning("Indexer %s: host busy, skipped", ix.name)
+            return []
         try:
             cats = ix.categories or cat
             found = torznab_client.search(
@@ -51,9 +67,21 @@ def _search_builtin_indexers(query: str, category: int | None, db: Session | Non
             )
             for f in found:
                 f["indexer"] = ix.name
-            results.extend(found)
+            return found
         except Exception as exc:
             log.warning("Indexer %s failed: %s", ix.name, exc)
+            return []
+        finally:
+            rate_limit.release_host(host)
+
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(8, len(rows))) as pool:
+        # Submit all concurrently, but collect in original priority order
+        # (not completion order) so ties in rank_releases still break by
+        # each indexer's configured priority, same as the old sequential loop.
+        futs = [pool.submit(_one, ix) for ix in rows]
+        for fut in futs:
+            results.extend(fut.result())
     return results
 
 

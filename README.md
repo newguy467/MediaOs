@@ -233,7 +233,7 @@ In CI the optional `e2e` job runs only when repository variable `PLAYWRIGHT_BASE
 DATABASE_URL="sqlite:///./data/dev.db" uvicorn app.main:app --reload --port 8787
 
 # The UI is pre-built in app/static/. To rebuild from source:
-cd ui/ && npm install && npm run build && cp -r dist/* ../app/static/
+npm install && npm run build
 ```
 
 * * *

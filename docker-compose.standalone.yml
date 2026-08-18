@@ -42,6 +42,10 @@ services:
     depends_on:
       mediaos-db:
         condition: service_healthy
+      qbittorrent:
+        condition: service_healthy
+      jellyfin:
+        condition: service_healthy
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mediaos}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD — run scripts/generate_secrets.sh}@mediaos-db:5432/${POSTGRES_DB:-mediaos}
@@ -53,7 +57,7 @@ services:
       # Uncomment FLARESOLVERR_URL when running the flaresolverr service below.
       # FLARESOLVERR_URL: http://flaresolverr:8191
     ports:
-      - "8787:8000"
+      - "${MEDIAOS_HOST_PORT:-8787}:8000"
     volumes:
       - ${MOVIES_PATH:-./data/movies}:/movies
       - ${TV_PATH:-./data/tv}:/tv
@@ -72,7 +76,6 @@ services:
       - ${GAMES_PATH:-./data/games}:/games
       - ${ADULT_PATH:-./data/adult}:/adult
       - ${MEDIAOS_DATA_PATH:-./data/mediaos}:/app/data
-      - ${MEDIAOS_DATA:-./data/mediaos}:/data
       - ${MEDIAOS_CONFIG:-./config/mediaos}:/config
     restart: unless-stopped
     security_opt:
@@ -95,17 +98,29 @@ services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.0.4
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
       - WEBUI_PORT=8080
+      - TORRENTING_PORT=${QBIT_TORRENT_PORT:-6881}
     volumes:
       - ./config/qbittorrent:/config
       - ${DOWNLOADS_PATH:-./data/downloads}:/downloads
     ports:
-      - "8080:8080"
-      - "6881:6881"
-      - "6881:6881/udp"
+      - "${QBIT_HOST_BIND:-127.0.0.1}:${QBIT_HOST_PORT:-8080}:8080"
+      - "${QBIT_TORRENT_PORT:-6881}:6881"
+      - "${QBIT_TORRENT_PORT:-6881}:6881/udp"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${QBIT_MEMORY_LIMIT:-1g}
+    cpus: ${QBIT_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:10.10.3
@@ -128,10 +143,21 @@ services:
       - ${D_MOVIES_HOST_PATH:-./data/movies-d}:/data/local-d-movies
       - ${D_TV_HOST_PATH:-./data/tv-d}:/data/local-d-tvshows
     ports:
-      - "8096:8096"
+      - "${JELLYFIN_HOST_PORT:-8096}:8096"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${JELLYFIN_MEMORY_LIMIT:-2g}
+    cpus: ${JELLYFIN_CPUS:-2.0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8096/Health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
 volumes:
   mediaos_pg:
+  ollama_data:
 
 # For built-in EPG grabber: use docker-compose.yml --profile full

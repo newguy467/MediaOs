@@ -1,12 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { PageChrome } from "../components/ui.jsx";
-
+import { useState, useEffect } from "react";
 function UsersPermissionsPage() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState([]);
   const [msg, setMsg] = useState("");
-  const [form, setForm] = useState({ username:"", password:"", role:"user", permissions:[] });
+  const [form, setForm] = useState({ username:"", password:"", role:"member", permissions:[] });
   const [editId, setEditId] = useState(null);
 
   function load() {
@@ -14,7 +12,7 @@ function UsersPermissionsPage() {
     fetch("/api/users").then(r=>r.json()).then(d=>setUsers(Array.isArray(d)?d:(d.users||[]))).catch(()=>setUsers([])).finally(()=>setLoading(false));
     fetch("/api/users/permissions/catalog").then(r=>r.json()).then(d=>{
       setCatalog(d.permissions||[]);
-      setForm(f => (!f.permissions.length && d.role_defaults?.user) ? ({...f, permissions: d.role_defaults.user}) : f);
+      setForm(f => (!f.permissions.length && d.role_defaults?.member) ? ({...f, permissions: d.role_defaults.member}) : f);
     }).catch(e => { console.warn(e); if (typeof setMsg === 'function') setMsg(String(e.message || e)); });
   }
   useEffect(()=>{ load(); }, []);
@@ -22,7 +20,7 @@ function UsersPermissionsPage() {
   async function createUser() {
     setMsg("");
     const r = await fetch("/api/users", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(form) }).then(x=>x.json());
-    if (r.id) { setMsg("Created "+r.username); setForm({ username:"", password:"", role:"user", permissions: form.permissions }); load(); }
+    if (r.id) { setMsg("Created "+r.username); setForm({ username:"", password:"", role:"member", permissions: form.permissions }); load(); }
     else setMsg(r.detail || r.error || JSON.stringify(r));
   }
   async function saveUser(u) {
@@ -66,7 +64,9 @@ function UsersPermissionsPage() {
           <input className="input input-bordered input-sm" placeholder="Username" value={form.username} onChange={e=>setForm({...form, username:e.target.value})} />
           <input className="input input-bordered input-sm" type="password" placeholder="Password" value={form.password} onChange={e=>setForm({...form, password:e.target.value})} />
           <select className="select select-bordered select-sm" value={form.role} onChange={e=>setForm({...form, role:e.target.value})}>
-            <option value="user">User</option>
+            <option value="guest">Guest</option>
+            <option value="member">Member</option>
+            <option value="manager">Manager</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -113,7 +113,9 @@ function UsersPermissionsPage() {
               <div className="space-y-2 border-t border-base-content/10 pt-2">
                 <select className="select select-bordered select-xs" value={u.role}
                   onChange={e=>{ u.role=e.target.value; setUsers([...users]); }}>
-                  <option value="user">User</option>
+                  <option value="guest">Guest</option>
+                  <option value="member">Member</option>
+                  <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
                 </select>
                 <label className="label cursor-pointer gap-2 justify-start py-0">

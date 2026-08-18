@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { LibraryModuleShell, TeachEmpty, SkeletonLoader } from "../components/ui.jsx";
 
 function YouTubeCookiesPanel() {

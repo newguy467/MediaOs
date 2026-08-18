@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import Ic, { Icons, P } from "../icons.jsx";
-import { getToken, setToken, getAdvanced, setAdvancedFlag, AUTH_TOKEN_KEY } from "../storage.js";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../api.js";
 
 function useHlsVideo(videoRef, src, { enabled = true } = {}) {
