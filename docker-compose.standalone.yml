@@ -37,7 +37,7 @@ services:
     profiles: ["ai"]
 
   mediaos:
-    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.01beta}
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.02beta}
     build: .
     depends_on:
       mediaos-db:

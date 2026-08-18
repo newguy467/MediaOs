@@ -69,7 +69,7 @@ services:
   # MediaOs on normal network; talks to qB via gluetun hostname (shared Docker network).
   # Publish MediaOs on host 8787; qB UI on 8080 through gluetun ports above.
   mediaos:
-    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.01beta}
+    image: ghcr.io/newguy467/mediaos:${MEDIAOS_IMAGE_TAG:-1.02beta}
     build: .
     depends_on:
       mediaos-db:
