@@ -616,11 +616,9 @@ progress {
   background: color-mix(in oklch, var(--mr-text) 10%, var(--mr-surface));
   border-radius: 999px;
 }
-.progress::-webkit-progress-value,
 .progress-primary::-webkit-progress-value {
   background: linear-gradient(90deg, var(--mr-primary), color-mix(in oklch, var(--mr-primary) 72%, white));
 }
-.progress::-moz-progress-bar,
 .progress-primary::-moz-progress-bar {
   background: var(--mr-primary);
 }

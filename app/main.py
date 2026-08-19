@@ -471,7 +471,23 @@ def on_startup():
     # Automatic Live TV: iptv-org playlists + EPG (zero-touch)
     try:
         from app.config import settings as _livetv_s
-        if getattr(_livetv_s, "livetv_seed_iptv_org", True):
+        # Belt-and-suspenders test guard: tests/conftest.py sets
+        # LIVETV_SEED_IPTV_ORG=false specifically to stop this thread from
+        # firing during the test suite (it spawns a real network fetch
+        # that writes real LiveTvChannel rows into the shared session-
+        # scoped test DB — see tests/test_livetv_stalker_catchup.py). That
+        # setting is respected below via livetv_seed_iptv_org, but relying
+        # solely on it means a timing issue in how/when Settings() reads
+        # the env var could let this thread through unnoticed (it always
+        # fails silently offline, so it was never caught locally — only in
+        # real CI with network access). As a second, timing-independent
+        # guard, also skip whenever DATABASE_URL points at the test
+        # database conftest.py creates, regardless of the setting's value.
+        _db_url = str(getattr(_livetv_s, "database_url", "") or "")
+        _is_test_db = "mediaos-test-" in _db_url
+        if _is_test_db:
+            log.info("LiveTV auto: skipped (test database detected)")
+        elif getattr(_livetv_s, "livetv_seed_iptv_org", True):
             from app.scheduler import run_iptv_org_resync, run_livetv_epg_sync
             import threading
             def _livetv_boot():

@@ -8,6 +8,14 @@ from pathlib import Path
 _db = Path(f"/tmp/mediaos-test-{os.getpid()}.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_db}"
 os.environ.setdefault("AUTH_REQUIRE", "false")
+# Prevent the zero-touch iptv-org auto-seed (app/main.py) from firing a
+# background thread on app startup that fetches real playlists from the
+# network and writes real LiveTvChannel rows into this session-scoped test
+# DB. Without this, tests that query LiveTvChannel with no per-test filter
+# (e.g. run_channel_health_cycle) can race against that thread and pick up
+# hundreds of leaked real channels instead of only their own fixtures —
+# the root cause of the CI flake in test_livetv_stalker_catchup.py.
+os.environ.setdefault("LIVETV_SEED_IPTV_ORG", "false")
 
 import pytest
 

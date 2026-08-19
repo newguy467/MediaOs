@@ -134,3 +134,26 @@ against the actual code rather than assuming unchecked means undone:
 This closes out the todo-scan the user asked to finish — every doc in the
 repo that tracks open work has now been checked against the code at least
 once this session, not just against other docs' claims.
+
+## Progress-bar color bug — fixed
+
+- **All `.progress` bars rendered purple regardless of variant** — in
+  `ui/src/styles.css`, `.progress::-webkit-progress-value` and
+  `.progress::-moz-progress-bar` were grouped into the same rule as
+  `.progress-primary`'s variant, so every progress bar (including
+  `progress-error` / `progress-warning`) got the primary gradient,
+  silently hiding disk-usage warnings like the dashboard Storage
+  widget's ≥90%-used red state (`dashboard.jsx`'s `StorageWidget`).
+  Fixed by scoping both rules to `.progress-primary` only, so
+  DaisyUI's own `.progress-error`/`.progress-warning`/`.progress-success`
+  rules (same specificity, defined earlier in the cascade) are no
+  longer overridden. Verified against the real compiled
+  `app/static/assets/index-DCvXGtsS.css` with the actual
+  `StorageWidget` markup (TV 92% now renders red, Movies 63% stays
+  purple, a warning-state bar renders yellow) — screenshot taken with
+  headless Chrome.
+- Also hand-patched the already-built `app/static/assets/index-*.css`
+  bundle to match, since `npm run build` isn't runnable in this
+  sandbox (no network for `npm ci`). Anyone building from source will
+  regenerate the same fixed output; this just keeps the shipped
+  static bundle in sync until then.

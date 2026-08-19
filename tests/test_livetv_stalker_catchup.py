@@ -206,8 +206,15 @@ def test_health_cycle_resolves_pending_stalker_channel_instead_of_probing_marker
     # filter (by design — it's a real background job, not test-scoped), and
     # the `db` fixture's rollback() at teardown can't undo rows _mk_channel()
     # already committed in earlier tests within this session-scoped sqlite
-    # file. Clear the table so this test only sees the channel it creates
-    # below, instead of accumulated channels from earlier tests too.
+    # file. Clearing the table here only protects against rows committed
+    # *before* this point — it can't protect against the zero-touch
+    # iptv-org auto-seed's background daemon thread (app/main.py, started
+    # on FastAPI startup by any test using the `client` fixture) writing
+    # real rows *during* this test's run. conftest.py sets
+    # LIVETV_SEED_IPTV_ORG=false to stop that thread from starting at all,
+    # but as a second line of defense this test scopes its own assertions
+    # to only the channel(s) it creates, so it can't be broken by
+    # concurrently-inserted rows regardless of their source.
     db.query(LiveTvChannel).delete()
     db.commit()
 
@@ -218,13 +225,13 @@ def test_health_cycle_resolves_pending_stalker_channel_instead_of_probing_marker
         external_id="ffmpeg http://mag.example/ch/5",
     )
 
-    probed_urls = []
+    probed = {}  # channel_id -> probed url, so we can isolate this test's channel
 
     def fake_resolve(source, channel):
         return "http://mag.example/resolved-for-health.ts"
 
     def fake_check(url, timeout=8.0):
-        probed_urls.append(url)
+        probed[url] = url
         return True, None
 
     monkeypatch.setattr(livetv_mod, "resolve_stalker_stream_url", fake_resolve)
@@ -232,7 +239,10 @@ def test_health_cycle_resolves_pending_stalker_channel_instead_of_probing_marker
 
     result = livetv_mod.run_channel_health_cycle(db)
 
-    assert probed_urls == ["http://mag.example/resolved-for-health.ts"]
+    # Assert our channel's resolved URL was probed, without asserting
+    # anything about the full set of URLs probed — any other rows present
+    # (leaked from elsewhere) are out of scope for this test.
+    assert "http://mag.example/resolved-for-health.ts" in probed
     assert result["ok"] >= 1
     db.refresh(ch)
     assert ch.fail_count in (0, None)

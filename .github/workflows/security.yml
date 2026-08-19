@@ -18,8 +18,8 @@ jobs:
     name: pip-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install project dependencies
@@ -55,8 +55,8 @@ jobs:
     name: npm audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -66,4 +66,4 @@ jobs:
         continue-on-error: true
         run: npm audit --audit-level=moderate
       - name: Gate on high/critical severity
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high

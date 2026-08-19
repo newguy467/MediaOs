@@ -11,11 +11,11 @@ jobs:
     name: Static checks (version, UI, lazy exports)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - run: python3 scripts/check_version.py
@@ -26,8 +26,8 @@ jobs:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -38,14 +38,15 @@ jobs:
         env:
           DATABASE_URL: "sqlite:////tmp/mediaos-ci.db"
           AUTH_REQUIRE: "false"
+          LIVETV_SEED_IPTV_ORG: "false"
         run: python3 -m pytest -q
 
   alembic-roundtrip:
     name: Alembic upgrade/downgrade/upgrade
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -66,8 +67,8 @@ jobs:
     name: vite build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
