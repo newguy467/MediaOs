@@ -4,8 +4,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Use /tmp to avoid sandbox disk I/O quirks on the workspace volume.
-_db = Path(f"/tmp/mediaos-test-{os.getpid()}.db")
+# Use a writable test directory. Termux does not guarantee that /tmp is writable.
+import tempfile
+
+_TEST_TMP = Path(
+    os.environ.get("MEDIAOS_TEST_TMP")
+    or tempfile.gettempdir()
+)
+_TEST_TMP.mkdir(parents=True, exist_ok=True)
+
+_db = _TEST_TMP / f"mediaos-test-{os.getpid()}.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_db}"
 os.environ.setdefault("AUTH_REQUIRE", "false")
 # Prevent the zero-touch iptv-org auto-seed (app/main.py) from firing a
@@ -49,7 +57,11 @@ def client(app):
 
 @pytest.fixture()
 def db():
-    from app.database import SessionLocal
+    from app.database import Base, SessionLocal, engine
+    from app.services.schema_migrate import run_schema_migrations
+
+    Base.metadata.create_all(bind=engine)
+    run_schema_migrations(engine)
 
     session = SessionLocal()
     try:
@@ -57,7 +69,6 @@ def db():
     finally:
         session.rollback()
         session.close()
-
 
 @pytest.fixture()
 def make_item(db):
