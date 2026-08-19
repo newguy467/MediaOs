@@ -319,7 +319,13 @@ def _ensure_bootstrap_auth() -> None:
         return
     from pathlib import Path as _P
     root = _P(getattr(settings, "data_path", None) or "/app/data") / "bootstrap"
-    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Configured data dir isn't writable (e.g. /app/data in CI/local dev).
+        # Fall back to a local ./data directory so startup never crashes.
+        root = _P("data") / "bootstrap"
+        root.mkdir(parents=True, exist_ok=True)
     cred_file = root / "admin-credentials.txt"
     if cred_file.exists():
         lines = cred_file.read_text(encoding="utf-8").splitlines()

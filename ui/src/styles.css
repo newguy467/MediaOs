@@ -6,7 +6,7 @@
  * MediaOS UI system
  * -----------------
  * One layout, one component language, many intentional color themes.
- * Theme-specific values come from DaisyUI's --p/--b*/--bc tokens so a
+ * Theme-specific values come from DaisyUI --p / --b / --bc tokens so a
  * theme changes the palette without replacing the layout stylesheet.
  */
 

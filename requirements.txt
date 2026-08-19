@@ -1,24 +1,27 @@
 # Python >=3.12,<3.13 recommended (nntplib removed in 3.13)
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
 SQLAlchemy==2.0.35
 psycopg2-binary==2.9.9
 pydantic==2.9.2
 pydantic-settings==2.5.2
 httpx==0.27.2
-requests==2.32.3
+requests==2.34.2
 APScheduler==3.10.4
-python-dotenv==1.0.1
+python-dotenv==1.2.3
 
 watchdog==4.0.2
-curl_cffi==0.7.3
+curl_cffi==0.16.0
 
 PyYAML==6.0.2
 beautifulsoup4==4.12.3
-lxml==5.3.0
+lxml==6.1.1
 alembic>=1.13.0
 mutagen==1.47.0
-python-multipart==0.0.12  # required by FastAPI's UploadFile (track artwork upload)
+python-multipart==0.0.32  # required by FastAPI UploadFile (track artwork upload)
 PyMuPDF==1.24.10  # PDF page rendering for the in-app comic reader (app/services/comic_reader.py)
 redis>=5.0.0  # optional multi-worker; set REDIS_URL
 psutil>=5.9.0  # System Monitor page: container CPU/memory (see app/services/host_monitor.py)
+
+# Build tooling pinned to clear PYSEC-2026-3447 (pip-audit gate counts env tools)
+setuptools==83.0.0

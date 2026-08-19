@@ -6,6 +6,11 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://mediaos:mediaos@mediaos-db:5432/mediaos"
 
+    # Writable data directory for bootstrap credentials, caches, etc.
+    # Defaults to /app/data (the Docker volume mount). Override via DATA_PATH.
+    # In CI / local dev where /app/data isn't writable, main falls back to ./data.
+    data_path: str = "/app/data"
+
     tmdb_api_key: str = ""
     tvdb_api_key: str = ""
     tvdb_pin: str = ""
